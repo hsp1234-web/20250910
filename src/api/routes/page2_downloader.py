@@ -145,7 +145,9 @@ async def start_downloads(payload: DownloadRequest, background_tasks: Background
 
     log.info(f"API: 收到 {len(url_ids)} 個項目的下載請求。")
 
-    port = request.url.port
+    # 從 app.state 獲取在應用程式啟動時捕獲的、可靠的伺服器埠號，
+    # 而不是使用 request.url.port，因為後者在反向代理後可能不正確。
+    port = request.app.state.server_port
 
     conn = None
     try:

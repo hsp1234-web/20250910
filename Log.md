@@ -1,3 +1,18 @@
+## 999號 - 2025-09-10T23:20:55.367522+08:00
+
+### fix(core): 修正背景任務無法回報完成狀態的通訊問題
+
+- **動機**: 使用者回報，在「批次下載」和「檔案處理」頁面，背景任務執行完畢後，前端介面沒有收到任何更新，導致列表狀態永遠停留在處理中。根本原因為背景任務向主伺服器回報狀態時，使用了由 `request.url.port` 獲取的錯誤埠號，導致 HTTP 請求失敗。
+- **核心變更**:
+    - **`src/api/api_server.py`**:
+        - 新增了一個 FastAPI 中介軟體 (Middleware)。此中介軟體會在應用程式首次啟動時，從 ASGI Scope 中可靠地捕獲伺服器真實監聽的埠號，並將其儲存於全域的 `app.state.server_port` 變數中。
+    - **`src/api/routes/page2_downloader.py`**:
+        - 修改了 `start_downloads` 函式，將其獲取埠號的方式從不穩定的 `request.url.port` 變更為從 `request.app.state.server_port` 讀取。
+    - **`src/api/routes/page3_processor.py`**:
+        - 在 `start_processing` 函式中做了完全相同的修改，確保檔案處理任務也能使用正確的埠號。
+- **成果**: 此項修復從根本上解決了背景任務與主伺服器之間的通訊障礙。現在，所有背景任務都能使用正確的埠號成功回報其最終狀態，確保了前端介面能夠即時、可靠地接收到 `PROCESSING_COMPLETE` 和 `DOWNLOAD_COMPLETE` 等通知，恢復了相關功能的狀態更新與可用性。
+
+---
 ## 998號 - 2025-09-10T23:04:47.818197+08:00
 
 ### feat(ui): 優化檔案處理完成的狀態通知

@@ -128,6 +128,24 @@ app.add_middleware(
     allow_headers=["*"],  # 允許所有標頭
 )
 
+# 新增中介軟體，用於在應用程式啟動時捕獲真實的伺服器埠號
+@app.middleware("http")
+async def add_server_port_to_state(request: Request, call_next):
+    """
+    這個中介軟體會在第一次收到 HTTP 請求時，從 ASGI Scope 中讀取伺服器埠號
+    並將其儲存在 app.state 中，供背景任務等需要與自身通訊的元件使用。
+    這解決了在反向代理後 request.url.port 會回傳錯誤埠號的問題。
+    """
+    if not hasattr(request.app.state, 'server_port'):
+        server = request.scope.get("server")
+        if server and len(server) > 1:
+            port = server[1]
+            request.app.state.server_port = port
+            log.info(f"✅ 成功從 ASGI Scope 捕獲並設定伺服器埠號: {port}")
+    response = await call_next(request)
+    return response
+
+
 # --- 整合模組化路由 ---
 from api.routes import ui, page1_ingestion, page2_downloader, page3_processor, page4_analyzer, page5_backup
 
