@@ -44,6 +44,13 @@
                 <!-- 處理狀態將會顯示在這裡 -->
             </div>
         </div>
+
+        <div class="panel">
+            <h2>已處理報告</h2>
+            <div id="processed-list-container">
+                <p>此處會顯示已成功處理的報告。</p>
+            </div>
+        </div>
     </div>
 
     <script>
@@ -53,6 +60,7 @@
             const deselectAllButton = document.getElementById('deselect-all-button');
             const processButton = document.getElementById('process-button');
             const statusArea = document.getElementById('status-area');
+            const processedListContainer = document.getElementById('processed-list-container');
 
             const logStatus = (message, color = 'black') => {
                 const timestamp = new Date().toLocaleTimeString();
@@ -155,14 +163,42 @@
                             }
                             logStatus(`❌ [處理失敗] 檔案 '${displayName}' 處理失敗：${errorMessage}`, 'red');
                         }
-                        // 更新列表以移除已處理的項目
-                        setTimeout(fetchAndRenderFiles, 500);
+                        // 更新列表以移除已處理的項目，並更新已處理報告列表
+                        setTimeout(() => {
+                            fetchAndRenderFiles();
+                            fetchAndRenderProcessedFiles();
+                        }, 500);
                     }
                 };
             };
 
+            const fetchAndRenderProcessedFiles = async () => {
+                try {
+                    const response = await fetch('/api/processor/processed');
+                    if (!response.ok) throw new Error(`伺服器錯誤 (狀態 ${response.status})`);
+                    const files = await response.json();
+
+                    if (files.length === 0) {
+                        processedListContainer.innerHTML = '<p>目前沒有已處理的報告。</p>';
+                        return;
+                    }
+
+                    let html = '<ul>';
+                    files.forEach(file => {
+                        html += `<li>- '${file.filename}' <a href="/report/${file.id}" target="_blank" class="view-button">查看報告</a></li>`;
+                    });
+                    html += '</ul>';
+                    processedListContainer.innerHTML = html;
+                } catch (error) {
+                    processedListContainer.innerHTML = `<p style="color: red;">載入已處理報告列表失敗：${error.message}</p>`;
+                }
+            };
+
             (async () => {
-                await fetchAndRenderFiles();
+                await Promise.all([
+                    fetchAndRenderFiles(),
+                    fetchAndRenderProcessedFiles()
+                ]);
                 setupWebSocket();
             })();
         });

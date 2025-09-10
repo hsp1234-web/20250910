@@ -163,17 +163,20 @@ app.include_router(page5_backup.router, prefix="/api/backup", tags=["API: 備份
 # 新的上傳檔案儲存目錄
 UPLOADS_DIR = ROOT_DIR / "uploads"
 REPORTS_DIR = ROOT_DIR / "reports"
+DOWNLOADS_DIR = ROOT_DIR / "downloads" # 新增 downloads 目錄路徑
 # 靜態檔案目錄
 STATIC_DIR = ROOT_DIR / "src" / "static"
 
 # 確保目錄存在
 UPLOADS_DIR.mkdir(exist_ok=True)
 REPORTS_DIR.mkdir(exist_ok=True)
+DOWNLOADS_DIR.mkdir(exist_ok=True) # 確保 downloads 目錄存在
 if not STATIC_DIR.exists():
     log.warning(f"靜態檔案目錄 {STATIC_DIR} 不存在，前端頁面可能無法載入。")
 else:
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
     app.mount("/reports", StaticFiles(directory=REPORTS_DIR), name="reports")
+    app.mount("/downloads", StaticFiles(directory=DOWNLOADS_DIR), name="downloads")
     # JULES'S FIX (2025-08-13): 移除有問題的 StaticFiles 掛載，改用自訂端點
 
 # JULES'S FIX (2025-08-13): 根據計畫，新增此端點來處理複雜檔名

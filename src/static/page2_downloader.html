@@ -44,6 +44,13 @@
                 <!-- 下載狀態將會顯示在這裡 -->
             </div>
         </div>
+
+        <div class="panel">
+            <h2>已完成下載</h2>
+            <div id="completed-list-container">
+                <p>此處會顯示已成功下載的檔案。</p>
+            </div>
+        </div>
     </div>
 
     <script>
@@ -53,6 +60,7 @@
             const deselectAllButton = document.getElementById('deselect-all-button');
             const downloadButton = document.getElementById('download-button');
             const statusArea = document.getElementById('status-area');
+            const completedListContainer = document.getElementById('completed-list-container');
 
             const logStatus = (message, color = 'black') => {
                 const timestamp = new Date().toLocaleTimeString();
@@ -130,13 +138,42 @@
                             : '偵測到下載任務完成，正在更新列表...';
                         logStatus(message, 'green');
                         // 稍作延遲以等待資料庫完全更新
-                        setTimeout(fetchAndRenderUrls, 500);
+                        setTimeout(() => {
+                            fetchAndRenderUrls();
+                            fetchAndRenderCompletedFiles(); // 同時更新已完成列表
+                        }, 500);
                     }
                 };
             };
 
+            const fetchAndRenderCompletedFiles = async () => {
+                try {
+                    const response = await fetch('/api/downloader/completed');
+                    if (!response.ok) throw new Error(`伺服器錯誤 (狀態 ${response.status})`);
+                    const files = await response.json();
+
+                    if (files.length === 0) {
+                        completedListContainer.innerHTML = '<p>目前沒有已下載的檔案。</p>';
+                        return;
+                    }
+
+                    let html = '<ul>';
+                    files.forEach(file => {
+                        const completedDate = new Date(file.completed_at).toLocaleString('zh-TW');
+                        html += `<li>- '${file.filename}' (${completedDate})</li>`;
+                    });
+                    html += '</ul>';
+                    completedListContainer.innerHTML = html;
+                } catch (error) {
+                    completedListContainer.innerHTML = `<p style="color: red;">載入已完成列表失敗：${error.message}</p>`;
+                }
+            };
+
             (async () => {
-                await fetchAndRenderUrls();
+                await Promise.all([
+                    fetchAndRenderUrls(),
+                    fetchAndRenderCompletedFiles()
+                ]);
                 setupWebSocket();
             })();
         });

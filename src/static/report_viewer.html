@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>報告檢視</title>
+    <link rel="stylesheet" href="/static/css/nav.css">
+    <link rel="stylesheet" href="/static/css/main.css"> <!-- 引用通用樣式 -->
+    <style>
+        .content {
+            max-width: 900px;
+            margin: 20px auto;
+            padding: 0 15px;
+        }
+        .panel {
+            background-color: #fff;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        }
+        h1, h2 {
+            border-bottom: 2px solid #eee;
+            padding-bottom: 10px;
+            margin-top: 0;
+        }
+        #image-gallery-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 15px;
+        }
+        #image-gallery-container img {
+            max-width: 100%;
+            height: auto;
+            border-radius: 4px;
+            border: 1px solid #ccc;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+        #image-gallery-container img:hover {
+            transform: scale(1.05);
+        }
+        #text-content-container {
+            white-space: pre-wrap; /* 保留換行和空格 */
+            line-height: 1.6;
+        }
+    </style>
+</head>
+<body>
+    <nav class="top-nav">
+        <ul>
+            <li><a href="/">鳳凰主頁</a></li>
+            <li><a href="/page1">網址提取</a></li>
+            <li><a href="/page2">批次下載</a></li>
+            <li><a href="/page3">檔案處理</a></li>
+            <li><a href="/page4">AI 分析</a></li>
+            <li><a href="/page5">備份管理</a></li>
+        </ul>
+    </nav>
+
+    <div class="content">
+        <h1 id="main-title">報告檢視</h1>
+
+        <div class="panel">
+            <h2>報告摘要 / 提取文字</h2>
+            <div id="text-content-container">
+                <p>正在載入文字內容...</p>
+            </div>
+        </div>
+
+        <div class="panel">
+            <h2>提取圖片 (已壓縮)</h2>
+            <div id="image-gallery-container">
+                <p>正在載入圖片...</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', async () => {
+            const titleElement = document.getElementById('main-title');
+            const textContainer = document.getElementById('text-content-container');
+            const imageGallery = document.getElementById('image-gallery-container');
+
+            const pathParts = window.location.pathname.split('/');
+            const fileId = pathParts.pop() || pathParts.pop(); // Handles trailing slash
+
+            if (!fileId || isNaN(parseInt(fileId))) {
+                titleElement.textContent = '錯誤：無效的檔案 ID';
+                textContainer.innerHTML = '<p style="color: red;">URL 中未提供有效的檔案 ID。</p>';
+                imageGallery.innerHTML = '';
+                return;
+            }
+
+            titleElement.textContent = `報告檢視 (ID: ${fileId})`;
+
+            try {
+                const response = await fetch(`/api/report/${fileId}`);
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.detail || `伺服器錯誤 (狀態 ${response.status})`);
+                }
+                const data = await response.json();
+
+                // 填充文字內容
+                textContainer.textContent = data.text_content || '沒有可用的文字內容。';
+
+                // 填充圖片
+                if (data.image_paths && data.image_paths.length > 0) {
+                    imageGallery.innerHTML = ''; // 清空"正在載入"提示
+                    data.image_paths.forEach(path => {
+                        const img = document.createElement('img');
+                        img.src = `/${path}`; // 確保路徑是從根目錄開始的 URL
+                        img.alt = '提取的圖片';
+                        img.title = '點擊以在新分頁中查看原始圖片';
+                        // 讓使用者可以點擊圖片在新分頁開啟
+                        img.onclick = () => window.open(img.src, '_blank');
+                        imageGallery.appendChild(img);
+                    });
+                } else {
+                    imageGallery.innerHTML = '<p>此報告未提取任何圖片。</p>';
+                }
+
+            } catch (error) {
+                titleElement.textContent = '載入報告失敗';
+                const errorMessage = `<p style="color: red;">無法載入報告內容：${error.message}</p>`;
+                textContainer.innerHTML = errorMessage;
+                imageGallery.innerHTML = '';
+            }
+        });
+    </script>
+</body>
+</html>

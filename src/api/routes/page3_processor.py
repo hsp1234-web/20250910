@@ -16,6 +16,7 @@ sys.path.insert(0, str(SRC_DIR))
 
 from db.database import get_db_connection
 from tools.file_hasher import calculate_sha256
+from tools.image_compressor import compress_image
 
 # --- 常數與設定 ---
 log = logging.getLogger(__name__)
@@ -45,6 +46,90 @@ async def get_completed_files():
     finally:
         if conn:
             conn.close()
+
+
+@router.get("/processed")
+async def get_processed_files():
+    """
+    獲取所有狀態為 'processed' (已處理完成) 的檔案列表。
+    這是為了在頁面三顯示已處理的報告。
+    """
+    log.info("API: 收到獲取已處理報告列表的請求。")
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        # 選擇 file_hash 也是為了將來可能的用途
+        cursor.execute("SELECT id, local_path FROM extracted_urls WHERE status = 'processed' ORDER BY created_at DESC")
+        rows = cursor.fetchall()
+        results = [
+            {
+                "id": row['id'],
+                "filename": Path(row['local_path']).name
+            }
+            for row in rows if row['local_path']
+        ]
+        return JSONResponse(content=results)
+    except Exception as e:
+        log.error(f"API: 獲取已處理報告列表時發生錯誤: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="獲取已處理報告列表時發生伺服器內部錯誤。")
+    finally:
+        if conn:
+            conn.close()
+
+
+@router.get("/report/{file_id}")
+async def get_report_content(file_id: int):
+    """
+    獲取單一已處理報告的詳細內容，包括文字和壓縮後的圖片路徑。
+    """
+    log.info(f"API: 收到對檔案 ID {file_id} 的報告內容請求。")
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT extracted_image_paths FROM extracted_urls WHERE id = ? AND status = 'processed'",
+            (file_id,)
+        )
+        row = cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="找不到指定 ID 的已處理報告。")
+
+        # 模擬文字內容
+        placeholder_text = "這裡是從文件中提取的文字內容的預留位置。未來的版本將會實作文字提取功能。"
+
+        # 處理圖片
+        compressed_image_paths = []
+        original_image_paths_json = row['extracted_image_paths']
+        if original_image_paths_json:
+            original_image_paths = json.loads(original_image_paths_json)
+
+            # 定義壓縮圖片的儲存目錄
+            # SRC_DIR 是 src，我們希望存到專案根目錄下的 downloads/compressed_images
+            compressed_output_dir = SRC_DIR.parent / "downloads" / "compressed_images"
+
+            for img_path in original_image_paths:
+                compressed_path = compress_image(img_path, str(compressed_output_dir))
+                if compressed_path:
+                    # 我們需要回傳一個可從前端訪問的相對 URL 路徑
+                    # 假設 'downloads' 在專案根目錄，且 FastAPI 靜態檔案設定會處理它
+                    # 我們需要將絕對路徑轉換為相對 web 路徑
+                    web_path = Path(compressed_path).relative_to(SRC_DIR.parent).as_posix()
+                    compressed_image_paths.append(web_path)
+
+        return JSONResponse(content={
+            "text_content": placeholder_text,
+            "image_paths": compressed_image_paths
+        })
+
+    except Exception as e:
+        log.error(f"API: 獲取報告 ID {file_id} 的內容時發生錯誤: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="獲取報告內容時發生伺服器內部錯誤。")
+    finally:
+        if conn:
+            conn.close()
+
 
 # --- 背景任務函式 ---
 def run_processing_task(url_id: int, port: int):

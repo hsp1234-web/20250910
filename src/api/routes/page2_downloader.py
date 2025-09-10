@@ -44,6 +44,38 @@ async def get_pending_urls():
             conn.close()
 
 
+@router.get("/completed")
+async def get_completed_downloads():
+    """
+    獲取所有狀態為 'completed' (已下載完成) 的檔案列表。
+    這是為了在頁面二顯示已完成的項目。
+    """
+    log.info("API: 收到獲取已完成下載列表的請求。")
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, url, local_path, created_at FROM extracted_urls WHERE status = 'completed' ORDER BY created_at DESC")
+        rows = cursor.fetchall()
+        # 從 local_path 提取檔名，並確保 local_path 存在
+        results = [
+            {
+                "id": row['id'],
+                "url": row['url'],
+                "filename": Path(row['local_path']).name,
+                "completed_at": row['created_at']
+            }
+            for row in rows if row['local_path']
+        ]
+        return JSONResponse(content=results)
+    except Exception as e:
+        log.error(f"API: 獲取已完成下載列表時發生錯誤: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="獲取已完成下載列表時發生伺服器內部錯誤。")
+    finally:
+        if conn:
+            conn.close()
+
+
 # --- Pydantic 模型 ---
 class DownloadRequest(BaseModel):
     ids: List[int]

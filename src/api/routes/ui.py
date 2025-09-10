@@ -42,3 +42,13 @@ async def serve_prompts_ui(request: Request):
 @router.get("/history", response_class=HTMLResponse)
 async def serve_history_page(request: Request):
     return templates.TemplateResponse("history.html", {"request": request})
+
+
+@router.get("/report/{file_id}", response_class=HTMLResponse)
+async def serve_report_viewer(request: Request, file_id: int):
+    """
+    提供新的報告檢視器頁面。
+    我們將 file_id 傳遞給模板，雖然模板本身不直接使用它，
+    但前端的 JavaScript 可以從 URL 中讀取它。
+    """
+    return templates.TemplateResponse("report_viewer.html", {"request": request, "file_id": file_id})
