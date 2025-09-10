@@ -114,7 +114,7 @@ def run_download_task(url_id: int):
             conn.close()
 
 
-@router.post("/api/start_downloads")
+@router.post("/start_downloads")
 async def start_downloads(payload: DownloadRequest, background_tasks: BackgroundTasks):
     """
     接收要下載的 URL ID 列表，並為每一個 ID 建立一個背景下載任務。
