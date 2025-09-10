@@ -4,12 +4,20 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>頁面二：批次下載</title>
+    <link rel="stylesheet" href="/static/css/nav.css">
     <link rel="stylesheet" href="/static/css/page2.css">
 </head>
 <body>
-    <header class="page-header">
-        <a href="/menu" class="back-to-menu">« 返回主選單</a>
-    </header>
+    <nav class="top-nav">
+        <ul>
+            <li><a href="/">鳳凰首頁</a></li>
+            <li><a href="/page1">網址提取</a></li>
+            <li><a href="/page2" class="active">批次下載</a></li>
+            <li><a href="/page3">檔案處理</a></li>
+            <li><a href="/page4">AI 分析</a></li>
+            <li><a href="/page5">備份管理</a></li>
+        </ul>
+    </nav>
 
     <div class="content">
         <div class="panel">
@@ -48,7 +56,7 @@
 
             const logStatus = (message, color = 'black') => {
                 const timestamp = new Date().toLocaleTimeString();
-                statusArea.innerHTML = `<p style="color: ${color};">${timestamp}: ${message}</p>` + statusArea.innerHTML;
+                statusArea.insertAdjacentHTML('afterbegin', `<p style="color: ${color};">${timestamp}: ${message}</p>`);
             };
 
             const fetchAndRenderUrls = async () => {
@@ -56,9 +64,7 @@
                     logStatus('正在從伺服器獲取最新的待處理網址列表...');
                     const response = await fetch('/api/downloader/pending_urls');
                     if (!response.ok) throw new Error(`伺服器錯誤 (狀態 ${response.status})`);
-
                     const urls = await response.json();
-
                     if (urls.length === 0) {
                         urlListContainer.innerHTML = '<p>目前沒有待處理的網址。</p>';
                         downloadButton.disabled = true;
@@ -67,15 +73,9 @@
                         logStatus('列表為空。');
                         return;
                     }
-
                     let html = '<ul>';
                     urls.forEach(item => {
-                        html += `
-                            <li>
-                                <input type="checkbox" class="url-checkbox" value="${item.id}">
-                                <label>${item.url}</label>
-                            </li>
-                        `;
+                        html += `<li><input type="checkbox" class="url-checkbox" value="${item.id}"><label>${item.url}</label></li>`;
                     });
                     html += '</ul>';
                     urlListContainer.innerHTML = html;
@@ -89,24 +89,15 @@
                 }
             };
 
-            // --- Event Listeners ---
-            selectAllButton.addEventListener('click', () => {
-                document.querySelectorAll('.url-checkbox').forEach(cb => cb.checked = true);
-            });
-
-            deselectAllButton.addEventListener('click', () => {
-                document.querySelectorAll('.url-checkbox').forEach(cb => cb.checked = false);
-            });
-
+            selectAllButton.addEventListener('click', () => document.querySelectorAll('.url-checkbox').forEach(cb => cb.checked = true));
+            deselectAllButton.addEventListener('click', () => document.querySelectorAll('.url-checkbox').forEach(cb => cb.checked = false));
             downloadButton.addEventListener('click', async () => {
                 const selectedIds = Array.from(document.querySelectorAll('.url-checkbox:checked')).map(cb => parseInt(cb.value, 10));
                 if (selectedIds.length === 0) {
                     alert('請至少選擇一個要下載的項目。');
                     return;
                 }
-
                 logStatus(`正在發送下載請求給 ${selectedIds.length} 個項目...`);
-
                 try {
                     const response = await fetch('/api/downloader/start_downloads', {
                         method: 'POST',
@@ -114,54 +105,32 @@
                         body: JSON.stringify({ ids: selectedIds })
                     });
                     const result = await response.json();
-
-                    if (!response.ok) {
-                        throw new Error(result.detail || '啟動下載時發生未知錯誤。');
-                    }
-
+                    if (!response.ok) throw new Error(result.detail || '啟動下載時發生未知錯誤。');
                     logStatus(result.message, 'green');
-                    // 刷新列表以移除已加入佇列的項目
                     await fetchAndRenderUrls();
-
                 } catch (error) {
                     logStatus(`請求失敗：${error.message}`, 'red');
                 }
             });
 
-            // --- WebSocket Logic for Real-time Updates ---
             const setupWebSocket = () => {
-                const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-                const wsUrl = `${wsProtocol}//${window.location.host}/api/ws`;
-                const ws = new WebSocket(wsUrl);
-
-                ws.onopen = () => {
-                    logStatus('WebSocket 連線成功。等待即時更新...', 'blue');
-                };
-
-                ws.onmessage = (event) => {
-                    const data = JSON.parse(event.data);
-                    logStatus(`收到 WebSocket 訊息: ${data.type}`, 'blue');
-
-                    // 如果有新的 URL 被加入，我們就重新整理列表
-                    if (data.type === 'URLS_EXTRACTED') {
-                        logStatus('偵測到新的 URL 已被提取，正在更新列表...', 'green');
-                        fetchAndRenderUrls();
-                    }
-                    // 也可以監聽下載完成的事件，雖然這個頁面主要關注待辦事項
-                };
-
+                const ws = new WebSocket(`${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/api/ws`);
+                ws.onopen = () => logStatus('WebSocket 連線成功。等待即時更新...', 'blue');
                 ws.onclose = () => {
                     logStatus('WebSocket 連線已中斷。5 秒後嘗試重新連線...', 'orange');
                     setTimeout(setupWebSocket, 5000);
                 };
-
-                ws.onerror = (error) => {
-                    logStatus('WebSocket 發生錯誤。', 'red');
-                    console.error("WebSocket Error:", error);
+                ws.onerror = (error) => console.error("WebSocket Error:", error);
+                ws.onmessage = (event) => {
+                    const data = JSON.parse(event.data);
+                    logStatus(`收到 WebSocket 訊息: ${data.type}`, 'blue');
+                    if (data.type === 'URLS_EXTRACTED') {
+                        logStatus('偵測到新的 URL 已被提取，正在更新列表...', 'green');
+                        fetchAndRenderUrls();
+                    }
                 };
             };
 
-            // Initial Load and Setup
             (async () => {
                 await fetchAndRenderUrls();
                 setupWebSocket();

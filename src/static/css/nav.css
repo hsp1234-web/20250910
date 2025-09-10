@@ -1,0 +1,48 @@
+/* src/static/css/nav.css */
+/* 新的、固定的頂部導覽列樣式 */
+.top-nav {
+    background-color: #343a40;
+    overflow: hidden;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    z-index: 1000;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+}
+
+.top-nav ul {
+    list-style-type: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    justify-content: flex-start; /* 從左邊開始排列 */
+    align-items: center;
+}
+
+.top-nav li a {
+    display: block;
+    color: white;
+    text-align: center;
+    padding: 14px 16px;
+    text-decoration: none;
+    font-size: 16px;
+    transition: background-color 0.3s, color 0.3s;
+}
+
+.top-nav li a:hover {
+    background-color: #575d63;
+    color: white;
+}
+
+.top-nav li a.active {
+    background-color: #007bff;
+    color: white;
+    font-weight: bold;
+}
+
+/* 讓主內容區塊不會被固定的導覽列遮住 */
+/* 注意：這個樣式需要被應用到所有使用此導覽列的頁面 */
+body {
+    padding-top: 50px; /* 這個值約等於導覽列的高度 */
+}
