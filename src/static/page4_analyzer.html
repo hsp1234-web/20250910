@@ -4,12 +4,12 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>頁面四：AI 分析</title>
+    <link rel="stylesheet" href="/static/css/menu.css">
     <link rel="stylesheet" href="/static/css/page4.css">
 </head>
 <body>
-    <header class="page-header">
-        <a href="/menu" class="back-to-menu">« 返回主選單</a>
-    </header>
+    <!-- 統一導覽列容器 -->
+    <div id="menu-container"></div>
 
     <div class="content">
         <h1>頁面四：AI 分析與歷史報告</h1>
@@ -45,7 +45,6 @@
             const startBtn = document.getElementById('start-analysis-btn');
             const statusDiv = document.getElementById('analysis-status');
 
-            // 填充檔案下拉選單
             const populateFiles = async () => {
                 try {
                     const response = await fetch('/api/analyzer/processed_files');
@@ -66,7 +65,6 @@
                 }
             };
 
-            // 填充提示詞下拉選單
             const populatePrompts = async () => {
                 try {
                     const response = await fetch('/api/analyzer/prompts');
@@ -105,24 +103,31 @@
                             api_key: apiKey
                         })
                     });
-
                     const result = await response.json();
-                    if (!response.ok) {
-                        throw new Error(result.detail || '啟動分析時發生未知錯誤。');
-                    }
-
+                    if (!response.ok) throw new Error(result.detail || '啟動分析時發生未知錯誤。');
                     statusDiv.textContent = result.message;
                     statusDiv.style.color = 'green';
-
                 } catch (error) {
                     statusDiv.textContent = `請求失敗：${error.message}`;
                     statusDiv.style.color = 'red';
                 }
             });
 
-            // 初始載入
-            populateFiles();
-            populatePrompts();
+            (async () => {
+                const menuContainer = document.getElementById('menu-container');
+                if (menuContainer) {
+                    try {
+                        const response = await fetch('/menu');
+                        menuContainer.innerHTML = await response.text();
+                        const currentLink = menuContainer.querySelector('a[href="/page4"]');
+                        if (currentLink) currentLink.classList.add('active');
+                    } catch (error) {
+                        console.error('無法載入導覽選單:', error);
+                        menuContainer.innerHTML = '<p style="color:red; text-align:center;">導覽選單載入失敗</p>';
+                    }
+                }
+                await Promise.all([populateFiles(), populatePrompts()]);
+            })();
         });
     </script>
 </body>

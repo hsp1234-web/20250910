@@ -4,12 +4,12 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>頁面三：檔案處理</title>
+    <link rel="stylesheet" href="/static/css/menu.css">
     <link rel="stylesheet" href="/static/css/page3.css">
 </head>
 <body>
-    <header class="page-header">
-        <a href="/menu" class="back-to-menu">« 返回主選單</a>
-    </header>
+    <!-- 統一導覽列容器 -->
+    <div id="menu-container"></div>
 
     <div class="content">
         <div class="panel">
@@ -48,12 +48,12 @@
 
             const logStatus = (message, color = 'black') => {
                 const timestamp = new Date().toLocaleTimeString();
-                statusArea.innerHTML = `<p style="color: ${color};">${timestamp}: ${message}</p>` + statusArea.innerHTML;
+                statusArea.insertAdjacentHTML('afterbegin', `<p style="color: ${color};">${timestamp}: ${message}</p>`);
             };
 
             const fetchAndRenderFiles = async () => {
                 try {
-                    logStatus('正在從伺服器獲取最新的已完成檔案列表...');
+                    logStatus('正在從伺服器獲取最新的已完成檔案列表...', 'blue');
                     const response = await fetch('/api/processor/completed_files');
                     if (!response.ok) throw new Error(`伺服器錯誤 (狀態 ${response.status})`);
 
@@ -70,9 +70,8 @@
 
                     let html = '<ul>';
                     files.forEach(item => {
-                        // 確保 filename 存在
-                        const displayName = item.filename || (item.payload && JSON.parse(item.payload).original_filename) || '未命名檔案';
-                        const sourceUrl = item.payload ? (JSON.parse(item.payload).url || '來源未知') : '來源未知';
+                        const displayName = item.filename || '未命名檔案';
+                        const sourceUrl = item.url || '來源未知';
                         html += `
                             <li>
                                 <input type="checkbox" class="file-checkbox" value="${item.id}">
@@ -85,64 +84,69 @@
                     processButton.disabled = false;
                     selectAllButton.disabled = false;
                     deselectAllButton.disabled = false;
-                    logStatus(`成功載入 ${files.length} 個已完成的檔案。`);
+                    logStatus(`成功載入 ${files.length} 個已完成的檔案。`, 'green');
                 } catch (error) {
                     fileListContainer.innerHTML = `<p style="color: red;">載入失敗：${error.message}</p>`;
                     logStatus(`載入失敗：${error.message}`, 'red');
                 }
             };
 
-            // --- Event Listeners ---
-            selectAllButton.addEventListener('click', () => {
-                document.querySelectorAll('.file-checkbox').forEach(cb => cb.checked = true);
-            });
-
-            deselectAllButton.addEventListener('click', () => {
-                document.querySelectorAll('.file-checkbox').forEach(cb => cb.checked = false);
-            });
-
+            selectAllButton.addEventListener('click', () => document.querySelectorAll('.file-checkbox').forEach(cb => cb.checked = true));
+            deselectAllButton.addEventListener('click', () => document.querySelectorAll('.file-checkbox').forEach(cb => cb.checked = false));
             processButton.addEventListener('click', async () => {
-                // This function's logic is not part of the current task, but we keep it.
-                // ...
+                const selectedIds = Array.from(document.querySelectorAll('.file-checkbox:checked')).map(cb => parseInt(cb.value, 10));
+                if (selectedIds.length === 0) {
+                    alert('請至少選擇一個要處理的項目。');
+                    return;
+                }
+                logStatus(`正在發送 ${selectedIds.length} 個項目的處理請求...`);
+                try {
+                    const response = await fetch('/api/processor/start_processing', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({ ids: selectedIds })
+                    });
+                    const result = await response.json();
+                    if (!response.ok) throw new Error(result.detail || '啟動處理時發生未知錯誤。');
+                    logStatus(result.message, 'green');
+                    await fetchAndRenderFiles();
+                } catch (error) {
+                    logStatus(`請求失敗：${error.message}`, 'red');
+                }
             });
 
-            // --- WebSocket Logic for Real-time Updates ---
             const setupWebSocket = () => {
-                const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-                const wsUrl = `${wsProtocol}//${window.location.host}/api/ws`;
-                const ws = new WebSocket(wsUrl);
-
-                ws.onopen = () => {
-                    logStatus('WebSocket 連線成功。等待即時更新...', 'blue');
-                };
-
-                ws.onmessage = (event) => {
-                    const data = JSON.parse(event.data);
-                    logStatus(`收到 WebSocket 訊息: ${data.type}`, 'blue');
-
-                    // 監聽所有可能的任務更新事件
-                    if (data.type === 'YOUTUBE_STATUS' || data.type === 'TRANSCRIPTION_STATUS') {
-                        if (data.payload && data.payload.status === 'completed') {
-                            logStatus(`偵測到任務 #${data.payload.task_id} 已完成，正在更新檔案列表...`, 'green');
-                            // 在短暫延遲後刷新，以確保後端資料庫已完全更新
-                            setTimeout(fetchAndRenderFiles, 500);
-                        }
-                    }
-                };
-
+                const ws = new WebSocket(`${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/api/ws`);
+                ws.onopen = () => logStatus('WebSocket 連線成功。等待即時更新...', 'blue');
                 ws.onclose = () => {
                     logStatus('WebSocket 連線已中斷。5 秒後嘗試重新連線...', 'orange');
                     setTimeout(setupWebSocket, 5000);
                 };
-
-                ws.onerror = (error) => {
-                    logStatus('WebSocket 發生錯誤。', 'red');
-                    console.error("WebSocket Error:", error);
+                ws.onerror = (error) => console.error("WebSocket Error:", error);
+                ws.onmessage = (event) => {
+                    const data = JSON.parse(event.data);
+                    logStatus(`收到 WebSocket 訊息: ${data.type}`, 'blue');
+                    // 監聽下載完成事件，因為這會產生新的可處理檔案
+                    if (data.type === 'DOWNLOAD_COMPLETE' || data.type === 'PROCESSING_COMPLETE') {
+                        logStatus(`偵測到任務完成，正在更新檔案列表...`, 'green');
+                        setTimeout(fetchAndRenderFiles, 500);
+                    }
                 };
             };
 
-            // Initial Load and Setup
             (async () => {
+                const menuContainer = document.getElementById('menu-container');
+                if (menuContainer) {
+                    try {
+                        const response = await fetch('/menu');
+                        menuContainer.innerHTML = await response.text();
+                        const currentLink = menuContainer.querySelector('a[href="/page3"]');
+                        if (currentLink) currentLink.classList.add('active');
+                    } catch (error) {
+                        console.error('無法載入導覽選單:', error);
+                        menuContainer.innerHTML = '<p style="color:red; text-align:center;">導覽選單載入失敗</p>';
+                    }
+                }
                 await fetchAndRenderFiles();
                 setupWebSocket();
             })();

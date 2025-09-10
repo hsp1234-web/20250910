@@ -4,12 +4,12 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>頁面一：網址提取</title>
+    <link rel="stylesheet" href="/static/css/menu.css">
     <link rel="stylesheet" href="/static/css/page1.css">
 </head>
 <body>
-    <header class="page-header">
-        <a href="/menu" class="back-to-menu">« 返回主選單</a>
-    </header>
+    <!-- 統一導覽列容器 -->
+    <div id="menu-container"></div>
 
     <div class="content">
         <h1>頁面一：網址提取與查詢</h1>
@@ -30,91 +30,110 @@
     </div>
 
     <script>
-        const textInput = document.getElementById('text-input');
-        const submitButton = document.getElementById('submit-button');
-        const statusMessage = document.getElementById('status-message');
+        document.addEventListener('DOMContentLoaded', () => {
+            const textInput = document.getElementById('text-input');
+            const submitButton = document.getElementById('submit-button');
+            const statusMessage = document.getElementById('status-message');
 
-        submitButton.addEventListener('click', async () => {
-            const text = textInput.value;
-            if (!text.trim()) {
-                statusMessage.textContent = '錯誤：輸入文字不可為空。';
-                statusMessage.style.color = 'red';
-                return;
-            }
-
-            statusMessage.textContent = '正在處理中，請稍候...';
-            statusMessage.style.color = 'blue';
-
-            try {
-                const response = await fetch('/api/ingestion/extract_urls', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({ text: text }),
-                });
-
-                const result = await response.json();
-
-                if (response.ok) {
-                    statusMessage.textContent = `成功！${result.message} 提取到 ${result.urls_found_count} 個網址。`;
-                    statusMessage.style.color = 'green';
-                } else {
-                    statusMessage.textContent = `錯誤：${result.detail || '未知錯誤'}`;
+            submitButton.addEventListener('click', async () => {
+                const text = textInput.value;
+                if (!text.trim()) {
+                    statusMessage.textContent = '錯誤：輸入文字不可為空。';
                     statusMessage.style.color = 'red';
-                }
-            } catch (error) {
-                statusMessage.textContent = `發生網路或腳本錯誤：${error.message}`;
-                statusMessage.style.color = 'red';
-            }
-        });
-
-        // --- 搜尋功能邏輯 ---
-        const searchInput = document.getElementById('search-input');
-        const searchButton = document.getElementById('search-button');
-        const searchResults = document.getElementById('search-results');
-
-        const performSearch = async () => {
-            const query = searchInput.value.trim();
-            if (!query) {
-                searchResults.innerHTML = '<p style="color: orange;">請輸入查詢關鍵字。</p>';
-                return;
-            }
-
-            searchResults.innerHTML = '<p>正在查詢中...</p>';
-
-            try {
-                const response = await fetch(`/api/ingestion/search_urls?q=${encodeURIComponent(query)}`);
-                const results = await response.json();
-
-                if (!response.ok) {
-                    throw new Error(results.detail || '搜尋時發生錯誤');
-                }
-
-                if (results.length === 0) {
-                    searchResults.innerHTML = '<p>找不到符合條件的網址。</p>';
                     return;
                 }
 
-                let html = '<ul>';
-                results.forEach(item => {
-                    html += `<li>${item.url} <small>(提取於: ${item.created_at})</small></li>`;
-                });
-                html += '</ul>';
-                searchResults.innerHTML = html;
+                statusMessage.textContent = '正在處理中，請稍候...';
+                statusMessage.style.color = 'blue';
 
-            } catch (error) {
-                searchResults.innerHTML = `<p style="color: red;">查詢失敗：${error.message}</p>`;
-            }
-        };
+                try {
+                    const response = await fetch('/api/ingestion/extract_urls', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({ text: text }),
+                    });
 
-        searchButton.addEventListener('click', performSearch);
+                    const result = await response.json();
 
-        // 讓使用者按下 Enter 鍵也能觸發搜尋
-        searchInput.addEventListener('keyup', (event) => {
-            if (event.key === 'Enter') {
-                performSearch();
-            }
+                    if (response.ok) {
+                        statusMessage.textContent = `成功！${result.message} 提取到 ${result.urls_found_count} 個網址。`;
+                        statusMessage.style.color = 'green';
+                    } else {
+                        statusMessage.textContent = `錯誤：${result.detail || '未知錯誤'}`;
+                        statusMessage.style.color = 'red';
+                    }
+                } catch (error) {
+                    statusMessage.textContent = `發生網路或腳本錯誤：${error.message}`;
+                    statusMessage.style.color = 'red';
+                }
+            });
+
+            // --- 搜尋功能邏輯 ---
+            const searchInput = document.getElementById('search-input');
+            const searchButton = document.getElementById('search-button');
+            const searchResults = document.getElementById('search-results');
+
+            const performSearch = async () => {
+                const query = searchInput.value.trim();
+                if (!query) {
+                    searchResults.innerHTML = '<p style="color: orange;">請輸入查詢關鍵字。</p>';
+                    return;
+                }
+
+                searchResults.innerHTML = '<p>正在查詢中...</p>';
+
+                try {
+                    const response = await fetch(`/api/ingestion/search_urls?q=${encodeURIComponent(query)}`);
+                    const results = await response.json();
+
+                    if (!response.ok) {
+                        throw new Error(results.detail || '搜尋時發生錯誤');
+                    }
+
+                    if (results.length === 0) {
+                        searchResults.innerHTML = '<p>找不到符合條件的網址。</p>';
+                        return;
+                    }
+
+                    let html = '<ul>';
+                    results.forEach(item => {
+                        html += `<li>${item.url} <small>(提取於: ${item.created_at})</small></li>`;
+                    });
+                    html += '</ul>';
+                    searchResults.innerHTML = html;
+
+                } catch (error) {
+                    searchResults.innerHTML = `<p style="color: red;">查詢失敗：${error.message}</p>`;
+                }
+            };
+
+            searchButton.addEventListener('click', performSearch);
+            searchInput.addEventListener('keyup', (event) => {
+                if (event.key === 'Enter') {
+                    performSearch();
+                }
+            });
+
+            // --- 初始載入共用元件 ---
+            (async () => {
+                const menuContainer = document.getElementById('menu-container');
+                if (menuContainer) {
+                    try {
+                        const response = await fetch('/menu');
+                        menuContainer.innerHTML = await response.text();
+                        // 啟用目前頁面的高亮
+                        const currentLink = menuContainer.querySelector('a[href="/page1"]');
+                        if (currentLink) {
+                            currentLink.classList.add('active');
+                        }
+                    } catch (error) {
+                        console.error('無法載入導覽選單:', error);
+                        menuContainer.innerHTML = '<p style="color:red; text-align:center;">導覽選單載入失敗</p>';
+                    }
+                }
+            })();
         });
     </script>
 </body>

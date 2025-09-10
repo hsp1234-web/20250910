@@ -73,31 +73,8 @@ def setup_database_logging():
 
 
 # --- WebSocket 連線管理器 ---
-class ConnectionManager:
-    def __init__(self):
-        self.active_connections: list[WebSocket] = []
-
-    async def connect(self, websocket: WebSocket):
-        await websocket.accept()
-        self.active_connections.append(websocket)
-        log.info(f"新用戶端連線。目前共 {len(self.active_connections)} 個連線。")
-
-    def disconnect(self, websocket: WebSocket):
-        self.active_connections.remove(websocket)
-        log.info(f"一個用戶端離線。目前共 {len(self.active_connections)} 個連線。")
-
-    async def send_personal_message(self, message: str, websocket: WebSocket):
-        await websocket.send_text(message)
-
-    async def broadcast(self, message: str):
-        for connection in self.active_connections:
-            await connection.send_text(message)
-
-    async def broadcast_json(self, data: dict):
-        for connection in self.active_connections:
-            await connection.send_json(data)
-
-manager = ConnectionManager()
+# 從獨立的模組中匯入，以避免循環依賴
+from api.connection_manager import manager
 
 
 # --- DB 客戶端 ---
