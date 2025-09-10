@@ -1,3 +1,22 @@
+## 1001號 - 2025-09-11T00:49:26.993621+08:00
+
+### fix(api): 修正報告檢視器的 404 錯誤並建立測試套件
+
+- **動機**: 使用者回報，在「檔案處理」頁面點擊「查看報告」時，報告內容無法載入，後端日誌顯示 `GET /api/report/{id} 404 Not Found` 錯誤。此外，專案缺乏測試來保障後端工具鏈的穩定性。
+- **核心變更**:
+    - **API 路徑修正**:
+        - **問題分析**: 根本原因為前端呼叫的 API 路徑 (`/api/report/{id}`) 與後端因路由前綴 (`/api/processor`) 而實際提供的路徑 (`/api/processor/report/{id}`) 不匹配。
+        - **程式碼修復**: 修改了 `src/static/report_viewer.html`，將 JavaScript 中的 `fetch` 呼叫更正為正確的 API 路徑，徹底解決 404 錯誤。
+    - **建立測試框架**:
+        - 從頭建立了 `tests/` 目錄，設定了 `pytest.ini`，並在 `requirements/test.txt` 中補齊了所有測試與核心模組所需的依賴（如 `pytest`, `python-pptx`, `requests`, `fastapi`, `Jinja2` 等）。
+    - **強化後端工具與測試**:
+        - **單元測試**: 撰寫了 `tests/test_tools.py`，透過模擬 DOCX 檔案驗證了 `content_extractor` 和 `image_compressor` 的核心邏輯。
+        - **工具強化**: 測試過程中發現 `image_compressor.py` 在處理小檔案時會讓檔案變大。已修復此問題，使其在無法有效壓縮時，直接複製原檔，確保檔案大小不會增加。
+        - **整合測試**: 撰寫了 `tests/test_integration.py`，該測試會動態建立 DOCX 和 PDF 檔案，並透過一個獨立的暫存資料庫，完整驗證 `run_processing_task` 函式對真實檔案的處理流程。
+        - **資料庫可測試性重構**: 重構了 `src/db/database.py` 中的 `initialize_database` 與 `get_db_connection` 函式，使其能透過環境變數在測試模式下使用獨立的資料庫，從而讓整合測試可以在一個隔離的環境中進行。
+- **成果**: 此次更新不僅從根本上解決了前端的 404 錯誤，更重要的是為專案建立了一套涵蓋單元測試與整合測試的完整測試套件。這套測試未來將能有效保障後端工具的穩定性與可靠性，大幅提升了專案品質。
+
+---
 ## 1000號 - 2025-09-11T00:06:09.771284+08:00
 
 ### feat(ui): 新增已完成項目列表與報告檢視器
