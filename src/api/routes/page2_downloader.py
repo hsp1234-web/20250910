@@ -92,22 +92,29 @@ def run_download_task(url_id: int, port: int):
     result_payload = {}
 
     try:
-        # 步驟 1: 獲取 URL 資訊
+        # 步驟 1: 獲取 URL 與建立時間
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute("SELECT url FROM extracted_urls WHERE id = ?", (url_id,))
+        # 同時獲取 url 和 created_at
+        cursor.execute("SELECT url, created_at FROM extracted_urls WHERE id = ?", (url_id,))
         row = cursor.fetchone()
         if not row:
             raise ValueError(f"在資料庫中找不到 ID 為 {url_id} 的 URL。")
 
         url_to_download = row['url']
-        log.info(f"背景任務：準備從 {url_to_download} 下載...")
+        created_at = row['created_at'] # 獲取建立時間
+        log.info(f"背景任務：準備從 {url_to_download} 下載 (建立於: {created_at})...")
 
         # 步驟 2: 執行下載
         from tools.drive_downloader import download_file
         download_dir = SRC_DIR.parent / "downloads"
-        file_name = f"download_{url_id}"
-        downloaded_path = download_file(url_to_download, str(download_dir), file_name)
+        # 將 url_id 和 created_at 傳遞給下載器
+        downloaded_path = download_file(
+            url=url_to_download,
+            output_dir=str(download_dir),
+            url_id=url_id,
+            created_at=created_at
+        )
 
         # 步驟 3: 根據下載結果更新資料庫
         if downloaded_path:
