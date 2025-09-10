@@ -100,7 +100,7 @@ def run_processing_task(url_id: int):
         if conn:
             conn.close()
 
-@router.post("/api/start_processing")
+@router.post("/start_processing")
 async def start_processing(payload: ProcessRequest, background_tasks: BackgroundTasks):
     """接收要處理的檔案 ID 列表，並為每一個 ID 建立一個背景處理任務。"""
     url_ids = payload.ids
