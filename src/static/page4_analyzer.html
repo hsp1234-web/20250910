@@ -4,38 +4,91 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>頁面四：AI 分析</title>
-</head>
-<body>
-    <h1>頁面四：AI 分析與歷史報告</h1>
-    <p>請選擇一個已處理完成的檔案和一個要使用的提示詞，然後開始 AI 分析。</p>
-
-    <div class="form-group">
-        <label for="file-select">選擇檔案:</label>
-        <select id="file-select" name="file-select">
-            <option value="">正在載入檔案...</option>
-        </select>
-    </div>
-
-    <div class="form-group">
-        <label for="prompt-select">選擇提示詞:</label>
-        <select id="prompt-select" name="prompt-select">
-            <option value="">正在載入提示詞...</option>
-        </select>
-    </div>
-
-    <div class="form-group">
-        <label for="api-key-input">Google AI API 金鑰:</label>
-        <input type="password" id="api-key-input" style="width: 100%; padding: 8px;" placeholder="請在此輸入您的 API 金鑰">
-    </div>
-
-    <button id="start-analysis-btn">開始分析</button>
-    <div id="analysis-status"></div>
-
     <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            padding-top: 60px; /* 為固定的導覽列新增頂部間距 */
+            margin: 0;
+        }
+        .navbar {
+            background-color: #343a40;
+            overflow: hidden;
+            width: 100%;
+            position: fixed;
+            top: 0;
+            left: 0;
+            z-index: 1000;
+            display: flex; /* 使用 Flexbox 來佈局 */
+        }
+        .navbar a {
+            color: #f2f2f2;
+            text-align: center;
+            padding: 14px 16px;
+            text-decoration: none;
+            font-size: 16px;
+            flex-grow: 1; /* 讓連結平均分配寬度 */
+        }
+        .navbar a:hover {
+            background-color: #495057;
+        }
+        .navbar a.active {
+            background-color: #007bff;
+            color: white;
+        }
+        .navbar a.home {
+            background-color: #6c757d;
+            flex-grow: 0; /* 首頁按鈕不參與寬度分配 */
+            padding-left: 20px;
+            padding-right: 20px;
+        }
+        .navbar a.home:hover {
+            background-color: #5a6268;
+        }
+        .content {
+            padding: 20px;
+        }
+        /* 原有頁面的樣式 */
         .form-group { margin-bottom: 15px; }
         label { display: block; margin-bottom: 5px; }
-        select { width: 100%; padding: 8px; }
+        select, input[type="password"] { width: 100%; padding: 8px; box-sizing: border-box; }
     </style>
+</head>
+<body>
+    <div class="navbar">
+        <a href="/" class="home">指揮中心</a>
+        <a href="/page1">1. 網址提取</a>
+        <a href="/page2">2. 批次下載</a>
+        <a href="/page3">3. 檔案處理</a>
+        <a href="/page4" class="active">4. AI 分析</a>
+        <a href="/page5">5. 備份管理</a>
+    </div>
+
+    <div class="content">
+        <h1>頁面四：AI 分析與歷史報告</h1>
+        <p>請選擇一個已處理完成的檔案和一個要使用的提示詞，然後開始 AI 分析。</p>
+
+        <div class="form-group">
+            <label for="file-select">選擇檔案:</label>
+            <select id="file-select" name="file-select">
+                <option value="">正在載入檔案...</option>
+            </select>
+        </div>
+
+        <div class="form-group">
+            <label for="prompt-select">選擇提示詞:</label>
+            <select id="prompt-select" name="prompt-select">
+                <option value="">正在載入提示詞...</option>
+            </select>
+        </div>
+
+        <div class="form-group">
+            <label for="api-key-input">Google AI API 金鑰:</label>
+            <input type="password" id="api-key-input" placeholder="請在此輸入您的 API 金鑰">
+        </div>
+
+        <button id="start-analysis-btn">開始分析</button>
+        <div id="analysis-status"></div>
+    </div>
 
     <script>
         document.addEventListener('DOMContentLoaded', () => {
@@ -124,17 +177,5 @@
             populatePrompts();
         });
     </script>
-
-    <nav>
-        <a href="/page1">網址提取</a> |
-        <a href="/page2">批次下載</a> |
-        <a href="/page3">檔案處理</a> |
-        <a href="/page4">AI 分析</a> |
-        <a href="/page5">備份管理</a> |
-        <a href="/prompts">提示詞管理</a> |
-        <a href="/history">歷史報告</a>
-    </nav>
-    <hr>
-
 </body>
 </html>

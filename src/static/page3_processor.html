@@ -4,26 +4,81 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>頁面三：檔案處理</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            padding-top: 60px; /* 為固定的導覽列新增頂部間距 */
+            margin: 0;
+        }
+        .navbar {
+            background-color: #343a40;
+            overflow: hidden;
+            width: 100%;
+            position: fixed;
+            top: 0;
+            left: 0;
+            z-index: 1000;
+            display: flex; /* 使用 Flexbox 來佈局 */
+        }
+        .navbar a {
+            color: #f2f2f2;
+            text-align: center;
+            padding: 14px 16px;
+            text-decoration: none;
+            font-size: 16px;
+            flex-grow: 1; /* 讓連結平均分配寬度 */
+        }
+        .navbar a:hover {
+            background-color: #495057;
+        }
+        .navbar a.active {
+            background-color: #007bff;
+            color: white;
+        }
+        .navbar a.home {
+            background-color: #6c757d;
+            flex-grow: 0; /* 首頁按鈕不參與寬度分配 */
+            padding-left: 20px;
+            padding-right: 20px;
+        }
+        .navbar a.home:hover {
+            background-color: #5a6268;
+        }
+        .content {
+            padding: 20px;
+        }
+    </style>
 </head>
 <body>
-    <h1>頁面三：檔案處理</h1>
-    <p>此頁面會列出所有已下載完成、可以進行處理的檔案。請勾選您想處理的項目，然後點擊按鈕開始。</p>
-
-    <div style="margin-bottom: 10px;">
-        <button id="select-all-button">全選</button>
-        <button id="deselect-all-button">取消全選</button>
+    <div class="navbar">
+        <a href="/" class="home">指揮中心</a>
+        <a href="/page1">1. 網址提取</a>
+        <a href="/page2">2. 批次下載</a>
+        <a href="/page3" class="active">3. 檔案處理</a>
+        <a href="/page4">4. AI 分析</a>
+        <a href="/page5">5. 備份管理</a>
     </div>
 
-    <div id="file-list-container">
-        <p>正在載入待處理的檔案...</p>
-    </div>
+    <div class="content">
+        <h1>頁面三：檔案處理</h1>
+        <p>此頁面會列出所有已下載完成、可以進行處理的檔案。請勾選您想處理的項目，然後點擊按鈕開始。</p>
 
-    <div style="margin-top: 20px;">
-        <button id="process-button" style="font-size: 1.2em; padding: 10px;">開始處理選中項目</button>
-    </div>
+        <div style="margin-bottom: 10px;">
+            <button id="select-all-button">全選</button>
+            <button id="deselect-all-button">取消全選</button>
+        </div>
 
-    <div id="status-area" style="margin-top: 20px; border: 1px solid #ccc; padding: 10px; min-height: 100px; background: #f9f9f9;">
-        <!-- 處理狀態將會顯示在這裡 -->
+        <div id="file-list-container">
+            <p>正在載入待處理的檔案...</p>
+        </div>
+
+        <div style="margin-top: 20px;">
+            <button id="process-button" style="font-size: 1.2em; padding: 10px;">開始處理選中項目</button>
+        </div>
+
+        <div id="status-area" style="margin-top: 20px; border: 1px solid #ccc; padding: 10px; min-height: 100px; background: #f9f9f9;">
+            <!-- 處理狀態將會顯示在這裡 -->
+        </div>
     </div>
 
     <script>
@@ -101,7 +156,7 @@
                     }
 
                     statusArea.innerHTML = `<p style="color: green;">${result.message} 請稍後刷新列表查看狀態。</p>`;
-                    fetchAndRenderFiles();
+                    await fetchAndRenderFiles();
 
                 } catch (error) {
                     statusArea.innerHTML = `<p style="color: red;">請求失敗：${error.message}</p>`;
@@ -109,20 +164,8 @@
             });
 
             // 初始載入
-            fetchAndRenderFiles();
+            await fetchAndRenderFiles();
         });
     </script>
-
-    <nav>
-        <a href="/page1">網址提取</a> |
-        <a href="/page2">批次下載</a> |
-        <a href="/page3">檔案處理</a> |
-        <a href="/page4">AI 分析</a> |
-        <a href="/page5">備份管理</a> |
-        <a href="/prompts">提示詞管理</a> |
-        <a href="/history">歷史報告</a>
-    </nav>
-    <hr>
-
 </body>
 </html>
