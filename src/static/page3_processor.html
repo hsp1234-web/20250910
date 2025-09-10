@@ -126,16 +126,34 @@
                 ws.onmessage = (event) => {
                     const data = JSON.parse(event.data);
                     logStatus(`收到 WebSocket 訊息: ${data.type}`, 'blue');
+
                     if (data.type === 'DOWNLOAD_COMPLETE') {
                         logStatus('偵測到新檔案已下載完成，正在更新列表...', 'green');
                         setTimeout(fetchAndRenderFiles, 500);
+
                     } else if (data.type === 'PROCESSING_COMPLETE') {
-                        const status = data.payload.status;
-                        const taskId = data.payload.task_id;
+                        const { status, task_id, filename, result } = data.payload;
+                        // 使用檔名作為主要識別，如果後端沒提供（為了相容性），則退回使用 task_id
+                        const displayName = filename || `檔案 #${task_id}`;
+
                         if (status === 'processed') {
-                            logStatus(`✅ 檔案 #${taskId} 已成功處理完畢。它將從此列表中移除。`, 'green');
+                            logStatus(`✅ [處理成功] 檔案 '${displayName}' 已處理完畢。`, 'green');
                         } else {
-                            logStatus(`❌ 檔案 #${taskId} 處理失敗。請檢查日誌。`, 'red');
+                            // 嘗試從 result payload 中解析更詳細的錯誤訊息
+                            let errorMessage = '請檢查伺服器日誌以了解詳情。';
+                            if (result) {
+                                try {
+                                    // 後端傳來的 result 是一個 JSON 字串，需要解析
+                                    const resultObj = JSON.parse(result);
+                                    if (resultObj && resultObj.error) {
+                                        errorMessage = resultObj.error;
+                                    }
+                                } catch (e) {
+                                    // 如果 result 不是有效的 JSON，則忽略，使用預設錯誤訊息
+                                    console.error("無法解析來自 WebSocket 的 result payload:", result);
+                                }
+                            }
+                            logStatus(`❌ [處理失敗] 檔案 '${displayName}' 處理失敗：${errorMessage}`, 'red');
                         }
                         // 更新列表以移除已處理的項目
                         setTimeout(fetchAndRenderFiles, 500);

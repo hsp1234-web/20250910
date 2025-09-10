@@ -56,6 +56,7 @@ def run_processing_task(url_id: int, port: int):
     conn = None
     final_status = 'failed'
     result_payload = {}
+    file_path = None  # 初始化 file_path 以確保在 finally 區塊中可用
 
     try:
         conn = get_db_connection()
@@ -114,8 +115,12 @@ def run_processing_task(url_id: int, port: int):
                 "task_id": str(url_id),
                 "status": final_status,
                 "result": json.dumps(result_payload),
-                "task_type": "processing" # 新增類型，幫助後端區分
+                "task_type": "processing"
             }
+            # 將檔名加入 payload，以便前端顯示更清晰的日誌
+            if file_path:
+                notification_payload["filename"] = file_path.name
+
             requests.post(
                 f"http://127.0.0.1:{port}/api/internal/notify_task_update",
                 json=notification_payload,
