@@ -1,0 +1,116 @@
+/* src/static/css/page3.css */
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    margin: 0;
+    padding: 0;
+    background-color: #f8f9fa;
+    color: #343a40;
+}
+
+.page-header {
+    background-color: #ffffff;
+    padding: 15px 20px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    text-align: center;
+    position: sticky;
+    top: 0;
+    z-index: 999;
+}
+
+.back-to-menu {
+    text-decoration: none;
+    color: #007bff;
+    font-size: 16px;
+    font-weight: 500;
+}
+
+.back-to-menu:hover {
+    text-decoration: underline;
+}
+
+.content {
+    padding: 20px;
+    max-width: 900px;
+    margin: 20px auto;
+}
+
+.panel {
+    background: #ffffff;
+    border: 1px solid #dee2e6;
+    border-radius: 8px;
+    padding: 20px;
+    margin-bottom: 20px;
+    box-shadow: 0 4px 8px rgba(0,0,0,0.05);
+}
+
+h1, h2 {
+    color: #0056b3;
+}
+
+button {
+    padding: 10px 20px;
+    font-size: 1em;
+    color: #fff;
+    background-color: #007bff;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    transition: background-color 0.3s;
+    margin-right: 10px;
+    margin-top: 5px;
+}
+
+button:hover {
+    background-color: #0056b3;
+}
+
+button:disabled {
+    background-color: #cccccc;
+    cursor: not-allowed;
+}
+
+#file-list-container ul {
+    list-style: none;
+    padding: 0;
+    max-height: 400px;
+    overflow-y: auto;
+    border: 1px solid #dee2e6;
+    border-radius: 5px;
+}
+
+#file-list-container li {
+    padding: 10px;
+    border-bottom: 1px solid #eee;
+    display: flex;
+    align-items: center;
+    word-break: break-all;
+}
+
+#file-list-container li:last-child {
+    border-bottom: none;
+}
+
+#file-list-container input[type="checkbox"] {
+    margin-right: 10px;
+}
+
+#status-area {
+    margin-top: 20px;
+    border: 1px solid #ccc;
+    padding: 15px;
+    min-height: 100px;
+    max-height: 300px;
+    overflow-y: auto;
+    background: #2b2b2b;
+    color: #f0f0f0;
+    border-radius: 5px;
+    white-space: pre-wrap;
+    font-family: "Courier New", Courier, monospace;
+    font-size: 14px;
+}
+
+#status-area p {
+    margin: 0 0 5px 0;
+    padding: 0;
+}

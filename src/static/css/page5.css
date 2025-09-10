@@ -1,0 +1,77 @@
+/* src/static/css/page5.css */
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    margin: 0;
+    padding: 0;
+    background-color: #f8f9fa;
+    color: #343a40;
+}
+
+.page-header {
+    background-color: #ffffff;
+    padding: 15px 20px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    text-align: center;
+    position: sticky;
+    top: 0;
+    z-index: 999;
+}
+
+.back-to-menu {
+    text-decoration: none;
+    color: #007bff;
+    font-size: 16px;
+    font-weight: 500;
+}
+
+.back-to-menu:hover {
+    text-decoration: underline;
+}
+
+.content {
+    padding: 20px;
+    max-width: 700px;
+    margin: 20px auto;
+    background: #fff;
+    border-radius: 8px;
+    box-shadow: 0 4px 8px rgba(0,0,0,0.05);
+    text-align: center;
+}
+
+h1 {
+    color: #0056b3;
+}
+
+p {
+    line-height: 1.6;
+    margin-bottom: 30px;
+}
+
+button {
+    padding: 15px 30px;
+    font-size: 1.2em;
+    color: #fff;
+    background-color: #28a745; /* Green for go */
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    transition: background-color 0.3s;
+}
+
+button:hover {
+    background-color: #218838;
+}
+
+button:disabled {
+    background-color: #6c757d;
+    cursor: not-allowed;
+}
+
+#status-area {
+    margin-top: 30px;
+    font-weight: bold;
+    padding: 15px;
+    border-radius: 5px;
+    min-height: 20px;
+}

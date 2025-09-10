@@ -10,6 +10,11 @@ router = APIRouter()
 
 # --- UI 頁面路由 ---
 
+@router.get("/menu", response_class=HTMLResponse)
+async def serve_menu(request: Request):
+    return templates.TemplateResponse("menu.html", {"request": request})
+
+
 @router.get("/page1", response_class=HTMLResponse)
 async def serve_page1(request: Request):
     return templates.TemplateResponse("page1_ingestion.html", {"request": request})
