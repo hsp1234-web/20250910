@@ -1,27 +1,28 @@
 # -*- coding: utf-8 -*-
 # ╔══════════════════════════════════════════════════════════════════╗
 # ║                                                                      ║
-# ║    ✨🐺 善狼一鍵啟動器 (v22.2) 🐺                                 ✨🐺 ║
+# ║    ✨🐺 善狼一鍵啟動器 (v23.1) 🐺                                 ✨🐺 ║
 # ║                                                                      ║
 # ╠══════════════════════════════════════════════════════════════════╣
 # ║                                                                      ║
-# ║ - V22.2 更新日誌 (2025-08-31):                                       ║
-# ║   - **依賴修正**: 將 YouTube 下載依賴加入安裝列表，解決下載失敗問題。║
-# ║   - **金鑰修正**: 修正了 Gemini API 金鑰的處理邏輯，使其在驗證後可  ║
-# ║     被後續的模型列表功能使用。                                     ║
-# ║   - **介面優化**: 將 Whisper 模型的預設選項調整為 'tiny'。         ║
+# ║ - V23.1 更新日誌 (2025-09-10):                                       ║
+# ║   - **啟動優化**: 重構依賴安裝流程，優先載入核心服務，將大型功能套件 ║
+# ║     改為背景安裝，大幅縮短伺服器可見時間。                         ║
+# ║   - **安裝加速**: 新增 `uv` 安裝程序，確保在可用時使用其取代 pip     ║
+# ║     以加速依賴下載。                                               ║
+# ║   - **配置更新**: 將預設分支更新為 `main` 以支援最新 MPA 架構。      ║
 # ║                                                                      ║
 # ╚══════════════════════════════════════════════════════════════════╝
 
-#@title ✨🐺 善狼一鍵啟動器 (v22.2) 🐺 { vertical-output: true, display-mode: "form" }
+#@title ✨🐺 善狼一鍵啟動器 (v23.1) 🐺 { vertical-output: true, display-mode: "form" }
 #@markdown ---
 #@markdown ### **Part 1: 專案與環境設定**
 #@markdown > **設定 Git 倉庫、分支或標籤，以及專案資料夾。**
 #@markdown ---
 #@markdown **後端程式碼倉庫 (REPOSITORY_URL)**
-REPOSITORY_URL = "https://github.com/hsp1234-web/0808.git" #@param {type:"string"}
+REPOSITORY_URL = "https://github.com/hsp1234-web/20250910.git" #@param {type:"string"}
 #@markdown **後端版本分支或標籤 (TARGET_BRANCH_OR_TAG)**
-TARGET_BRANCH_OR_TAG = "902" #@param {type:"string"}
+TARGET_BRANCH_OR_TAG = "main" #@param {type:"string"}
 #@markdown **專案資料夾名稱 (PROJECT_FOLDER_NAME)**
 PROJECT_FOLDER_NAME = "wolf_project" #@param {type:"string"}
 #@markdown **強制刷新後端程式碼 (FORCE_REPO_REFRESH)**
@@ -207,6 +208,22 @@ class ServerManager:
         self._thread = threading.Thread(target=self._run, daemon=True)
         self.port = None
 
+    def _ensure_uv_installed(self):
+        """檢查 `uv` 是否已安裝，若否，則嘗試安裝。"""
+        try:
+            subprocess.check_call([sys.executable, "-m", "uv", "--version"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            self._log_manager.log("INFO", "✅ 'uv' 加速器已安裝。")
+            return True
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            self._log_manager.log("INFO", "未找到 'uv'，正在嘗試安裝...")
+            try:
+                subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", "uv"])
+                self._log_manager.log("SUCCESS", "✅ 'uv' 加速器安裝成功！")
+                return True
+            except subprocess.CalledProcessError:
+                self._log_manager.log("WARN", "安裝 'uv' 失敗，將退回使用 'pip'。")
+                return False
+
     def _run(self):
         try:
             self._stats['status'] = "🚀 呼叫核心協調器..."
@@ -240,6 +257,7 @@ class ServerManager:
             add_system_log("colab_setup", "INFO", "Git repository cloned successfully.")
 
             # --- JULES: 重構為兩階段依賴安裝 ---
+            use_uv = self._ensure_uv_installed()
 
             def install_requirements(req_files, log_prefix=""):
                 """幫助函式：智慧地檢查並只安裝缺失的依賴。"""
@@ -264,9 +282,11 @@ class ServerManager:
                 if result.returncode != 0:
                     self._log_manager.log("ERROR", f"[{log_prefix}] 依賴檢查腳本執行失敗: {result.stderr}")
                     # 作為備用方案，直接安裝所有套件
-                    missing_packages = [p.read_text(encoding='utf-8') for p in req_files]
+                    missing_packages_text = "".join([p.read_text(encoding='utf-8') for p in req_files])
+                    missing_packages = missing_packages_text.strip().splitlines()
                 else:
                     missing_packages = result.stdout.strip().splitlines()
+
 
                 if not missing_packages:
                     self._log_manager.log("SUCCESS", f"✅ [{log_prefix}] 所有依賴均已滿足，無需安裝。")
@@ -281,13 +301,12 @@ class ServerManager:
                         f.write(pkg + "\n")
 
                 try:
-                    pip_command = [sys.executable, "-m", "pip", "install", "-q", "--progress-bar", "off", "-r", str(temp_req_path)]
-                    try:
-                        subprocess.check_call([sys.executable, "-m", "uv", "--version"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    if use_uv:
                         pip_command = [sys.executable, "-m", "uv", "pip", "install", "--system", "-q", "-r", str(temp_req_path)]
                         self._log_manager.log("INFO", f"[{log_prefix}] 使用 'uv' 進行快速安裝...")
-                    except (subprocess.CalledProcessError, FileNotFoundError):
-                        self._log_manager.log("INFO", f"[{log_prefix}] 未找到 'uv'，退回使用 'pip'。")
+                    else:
+                        pip_command = [sys.executable, "-m", "pip", "install", "-q", "--progress-bar", "off", "-r", str(temp_req_path)]
+                        self._log_manager.log("INFO", f"[{log_prefix}] 退回使用 'pip'。")
 
                     subprocess.check_call(pip_command)
                     self._log_manager.log("SUCCESS", f"✅ {log_prefix} 依賴安裝完成。")
@@ -302,10 +321,9 @@ class ServerManager:
             # --- 階段 1: 同步安裝核心依賴 ---
             self._log_manager.log("INFO", "步驟 1/3: 正在快速安裝核心伺服器依賴...")
             core_requirements = [
-                project_path / "requirements" / "server.txt",
-                project_path / "requirements" / "youtube.txt"
+                project_path / "requirements" / "core.txt"
             ]
-            install_requirements(core_requirements, "核心依賴")
+            install_requirements(core_requirements, "核心伺服器")
 
             # --- 階段 2: 啟動後端服務 (這會立即發生，以便使用者盡快取得 URL) ---
             self._log_manager.log("INFO", "步驟 2/3: 正在啟動後端服務...")
@@ -318,13 +336,14 @@ class ServerManager:
 
             # --- 階段 3: 在背景安裝大型依賴 ---
             def background_install():
-                self._log_manager.log("INFO", "步驟 3/3: [背景] 開始安裝大型任務依賴...")
+                self._log_manager.log("INFO", "步驟 3/3: [背景] 開始安裝大型與功能性依賴...")
                 large_requirements = [
+                    project_path / "requirements" / "features.txt",
                     project_path / "requirements" / "transcriber.txt",
                     project_path / "requirements" / "gemini.txt"
                 ]
                 try:
-                    install_requirements(large_requirements, "背景大型任務")
+                    install_requirements(large_requirements, "功能與模型")
                     self._log_manager.log("SUCCESS", "[背景] ✅ 所有大型任務依賴均已成功安裝！")
                 except Exception as e:
                     self._log_manager.log("CRITICAL", f"[背景] 大型依賴安裝失敗: {e}")
