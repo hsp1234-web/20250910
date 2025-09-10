@@ -114,3 +114,78 @@ button:disabled {
     margin: 0 0 5px 0;
     padding: 0;
 }
+
+/* --- 新增的下載項目樣式 --- */
+.download-item {
+    background-color: #3a3a3a;
+    border: 1px solid #555;
+    border-radius: 5px;
+    padding: 10px;
+    margin-bottom: 10px;
+}
+
+.download-item .filename {
+    font-weight: bold;
+    color: #a9d1ff;
+    margin-bottom: 8px;
+    word-break: break-all;
+}
+
+.download-item .progress-container {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.download-item progress {
+    width: 100%;
+    height: 20px;
+    -webkit-appearance: none;
+    appearance: none;
+}
+
+/* 為 Chrome/Safari/Edge 等 Webkit 核心瀏覽器設定樣式 */
+.download-item progress::-webkit-progress-bar {
+    background-color: #555;
+    border-radius: 5px;
+}
+
+.download-item progress::-webkit-progress-value {
+    background-color: #28a745;
+    border-radius: 5px;
+    transition: width 0.1s linear;
+}
+
+/* 為 Firefox 設定樣式 */
+.download-item progress::-moz-progress-bar {
+    background-color: #28a745;
+    border-radius: 5px;
+}
+
+.download-item .progress-text {
+    font-size: 14px;
+    color: #fff;
+    min-width: 40px; /* 避免文字跳動 */
+    text-align: right;
+}
+
+.download-item .preview-area img {
+    max-width: 100%;
+    height: auto;
+    margin-top: 10px;
+    border-radius: 5px;
+    border: 2px solid #666;
+}
+
+.download-item .status-message {
+    margin-top: 8px;
+    font-size: 14px;
+}
+
+.status-completed {
+    color: #28a745; /* 綠色 */
+}
+
+.status-error {
+    color: #dc3545; /* 紅色 */
+}

@@ -1,3 +1,26 @@
+## 992號 - 2025-09-10T19:23:19.327785+08:00
+
+### feat(downloader): 為批次下載器新增即時進度與圖片預覽
+
+- **動機**: 原有的批次下載頁面 (`page2_downloader.html`) 以背景方式執行任務，但前端完全無法得知下載的即時狀態，使用者體驗不佳。本次更新旨在為下載流程提供清晰、即時的視覺回饋，並在完成後提供預覽。
+- **核心變更**:
+    - **後端 (`page2_downloader.py`, `drive_downloader.py`)**:
+        - **重構下載工具**: 將 `drive_downloader.py` 中的 `download_file` 函式從一個簡單的函式，重構為一個使用 `subprocess` 執行 `gdown` 命令的生成器。這使其能夠即時讀取 `gdown` 的標準輸出，並 `yield` 進度百分比。
+        - **整合 WebSocket**: 修改了 `page2_downloader.py` 中的背景任務邏輯。現在它會疊代處理上述生成器產生的進度，並透過 WebSocket 將 `DOWNLOAD_STARTED`、`DOWNLOAD_PROGRESS`、`DOWNLOAD_COMPLETE` 和 `DOWNLOAD_ERROR` 等結構化訊息廣播給前端。
+        - **共享連線管理器**: 為了讓 `page2_downloader.py` 能存取 WebSocket 管理器而又不產生循環依賴，新建了 `src/api/connection_manager.py` 模組，集中管理 `ConnectionManager` 單例。
+        - **新增檔案預覽端點**: 在 `ui.py` 中新增了 `/downloads/{file_path:path}` API 端點，用於安全地提供 `downloads` 目錄下的檔案，使前端能夠顯示圖片預覽。
+    - **前端 (`page2_downloader.html`, `page2.css`)**:
+        - **動態 UI 生成**: 修改了頁面的 JavaScript，現在它會監聽後端傳來的 WebSocket 訊息。
+        - **進度條**: 收到 `DOWNLOAD_STARTED` 後，為每個任務動態生成一個包含檔案名稱和 `<progress>` 進度條的 UI 區塊。進度條會根據 `DOWNLOAD_PROGRESS` 訊息即時更新。
+        - **完成預覽**: 收到 `DOWNLOAD_COMPLETE` 訊息後，如果檔案是圖片，會移除進度條並動態建立一個 `<img>` 標籤來顯示預覽圖；否則，顯示完成圖示。
+        - **樣式美化**: 在 `page2.css` 中新增了對應的樣式，美化了新的進度區塊、進度條和預覽圖，使其與現有 UI 風格一致。
+- **測試與驗證**:
+    - 透過在每次檔案寫入後執行讀取操作，驗證了所有程式碼修改都已正確應用。
+    - 檔案服務端點 (`/downloads/...`) 的實作中包含了路徑安全檢查，以防止目錄遍歷攻擊。
+    - 透過將 WebSocket 管理器重構為獨立模組，從架構上解決了循環依賴問題。
+- **成果**: 此次更新將原本不透明的背景下載過程，轉變為一個具備即時回饋、清晰易懂的現代化使用者介面。使用者現在可以清楚地看到每個檔案的下載進度，並在完成後立即預覽，大幅提升了應用的可用性和使用者體驗。
+
+---
 ## 991號 - 2025-09-10T11:47:42.558872+08:00
 
 ### refactor(ui): 建立階層式導覽架構並統一功能頁面

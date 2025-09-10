@@ -4,12 +4,14 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>頁面二：批次下載</title>
+    <!-- 引入 menu.css 來確保共用導覽列樣式正確 -->
+    <link rel="stylesheet" href="/static/css/menu.css">
+    <!-- 引入頁面專屬的樣式 -->
     <link rel="stylesheet" href="/static/css/page2.css">
 </head>
 <body>
-    <header class="page-header">
-        <a href="/menu" class="back-to-menu">« 返回主選單</a>
-    </header>
+    <!-- 統一導覽列 -->
+    <div id="menu-container"></div>
 
     <div class="content">
         <div class="panel">
@@ -46,14 +48,25 @@
             const downloadButton = document.getElementById('download-button');
             const statusArea = document.getElementById('status-area');
 
-            const logStatus = (message, color = 'black') => {
+            // --- 輔助函式 ---
+            const logStatus = (message, color = 'white') => {
                 const timestamp = new Date().toLocaleTimeString();
-                statusArea.innerHTML = `<p style="color: ${color};">${timestamp}: ${message}</p>` + statusArea.innerHTML;
+                // 改為插入 HTML，以便保留舊日誌
+                statusArea.insertAdjacentHTML('afterbegin', `<p style="color: ${color};">${timestamp}: ${message}</p>`);
             };
 
+            const getUrlLabelById = (id) => {
+                const checkbox = urlListContainer.querySelector(`input.url-checkbox[value="${id}"]`);
+                if (checkbox && checkbox.nextElementSibling && checkbox.nextElementSibling.tagName === 'LABEL') {
+                    return checkbox.nextElementSibling.textContent;
+                }
+                return `任務 ID: ${id}`; // 備用文字
+            };
+
+            // --- 核心 UI 渲染函式 ---
             const fetchAndRenderUrls = async () => {
                 try {
-                    logStatus('正在從伺服器獲取最新的待處理網址列表...');
+                    logStatus('正在從伺服器獲取最新的待處理網址列表...', '#87CEEB');
                     const response = await fetch('/api/downloader/pending_urls');
                     if (!response.ok) throw new Error(`伺服器錯誤 (狀態 ${response.status})`);
 
@@ -64,7 +77,7 @@
                         downloadButton.disabled = true;
                         selectAllButton.disabled = true;
                         deselectAllButton.disabled = true;
-                        logStatus('列表為空。');
+                        logStatus('待處理列表為空。');
                         return;
                     }
 
@@ -82,14 +95,14 @@
                     downloadButton.disabled = false;
                     selectAllButton.disabled = false;
                     deselectAllButton.disabled = false;
-                    logStatus(`成功載入 ${urls.length} 個待處理的網址。`);
+                    logStatus(`成功載入 ${urls.length} 個待處理的網址。`, '#90EE90');
                 } catch (error) {
                     urlListContainer.innerHTML = `<p style="color: red;">載入失敗：${error.message}</p>`;
-                    logStatus(`載入失敗：${error.message}`, 'red');
+                    logStatus(`載入失敗：${error.message}`, '#FF6347');
                 }
             };
 
-            // --- Event Listeners ---
+            // --- 事件監聽器 ---
             selectAllButton.addEventListener('click', () => {
                 document.querySelectorAll('.url-checkbox').forEach(cb => cb.checked = true);
             });
@@ -115,54 +128,118 @@
                     });
                     const result = await response.json();
 
-                    if (!response.ok) {
-                        throw new Error(result.detail || '啟動下載時發生未知錯誤。');
-                    }
+                    if (!response.ok) throw new Error(result.detail || '啟動下載時發生未知錯誤。');
 
-                    logStatus(result.message, 'green');
+                    logStatus(result.message, '#90EE90');
                     // 刷新列表以移除已加入佇列的項目
                     await fetchAndRenderUrls();
 
                 } catch (error) {
-                    logStatus(`請求失敗：${error.message}`, 'red');
+                    logStatus(`請求失敗：${error.message}`, '#FF6347');
                 }
             });
 
-            // --- WebSocket Logic for Real-time Updates ---
+            // --- WebSocket 核心邏輯 ---
             const setupWebSocket = () => {
                 const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
                 const wsUrl = `${wsProtocol}//${window.location.host}/api/ws`;
                 const ws = new WebSocket(wsUrl);
 
-                ws.onopen = () => {
-                    logStatus('WebSocket 連線成功。等待即時更新...', 'blue');
+                ws.onopen = () => logStatus('WebSocket 連線成功。等待即時更新...', '#87CEEB');
+                ws.onclose = () => {
+                    logStatus('WebSocket 連線已中斷。5 秒後嘗試重新連線...', '#FFA500');
+                    setTimeout(setupWebSocket, 5000);
+                };
+                ws.onerror = (error) => {
+                    logStatus('WebSocket 發生錯誤。', '#FF6347');
+                    console.error("WebSocket Error:", error);
                 };
 
                 ws.onmessage = (event) => {
                     const data = JSON.parse(event.data);
-                    logStatus(`收到 WebSocket 訊息: ${data.type}`, 'blue');
+                    const { type, payload } = data;
+                    if (!payload) return;
 
-                    // 如果有新的 URL 被加入，我們就重新整理列表
-                    if (data.type === 'URLS_EXTRACTED') {
-                        logStatus('偵測到新的 URL 已被提取，正在更新列表...', 'green');
-                        fetchAndRenderUrls();
+                    const { task_id } = payload;
+                    let taskDiv = document.getElementById(`task-${task_id}`);
+
+                    switch (type) {
+                        case 'URLS_EXTRACTED':
+                            logStatus('偵測到新的 URL 已被提取，正在更新列表...', '#90EE90');
+                            fetchAndRenderUrls();
+                            break;
+
+                        case 'DOWNLOAD_STARTED':
+                            if (!taskDiv) {
+                                const urlLabel = getUrlLabelById(task_id);
+                                const newDiv = `
+                                    <div class="download-item" id="task-${task_id}">
+                                        <p class="filename">正在準備下載: ${urlLabel}</p>
+                                        <div class="progress-container" id="progress-container-${task_id}">
+                                            <progress id="progress-bar-${task_id}" value="0" max="100"></progress>
+                                            <span class="progress-text" id="progress-text-${task_id}">0%</span>
+                                        </div>
+                                        <div class="preview-area" id="preview-area-${task_id}"></div>
+                                    </div>
+                                `;
+                                statusArea.insertAdjacentHTML('beforeend', newDiv);
+                            }
+                            break;
+
+                        case 'DOWNLOAD_PROGRESS':
+                            if (taskDiv) {
+                                const progressBar = document.getElementById(`progress-bar-${task_id}`);
+                                const progressText = document.getElementById(`progress-text-${task_id}`);
+                                if (progressBar && progressText) {
+                                    progressBar.value = payload.progress;
+                                    progressText.textContent = `${payload.progress}%`;
+                                }
+                            }
+                            break;
+
+                        case 'DOWNLOAD_COMPLETE':
+                            if (taskDiv) {
+                                const filenameP = taskDiv.querySelector('.filename');
+                                if (filenameP) filenameP.innerHTML = `檔案 "${payload.file_name}" 下載完成 <span class="status-completed">✅</span>`;
+
+                                const progressContainer = document.getElementById(`progress-container-${task_id}`);
+                                if (progressContainer) progressContainer.remove();
+
+                                const previewArea = document.getElementById(`preview-area-${task_id}`);
+                                if (payload.is_image && previewArea) {
+                                    const img = document.createElement('img');
+                                    img.src = payload.file_path;
+                                    img.alt = `預覽: ${payload.file_name}`;
+                                    img.onerror = () => { previewArea.innerHTML = '<p class="status-error">圖片預覽載入失敗。</p>'; };
+                                    previewArea.appendChild(img);
+                                }
+                            }
+                            break;
+
+                        case 'DOWNLOAD_ERROR':
+                            if (taskDiv) {
+                                const filenameP = taskDiv.querySelector('.filename');
+                                if (filenameP) filenameP.innerHTML += ` <span class="status-error">❌ 失敗</span>`;
+
+                                const progressContainer = document.getElementById(`progress-container-${task_id}`);
+                                if (progressContainer) {
+                                    progressContainer.innerHTML = `<p class="status-error">錯誤: ${payload.error}</p>`;
+                                }
+                            }
+                            break;
                     }
-                    // 也可以監聽下載完成的事件，雖然這個頁面主要關注待辦事項
-                };
-
-                ws.onclose = () => {
-                    logStatus('WebSocket 連線已中斷。5 秒後嘗試重新連線...', 'orange');
-                    setTimeout(setupWebSocket, 5000);
-                };
-
-                ws.onerror = (error) => {
-                    logStatus('WebSocket 發生錯誤。', 'red');
-                    console.error("WebSocket Error:", error);
                 };
             };
 
-            // Initial Load and Setup
+            // --- 初始載入與設定 ---
             (async () => {
+                // 載入共用導覽列
+                const response = await fetch('/menu');
+                const menuHtml = await response.text();
+                document.getElementById('menu-container').innerHTML = menuHtml;
+                // 啟用目前頁面的高亮
+                document.querySelector('a[href="/page2"]').classList.add('active');
+
                 await fetchAndRenderUrls();
                 setupWebSocket();
             })();
