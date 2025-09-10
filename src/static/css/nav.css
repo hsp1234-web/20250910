@@ -1,0 +1,40 @@
+/* src/static/css/nav.css */
+/* 新的、固定的頂部導覽列樣式 */
+.top-nav {
+    background-color: #343a40;
+    overflow: hidden;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+    /* 移除了 position: fixed 及相關屬性，使其變為靜態佈局 */
+}
+
+.top-nav ul {
+    list-style-type: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    justify-content: flex-start; /* 從左邊開始排列 */
+    align-items: center;
+}
+
+.top-nav li a {
+    display: block;
+    color: white;
+    text-align: center;
+    padding: 14px 16px;
+    text-decoration: none;
+    font-size: 16px;
+    transition: background-color 0.3s, color 0.3s;
+}
+
+.top-nav li a:hover {
+    background-color: #575d63;
+    color: white;
+}
+
+.top-nav li a.active {
+    background-color: #007bff;
+    color: white;
+    font-weight: bold;
+}
+
+/* body 的 padding-top 已被移除，因為導覽列不再是 fixed 定位 */
