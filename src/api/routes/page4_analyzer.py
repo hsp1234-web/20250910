@@ -15,8 +15,6 @@ SRC_DIR = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(SRC_DIR))
 
 from db.database import get_db_connection
-from tools.document_analyzer import analyze_document
-from tools.report_generator import generate_html_report_from_data
 
 # --- 常數與設定 ---
 log = logging.getLogger(__name__)
@@ -79,6 +77,10 @@ async def save_prompts(request: Request):
 
 # --- 背景任務函式 ---
 def run_ai_analysis_task(file_id: int, prompt_key: str, api_key: str):
+    # --- 延遲導入 (Lazy Import) ---
+    from tools.document_analyzer import analyze_document
+    from tools.report_generator import generate_html_report_from_data
+
     log.info(f"背景任務：開始分析檔案 ID: {file_id}, 使用提示詞: {prompt_key}")
     conn = None
     try:

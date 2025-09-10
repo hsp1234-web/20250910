@@ -69,7 +69,7 @@ SHOW_LOG_LEVEL_DEBUG = True #@param {type:"boolean"}
 #@markdown **日誌歸檔資料夾 (LOG_ARCHIVE_ROOT_FOLDER)**
 LOG_ARCHIVE_ROOT_FOLDER = "paper" #@param {type:"string"}
 #@markdown **伺服器就緒等待超時 (秒) (SERVER_READY_TIMEOUT)**
-SERVER_READY_TIMEOUT = 45 #@param {type:"integer"}
+SERVER_READY_TIMEOUT = 60 #@param {type:"integer"}
 #@markdown **最大日誌複製數量 (LOG_COPY_MAX_LINES)**
 LOG_COPY_MAX_LINES = 5000 #@param {type:"integer"}
 
@@ -226,8 +226,8 @@ class ServerManager:
 
     def _run(self):
         try:
-            self._stats['status'] = "🚀 呼叫核心協調器..."
-            self._log_manager.log("BATTLE", "=== 正在呼叫核心協調器 `orchestrator.py` ===")
+            self._log_manager.log("BATTLE", "=== 啟動器核心流程開始 ===")
+            self._stats['status'] = "🚀 準備執行環境..."
             project_path = Path(PROJECT_FOLDER_NAME)
             if FORCE_REPO_REFRESH and project_path.exists():
                 self._log_manager.log("INFO", f"偵測到舊的專案資料夾 '{project_path}'，正在強制刪除...")
@@ -247,6 +247,7 @@ class ServerManager:
                 return
 
             self._log_manager.log("INFO", "✅ Git 倉庫下載完成。")
+            self._log_manager.log("INFO", f"--- Git Clone 完成 (耗時: {time.monotonic() - self._stats.get('start_time_monotonic', 0):.2f} 秒) ---")
             project_src_path = project_path / "src"
             project_src_path_str = str(project_src_path.resolve())
             if project_src_path_str not in sys.path:
@@ -261,7 +262,8 @@ class ServerManager:
 
             def install_requirements(req_files, log_prefix=""):
                 """幫助函式：智慧地檢查並只安裝缺失的依賴。"""
-                self._log_manager.log("INFO", f"[{log_prefix}] 開始檢查依賴...")
+                self._log_manager.log("INFO", f"[{log_prefix}] 開始檢查與安裝依賴...")
+                install_start_time = time.monotonic()
 
                 checker_script = project_path / "scripts" / "check_deps.py"
                 if not checker_script.is_file():
@@ -309,7 +311,8 @@ class ServerManager:
                         self._log_manager.log("INFO", f"[{log_prefix}] 退回使用 'pip'。")
 
                     subprocess.check_call(pip_command)
-                    self._log_manager.log("SUCCESS", f"✅ {log_prefix} 依賴安裝完成。")
+                    self._log_manager.log("SUCCESS", f"✅ [{log_prefix}] 依賴安裝完成。")
+                    self._log_manager.log("INFO", f"--- [{log_prefix}] 安裝耗時: {time.monotonic() - install_start_time:.2f} 秒 ---")
                 except subprocess.CalledProcessError as e:
                     error_message = f"[{log_prefix}] 依賴安裝失敗！返回碼: {e.returncode}\n--- STDOUT ---\n{e.stdout}\n--- STDERR ---\n{e.stderr}"
                     self._log_manager.log("CRITICAL", error_message)
@@ -326,7 +329,7 @@ class ServerManager:
             install_requirements(core_requirements, "核心伺服器")
 
             # --- 階段 2: 啟動後端服務 (這會立即發生，以便使用者盡快取得 URL) ---
-            self._log_manager.log("INFO", "步驟 2/3: 正在啟動後端服務...")
+            self._log_manager.log("INFO", "步驟 2/3: 正在啟動後端協調器...")
             launch_command = [sys.executable, "src/core/orchestrator.py"]
             process_env = os.environ.copy()
             src_path_str = str((project_path / "src").resolve())
@@ -365,7 +368,7 @@ class ServerManager:
                 if not server_ready and uvicorn_ready_pattern.search(line):
                     server_ready = True
                     self._stats['status'] = "✅ 伺服器運行中"
-                    self._log_manager.log("SUCCESS", "伺服器已就緒！收到 Uvicorn 握手信號！")
+                    self._log_manager.log("SUCCESS", f"✅ 伺服器已就緒！收到 Uvicorn 握手信號！ (總耗時: {time.monotonic() - self._stats.get('start_time_monotonic', 0):.2f} 秒)")
                 if self.port and server_ready:
                     self.server_ready_event.set()
 
@@ -571,7 +574,8 @@ except Exception as e:
 # SECTION 3: 主程式執行入口
 # ==============================================================================
 def main():
-    shared_stats = {"start_time_monotonic": time.monotonic(), "status": "初始化...", "urls": {}}
+    start_time_monotonic = time.monotonic()
+    shared_stats = {"start_time_monotonic": start_time_monotonic, "status": "初始化...", "urls": {}}
     log_manager, display_manager, server_manager, tunnel_manager = None, None, None, None
     start_time = datetime.now(pytz.timezone(TIMEZONE))
     try:
@@ -581,6 +585,7 @@ def main():
         display_manager = DisplayManager(log_manager=log_manager, stats_dict=shared_stats, refresh_rate=UI_REFRESH_SECONDS)
         display_manager.start()
         server_manager.start()
+        log_manager.log("INFO", f"設定伺服器啟動超時時間為 {SERVER_READY_TIMEOUT} 秒...")
         if server_manager.server_ready_event.wait(timeout=SERVER_READY_TIMEOUT):
             if not server_manager.port:
                 log_manager.log("CRITICAL", "伺服器已就緒，但未能解析出 API 埠號。無法建立代理連結。")
@@ -589,11 +594,16 @@ def main():
                 tunnel_manager = TunnelManager(log_manager=log_manager, stats_dict=shared_stats, port=server_manager.port)
                 tunnel_manager.start()
         else:
-            shared_stats['status'] = "❌ 伺服器啟動超時"
-            log_manager.log("CRITICAL", f"伺服器在 {SERVER_READY_TIMEOUT} 秒內未能就緒。")
+            shared_stats['status'] = f"❌ 伺服器啟動超時 ({SERVER_READY_TIMEOUT}秒)"
+            log_manager.log("CRITICAL", f"伺服器在 {SERVER_READY_TIMEOUT} 秒內未能就緒。 POC 驗證失敗。正在強制終止...")
+            # 這會觸發 finally 區塊來清理所有程序
+            raise SystemExit(f"POC FAILED: Server did not start within {SERVER_READY_TIMEOUT} seconds.")
         while server_manager._thread.is_alive(): time.sleep(1)
-    except KeyboardInterrupt:
-        if log_manager: log_manager.log("WARN", "🛑 偵測到使用者手動中斷...")
+    except (KeyboardInterrupt, SystemExit) as e:
+        if isinstance(e, SystemExit):
+            if log_manager: log_manager.log("CRITICAL", f"系統因致命錯誤退出: {e}")
+        else: # KeyboardInterrupt
+            if log_manager: log_manager.log("WARN", "🛑 偵測到使用者手動中斷...")
     except Exception as e:
         if log_manager: log_manager.log("CRITICAL", f"❌ 發生未預期的致命錯誤: {e}")
         else: print(f"❌ 發生未預期的致命錯誤: {e}")
