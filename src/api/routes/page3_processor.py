@@ -15,7 +15,6 @@ sys.path.insert(0, str(SRC_DIR))
 
 from db.database import get_db_connection
 from tools.file_hasher import calculate_sha256
-from tools.content_extractor import extract_content
 
 # --- 常數與設定 ---
 log = logging.getLogger(__name__)
@@ -49,6 +48,9 @@ async def get_completed_files():
 # --- 背景任務函式 ---
 def run_processing_task(url_id: int):
     """這是在背景執行的單一檔案處理任務。"""
+    # --- 延遲導入 (Lazy Import) ---
+    from tools.content_extractor import extract_content
+
     log.info(f"背景任務：開始處理檔案 URL ID: {url_id}")
     conn = None
     try:

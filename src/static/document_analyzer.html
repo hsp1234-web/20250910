@@ -7,23 +7,55 @@
     <style>
         body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            height: 100vh;
-            margin: 0;
             background-color: #f0f2f5;
-            text-align: center;
+            color: #333;
+            line-height: 1.6;
+            padding: 20px;
         }
         .container {
-            max-width: 600px;
+            max-width: 800px;
+            margin: auto;
+            background: #fff;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         }
-        h1 {
+        h1, h2 {
             color: #333;
+            border-bottom: 2px solid #eee;
+            padding-bottom: 10px;
         }
-        p {
-            color: #666;
-            font-size: 1.2em;
+        .file-list, .history-list {
+            list-style-type: none;
+            padding: 0;
+        }
+        .file-list li, .history-list li {
+            padding: 10px;
+            border: 1px solid #ddd;
+            margin-top: -1px; /* A little trick for seamless borders */
+            background: #f9f9f9;
+        }
+        .file-list li:hover {
+            background: #f0f0f0;
+        }
+        .file-list li label {
+            display: block;
+            cursor: pointer;
+        }
+        .form-group {
+            margin-top: 20px;
+        }
+        label {
+            font-weight: bold;
+            display: block;
+            margin-bottom: 5px;
+        }
+        select, input[type="text"], input[type="password"] {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            box-sizing: border-box;
         }
         .button {
             display: inline-block;
@@ -31,7 +63,7 @@
             padding: 10px 20px;
             font-size: 1em;
             color: #fff;
-            background-color: #6c757d;
+            background-color: #007bff;
             border: none;
             border-radius: 5px;
             text-decoration: none;
@@ -39,15 +71,220 @@
             transition: background-color 0.3s;
         }
         .button:hover {
+            background-color: #0056b3;
+        }
+        .button-secondary {
+            background-color: #6c757d;
+        }
+        .button-secondary:hover {
             background-color: #5a6268;
+        }
+        #status {
+            margin-top: 20px;
+            padding: 10px;
+            border-radius: 5px;
+            display: none; /* Hidden by default */
+        }
+        .status-success {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+            display: block;
+        }
+        .status-error {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+            display: block;
         }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>文件分析儀</h1>
-        <p>此功能正在積極開發中，敬請期待！</p>
-        <a href="/" class="button">返回主頁</a>
+
+        <!-- Section 1: Select File -->
+        <div id="file-selection">
+            <h2>1. 選擇要分析的檔案</h2>
+            <ul id="processed-files-list" class="file-list">
+                <!-- Files will be loaded here by JavaScript -->
+            </ul>
+        </div>
+
+        <!-- Section 2: Select Prompt and API Key -->
+        <div id="analysis-options">
+            <h2>2. 設定分析選項</h2>
+            <div class="form-group">
+                <label for="prompt-select">選擇分析提示詞 (Prompt)</label>
+                <select id="prompt-select" name="prompt_key"></select>
+            </div>
+            <div class="form-group">
+                <label for="api-key">輸入您的 AI API 金鑰</label>
+                <input type="password" id="api-key" name="api_key" placeholder="請在此輸入金鑰">
+            </div>
+        </div>
+
+        <!-- Section 3: Action Button -->
+        <button id="start-analysis-btn" class="button">開始分析</button>
+        <a href="/" class="button button-secondary">返回主頁</a>
+
+        <!-- Status Message -->
+        <div id="status"></div>
+
+        <!-- Section 4: History -->
+        <div id="history-section">
+            <h2>分析歷史紀錄</h2>
+            <ul id="history-list" class="history-list">
+                <!-- History will be loaded here -->
+            </ul>
+        </div>
     </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            init();
+        });
+
+        function init() {
+            fetchProcessedFiles();
+            fetchPrompts();
+            fetchReports();
+            document.getElementById('start-analysis-btn').addEventListener('click', startAnalysis);
+        }
+
+        function showStatus(message, isError = false) {
+            const statusEl = document.getElementById('status');
+            statusEl.textContent = message;
+            statusEl.className = isError ? 'status-error' : 'status-success';
+        }
+
+        async function fetchProcessedFiles() {
+            const listEl = document.getElementById('processed-files-list');
+            listEl.innerHTML = '<li>正在載入待分析檔案...</li>';
+            try {
+                const response = await fetch('/api/processed_files');
+                if (!response.ok) {
+                    throw new Error(`伺服器錯誤: ${response.status}`);
+                }
+                const files = await response.json();
+                listEl.innerHTML = ''; // Clear loading message
+                if (files.length === 0) {
+                    listEl.innerHTML = '<li>目前沒有已處理完成、可供分析的檔案。</li>';
+                    return;
+                }
+                files.forEach(file => {
+                    const li = document.createElement('li');
+                    const radioId = `file-${file.id}`;
+                    li.innerHTML = `
+                        <input type="radio" id="${radioId}" name="file_id" value="${file.id}" />
+                        <label for="${radioId}">${file.filename}</label>
+                    `;
+                    listEl.appendChild(li);
+                });
+            } catch (error) {
+                listEl.innerHTML = '<li>載入檔案列表失敗。</li>';
+                showStatus(`無法載入檔案列表: ${error.message}`, true);
+            }
+        }
+
+        async function fetchPrompts() {
+            const selectEl = document.getElementById('prompt-select');
+            selectEl.innerHTML = '<option>正在載入提示詞...</option>';
+            try {
+                const response = await fetch('/api/prompts');
+                 if (!response.ok) {
+                    throw new Error(`伺服器錯誤: ${response.status}`);
+                }
+                const prompts = await response.json();
+                selectEl.innerHTML = ''; // Clear loading message
+                for (const key in prompts) {
+                    const option = document.createElement('option');
+                    option.value = key;
+                    option.textContent = prompts[key].name;
+                    selectEl.appendChild(option);
+                }
+            } catch (error) {
+                selectEl.innerHTML = '<option>載入提示詞失敗</option>';
+                showStatus(`無法載入提示詞: ${error.message}`, true);
+            }
+        }
+
+        async function startAnalysis() {
+            const selectedFile = document.querySelector('input[name="file_id"]:checked');
+            const promptKey = document.getElementById('prompt-select').value;
+            const apiKey = document.getElementById('api-key').value;
+
+            if (!selectedFile) {
+                showStatus('錯誤：請先選擇一個要分析的檔案。', true);
+                return;
+            }
+            if (!apiKey) {
+                showStatus('錯誤：請輸入您的 AI API 金鑰。', true);
+                return;
+            }
+
+            const fileId = parseInt(selectedFile.value, 10);
+
+            showStatus('正在發送分析請求...', false);
+
+            try {
+                const response = await fetch('/api/start_analysis', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        file_id: fileId,
+                        prompt_key: promptKey,
+                        api_key: apiKey,
+                    }),
+                });
+
+                const result = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(result.detail || `伺服器錯誤: ${response.status}`);
+                }
+
+                showStatus(result.message, false);
+                // After 2 seconds, refresh the history list to show the new report
+                setTimeout(fetchReports, 2000);
+            } catch (error) {
+                showStatus(`分析請求失敗: ${error.message}`, true);
+            }
+        }
+
+        async function fetchReports() {
+            const listEl = document.getElementById('history-list');
+            listEl.innerHTML = '<li>正在載入歷史紀錄...</li>';
+            try {
+                const response = await fetch('/api/reports');
+                if (!response.ok) {
+                    throw new Error(`伺服器錯誤: ${response.status}`);
+                }
+                const reports = await response.json();
+                listEl.innerHTML = ''; // Clear loading message
+                if (reports.length === 0) {
+                    listEl.innerHTML = '<li>目前沒有任何分析報告。</li>';
+                    return;
+                }
+                reports.forEach(report => {
+                    const li = document.createElement('li');
+                    // Paths are absolute, so we need to make them relative for the link
+                    const relativePath = report.report_path.split('/reports/')[1];
+                    const reportDate = new Date(report.created_at).toLocaleString('zh-TW');
+                    li.innerHTML = `
+                        <a href="/reports/${relativePath}" target="_blank">
+                            報告於 ${reportDate} 產生 (來源: ${report.source_url})
+                        </a>
+                    `;
+                    listEl.appendChild(li);
+                });
+            } catch (error) {
+                listEl.innerHTML = '<li>載入歷史紀錄失敗。</li>';
+                showStatus(`無法載入歷史紀錄: ${error.message}`, true);
+            }
+        }
+    </script>
 </body>
 </html>

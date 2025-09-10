@@ -9,8 +9,6 @@ from fastapi.responses import JSONResponse
 SRC_DIR = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(SRC_DIR))
 
-from tools.gdrive_backup import create_backup_archive, upload_to_google_drive
-
 # --- 常數與設定 ---
 log = logging.getLogger(__name__)
 router = APIRouter()
@@ -20,6 +18,9 @@ def run_backup_task():
     """
     這是在背景執行的備份任務。
     """
+    # --- 延遲導入 (Lazy Import) ---
+    from tools.gdrive_backup import create_backup_archive, upload_to_google_drive
+
     log.info("背景任務：開始執行備份流程...")
     try:
         # 步驟 1: 建立壓縮檔

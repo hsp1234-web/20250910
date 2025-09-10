@@ -1,27 +1,28 @@
 # -*- coding: utf-8 -*-
 # ╔══════════════════════════════════════════════════════════════════╗
 # ║                                                                      ║
-# ║    ✨🐺 善狼一鍵啟動器 (v22.2) 🐺                                 ✨🐺 ║
+# ║    ✨🐺 善狼一鍵啟動器 (v23.1) 🐺                                 ✨🐺 ║
 # ║                                                                      ║
 # ╠══════════════════════════════════════════════════════════════════╣
 # ║                                                                      ║
-# ║ - V22.2 更新日誌 (2025-08-31):                                       ║
-# ║   - **依賴修正**: 將 YouTube 下載依賴加入安裝列表，解決下載失敗問題。║
-# ║   - **金鑰修正**: 修正了 Gemini API 金鑰的處理邏輯，使其在驗證後可  ║
-# ║     被後續的模型列表功能使用。                                     ║
-# ║   - **介面優化**: 將 Whisper 模型的預設選項調整為 'tiny'。         ║
+# ║ - V23.1 更新日誌 (2025-09-10):                                       ║
+# ║   - **啟動優化**: 重構依賴安裝流程，優先載入核心服務，將大型功能套件 ║
+# ║     改為背景安裝，大幅縮短伺服器可見時間。                         ║
+# ║   - **安裝加速**: 新增 `uv` 安裝程序，確保在可用時使用其取代 pip     ║
+# ║     以加速依賴下載。                                               ║
+# ║   - **配置更新**: 將預設分支更新為 `main` 以支援最新 MPA 架構。      ║
 # ║                                                                      ║
 # ╚══════════════════════════════════════════════════════════════════╝
 
-#@title ✨🐺 善狼一鍵啟動器 (v22.2) 🐺 { vertical-output: true, display-mode: "form" }
+#@title ✨🐺 善狼一鍵啟動器 (v23.1) 🐺 { vertical-output: true, display-mode: "form" }
 #@markdown ---
 #@markdown ### **Part 1: 專案與環境設定**
 #@markdown > **設定 Git 倉庫、分支或標籤，以及專案資料夾。**
 #@markdown ---
 #@markdown **後端程式碼倉庫 (REPOSITORY_URL)**
-REPOSITORY_URL = "https://github.com/hsp1234-web/0808.git" #@param {type:"string"}
+REPOSITORY_URL = "https://github.com/hsp1234-web/20250910.git" #@param {type:"string"}
 #@markdown **後端版本分支或標籤 (TARGET_BRANCH_OR_TAG)**
-TARGET_BRANCH_OR_TAG = "902" #@param {type:"string"}
+TARGET_BRANCH_OR_TAG = "main" #@param {type:"string"}
 #@markdown **專案資料夾名稱 (PROJECT_FOLDER_NAME)**
 PROJECT_FOLDER_NAME = "wolf_project" #@param {type:"string"}
 #@markdown **強制刷新後端程式碼 (FORCE_REPO_REFRESH)**
@@ -68,7 +69,7 @@ SHOW_LOG_LEVEL_DEBUG = True #@param {type:"boolean"}
 #@markdown **日誌歸檔資料夾 (LOG_ARCHIVE_ROOT_FOLDER)**
 LOG_ARCHIVE_ROOT_FOLDER = "paper" #@param {type:"string"}
 #@markdown **伺服器就緒等待超時 (秒) (SERVER_READY_TIMEOUT)**
-SERVER_READY_TIMEOUT = 45 #@param {type:"integer"}
+SERVER_READY_TIMEOUT = 60 #@param {type:"integer"}
 #@markdown **最大日誌複製數量 (LOG_COPY_MAX_LINES)**
 LOG_COPY_MAX_LINES = 5000 #@param {type:"integer"}
 
@@ -207,10 +208,26 @@ class ServerManager:
         self._thread = threading.Thread(target=self._run, daemon=True)
         self.port = None
 
+    def _ensure_uv_installed(self):
+        """檢查 `uv` 是否已安裝，若否，則嘗試安裝。"""
+        try:
+            subprocess.check_call([sys.executable, "-m", "uv", "--version"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            self._log_manager.log("INFO", "✅ 'uv' 加速器已安裝。")
+            return True
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            self._log_manager.log("INFO", "未找到 'uv'，正在嘗試安裝...")
+            try:
+                subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", "uv"])
+                self._log_manager.log("SUCCESS", "✅ 'uv' 加速器安裝成功！")
+                return True
+            except subprocess.CalledProcessError:
+                self._log_manager.log("WARN", "安裝 'uv' 失敗，將退回使用 'pip'。")
+                return False
+
     def _run(self):
         try:
-            self._stats['status'] = "🚀 呼叫核心協調器..."
-            self._log_manager.log("BATTLE", "=== 正在呼叫核心協調器 `orchestrator.py` ===")
+            self._log_manager.log("BATTLE", "=== 啟動器核心流程開始 ===")
+            self._stats['status'] = "🚀 準備執行環境..."
             project_path = Path(PROJECT_FOLDER_NAME)
             if FORCE_REPO_REFRESH and project_path.exists():
                 self._log_manager.log("INFO", f"偵測到舊的專案資料夾 '{project_path}'，正在強制刪除...")
@@ -230,6 +247,7 @@ class ServerManager:
                 return
 
             self._log_manager.log("INFO", "✅ Git 倉庫下載完成。")
+            self._log_manager.log("INFO", f"--- Git Clone 完成 (耗時: {time.monotonic() - self._stats.get('start_time_monotonic', 0):.2f} 秒) ---")
             project_src_path = project_path / "src"
             project_src_path_str = str(project_src_path.resolve())
             if project_src_path_str not in sys.path:
@@ -240,10 +258,12 @@ class ServerManager:
             add_system_log("colab_setup", "INFO", "Git repository cloned successfully.")
 
             # --- JULES: 重構為兩階段依賴安裝 ---
+            use_uv = self._ensure_uv_installed()
 
             def install_requirements(req_files, log_prefix=""):
                 """幫助函式：智慧地檢查並只安裝缺失的依賴。"""
-                self._log_manager.log("INFO", f"[{log_prefix}] 開始檢查依賴...")
+                self._log_manager.log("INFO", f"[{log_prefix}] 開始檢查與安裝依賴...")
+                install_start_time = time.monotonic()
 
                 checker_script = project_path / "scripts" / "check_deps.py"
                 if not checker_script.is_file():
@@ -264,9 +284,11 @@ class ServerManager:
                 if result.returncode != 0:
                     self._log_manager.log("ERROR", f"[{log_prefix}] 依賴檢查腳本執行失敗: {result.stderr}")
                     # 作為備用方案，直接安裝所有套件
-                    missing_packages = [p.read_text(encoding='utf-8') for p in req_files]
+                    missing_packages_text = "".join([p.read_text(encoding='utf-8') for p in req_files])
+                    missing_packages = missing_packages_text.strip().splitlines()
                 else:
                     missing_packages = result.stdout.strip().splitlines()
+
 
                 if not missing_packages:
                     self._log_manager.log("SUCCESS", f"✅ [{log_prefix}] 所有依賴均已滿足，無需安裝。")
@@ -281,16 +303,16 @@ class ServerManager:
                         f.write(pkg + "\n")
 
                 try:
-                    pip_command = [sys.executable, "-m", "pip", "install", "-q", "--progress-bar", "off", "-r", str(temp_req_path)]
-                    try:
-                        subprocess.check_call([sys.executable, "-m", "uv", "--version"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    if use_uv:
                         pip_command = [sys.executable, "-m", "uv", "pip", "install", "--system", "-q", "-r", str(temp_req_path)]
                         self._log_manager.log("INFO", f"[{log_prefix}] 使用 'uv' 進行快速安裝...")
-                    except (subprocess.CalledProcessError, FileNotFoundError):
-                        self._log_manager.log("INFO", f"[{log_prefix}] 未找到 'uv'，退回使用 'pip'。")
+                    else:
+                        pip_command = [sys.executable, "-m", "pip", "install", "-q", "--progress-bar", "off", "-r", str(temp_req_path)]
+                        self._log_manager.log("INFO", f"[{log_prefix}] 退回使用 'pip'。")
 
                     subprocess.check_call(pip_command)
-                    self._log_manager.log("SUCCESS", f"✅ {log_prefix} 依賴安裝完成。")
+                    self._log_manager.log("SUCCESS", f"✅ [{log_prefix}] 依賴安裝完成。")
+                    self._log_manager.log("INFO", f"--- [{log_prefix}] 安裝耗時: {time.monotonic() - install_start_time:.2f} 秒 ---")
                 except subprocess.CalledProcessError as e:
                     error_message = f"[{log_prefix}] 依賴安裝失敗！返回碼: {e.returncode}\n--- STDOUT ---\n{e.stdout}\n--- STDERR ---\n{e.stderr}"
                     self._log_manager.log("CRITICAL", error_message)
@@ -302,13 +324,12 @@ class ServerManager:
             # --- 階段 1: 同步安裝核心依賴 ---
             self._log_manager.log("INFO", "步驟 1/3: 正在快速安裝核心伺服器依賴...")
             core_requirements = [
-                project_path / "requirements" / "server.txt",
-                project_path / "requirements" / "youtube.txt"
+                project_path / "requirements" / "core.txt"
             ]
-            install_requirements(core_requirements, "核心依賴")
+            install_requirements(core_requirements, "核心伺服器")
 
             # --- 階段 2: 啟動後端服務 (這會立即發生，以便使用者盡快取得 URL) ---
-            self._log_manager.log("INFO", "步驟 2/3: 正在啟動後端服務...")
+            self._log_manager.log("INFO", "步驟 2/3: 正在啟動後端協調器...")
             launch_command = [sys.executable, "src/core/orchestrator.py"]
             process_env = os.environ.copy()
             src_path_str = str((project_path / "src").resolve())
@@ -318,13 +339,14 @@ class ServerManager:
 
             # --- 階段 3: 在背景安裝大型依賴 ---
             def background_install():
-                self._log_manager.log("INFO", "步驟 3/3: [背景] 開始安裝大型任務依賴...")
+                self._log_manager.log("INFO", "步驟 3/3: [背景] 開始安裝大型與功能性依賴...")
                 large_requirements = [
+                    project_path / "requirements" / "features.txt",
                     project_path / "requirements" / "transcriber.txt",
                     project_path / "requirements" / "gemini.txt"
                 ]
                 try:
-                    install_requirements(large_requirements, "背景大型任務")
+                    install_requirements(large_requirements, "功能與模型")
                     self._log_manager.log("SUCCESS", "[背景] ✅ 所有大型任務依賴均已成功安裝！")
                 except Exception as e:
                     self._log_manager.log("CRITICAL", f"[背景] 大型依賴安裝失敗: {e}")
@@ -346,7 +368,7 @@ class ServerManager:
                 if not server_ready and uvicorn_ready_pattern.search(line):
                     server_ready = True
                     self._stats['status'] = "✅ 伺服器運行中"
-                    self._log_manager.log("SUCCESS", "伺服器已就緒！收到 Uvicorn 握手信號！")
+                    self._log_manager.log("SUCCESS", f"✅ 伺服器已就緒！收到 Uvicorn 握手信號！ (總耗時: {time.monotonic() - self._stats.get('start_time_monotonic', 0):.2f} 秒)")
                 if self.port and server_ready:
                     self.server_ready_event.set()
 
@@ -552,7 +574,8 @@ except Exception as e:
 # SECTION 3: 主程式執行入口
 # ==============================================================================
 def main():
-    shared_stats = {"start_time_monotonic": time.monotonic(), "status": "初始化...", "urls": {}}
+    start_time_monotonic = time.monotonic()
+    shared_stats = {"start_time_monotonic": start_time_monotonic, "status": "初始化...", "urls": {}}
     log_manager, display_manager, server_manager, tunnel_manager = None, None, None, None
     start_time = datetime.now(pytz.timezone(TIMEZONE))
     try:
@@ -562,6 +585,7 @@ def main():
         display_manager = DisplayManager(log_manager=log_manager, stats_dict=shared_stats, refresh_rate=UI_REFRESH_SECONDS)
         display_manager.start()
         server_manager.start()
+        log_manager.log("INFO", f"設定伺服器啟動超時時間為 {SERVER_READY_TIMEOUT} 秒...")
         if server_manager.server_ready_event.wait(timeout=SERVER_READY_TIMEOUT):
             if not server_manager.port:
                 log_manager.log("CRITICAL", "伺服器已就緒，但未能解析出 API 埠號。無法建立代理連結。")
@@ -570,11 +594,16 @@ def main():
                 tunnel_manager = TunnelManager(log_manager=log_manager, stats_dict=shared_stats, port=server_manager.port)
                 tunnel_manager.start()
         else:
-            shared_stats['status'] = "❌ 伺服器啟動超時"
-            log_manager.log("CRITICAL", f"伺服器在 {SERVER_READY_TIMEOUT} 秒內未能就緒。")
+            shared_stats['status'] = f"❌ 伺服器啟動超時 ({SERVER_READY_TIMEOUT}秒)"
+            log_manager.log("CRITICAL", f"伺服器在 {SERVER_READY_TIMEOUT} 秒內未能就緒。 POC 驗證失敗。正在強制終止...")
+            # 這會觸發 finally 區塊來清理所有程序
+            raise SystemExit(f"POC FAILED: Server did not start within {SERVER_READY_TIMEOUT} seconds.")
         while server_manager._thread.is_alive(): time.sleep(1)
-    except KeyboardInterrupt:
-        if log_manager: log_manager.log("WARN", "🛑 偵測到使用者手動中斷...")
+    except (KeyboardInterrupt, SystemExit) as e:
+        if isinstance(e, SystemExit):
+            if log_manager: log_manager.log("CRITICAL", f"系統因致命錯誤退出: {e}")
+        else: # KeyboardInterrupt
+            if log_manager: log_manager.log("WARN", "🛑 偵測到使用者手動中斷...")
     except Exception as e:
         if log_manager: log_manager.log("CRITICAL", f"❌ 發生未預期的致命錯誤: {e}")
         else: print(f"❌ 發生未預期的致命錯誤: {e}")
