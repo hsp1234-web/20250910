@@ -145,7 +145,13 @@ async def start_downloads(payload: DownloadRequest, background_tasks: Background
 
     log.info(f"API: 收到 {len(url_ids)} 個項目的下載請求。")
 
-    port = request.url.port
+    # 從應用程式狀態中獲取由中介軟體儲存的、可靠的伺服器埠號
+    try:
+        port = request.app.state.server_port
+    except AttributeError:
+        log.error("無法從 app.state 獲取 server_port。背景任務通知功能可能失敗。")
+        # 提供一個備用埠號，或直接引發錯誤
+        raise HTTPException(status_code=500, detail="伺服器設定錯誤：無法確定通知埠號。")
 
     conn = None
     try:

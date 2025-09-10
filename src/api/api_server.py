@@ -119,6 +119,23 @@ app = FastAPI(title="鳳凰音訊轉錄儀 API (v3 - 重構)", version="3.0", li
 app.state.manager = manager
 
 # --- 中介軟體 (Middleware) ---
+@app.middleware("http")
+async def store_server_port(request: Request, call_next):
+    """
+    一個中介軟體，用於捕獲並儲存伺服器運行的實際埠號。
+    這解決了在反向代理後方 `request.url.port` 可能不準確的問題。
+    """
+    # 伺服器埠號通常在應用生命週期中不會改變，
+    # 所以我們只在它尚未被設定時儲存一次。
+    if not hasattr(app.state, "server_port"):
+        # 從 ASGI scope 中獲取伺服器資訊 (host, port)
+        # request.scope['server'] 是一個包含 (host, port) 的元組
+        server_port = request.scope['server'][1]
+        app.state.server_port = server_port
+        log.info(f"伺服器埠號已捕獲並儲存: {server_port}")
+    response = await call_next(request)
+    return response
+
 # JULES: 新增 CORS 中介軟體以允許來自瀏覽器腳本的跨來源請求
 app.add_middleware(
     CORSMiddleware,

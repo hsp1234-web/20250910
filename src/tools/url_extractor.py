@@ -36,14 +36,20 @@ log = logging.getLogger('url_extractor')
 def extract_urls(text: str) -> list[str]:
     """
     使用正規表示式從給定的文字中提取所有 http/https 網址。
+    新增了預處理步驟，以分離串接的 URL。
 
     :param text: 要從中提取網址的來源文字。
     :return: 一個包含所有找到的網址的列表。
     """
+    # 預處理：在 "http://" 或 "https://" 前插入空格，以分離可能黏合在一起的網址。
+    # 例如 "wordhttps://..." 會變成 "word https://..."
+    # 這可以避免 `\S+` 的貪婪匹配產生無效的長網址。
+    processed_text = re.sub(r'(https?://)', r' \1', text)
+
     # 這個正規表示式匹配 http:// 或 https:// 開頭的網址
     # 它會匹配直到遇到空格、換行符或成為字串結尾
     url_pattern = re.compile(r'https?://\S+')
-    urls = url_pattern.findall(text)
+    urls = url_pattern.findall(processed_text)
     log.info(f"從文字中提取了 {len(urls)} 個網址。")
     return urls
 
