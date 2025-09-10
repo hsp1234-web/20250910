@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>頁面三：檔案處理</title>
+</head>
+<body>
+    <h1>頁面三：檔案處理</h1>
+    <p>此頁面會列出所有已下載完成、可以進行處理的檔案。請勾選您想處理的項目，然後點擊按鈕開始。</p>
+
+    <div style="margin-bottom: 10px;">
+        <button id="select-all-button">全選</button>
+        <button id="deselect-all-button">取消全選</button>
+    </div>
+
+    <div id="file-list-container">
+        <p>正在載入待處理的檔案...</p>
+    </div>
+
+    <div style="margin-top: 20px;">
+        <button id="process-button" style="font-size: 1.2em; padding: 10px;">開始處理選中項目</button>
+    </div>
+
+    <div id="status-area" style="margin-top: 20px; border: 1px solid #ccc; padding: 10px; min-height: 100px; background: #f9f9f9;">
+        <!-- 處理狀態將會顯示在這裡 -->
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const fileListContainer = document.getElementById('file-list-container');
+            const selectAllButton = document.getElementById('select-all-button');
+            const deselectAllButton = document.getElementById('deselect-all-button');
+            const processButton = document.getElementById('process-button');
+            const statusArea = document.getElementById('status-area');
+
+            const fetchAndRenderFiles = async () => {
+                try {
+                    fileListContainer.innerHTML = '<p>正在載入待處理的檔案...</p>';
+                    const response = await fetch('/api/processor/completed_files');
+                    if (!response.ok) throw new Error('無法從伺服器獲取檔案列表。');
+
+                    const files = await response.json();
+
+                    if (files.length === 0) {
+                        fileListContainer.innerHTML = '<p>目前沒有待處理的檔案。</p>';
+                        processButton.disabled = true;
+                        selectAllButton.disabled = true;
+                        deselectAllButton.disabled = true;
+                        return;
+                    }
+
+                    let html = '<ul>';
+                    files.forEach(item => {
+                        html += `
+                            <li style="list-style-type: none; margin-bottom: 5px;">
+                                <input type="checkbox" class="file-checkbox" value="${item.id}">
+                                <label>${item.filename} (來自: ${item.url})</label>
+                            </li>
+                        `;
+                    });
+                    html += '</ul>';
+                    fileListContainer.innerHTML = html;
+                    processButton.disabled = false;
+                    selectAllButton.disabled = false;
+                    deselectAllButton.disabled = false;
+
+                } catch (error) {
+                    fileListContainer.innerHTML = `<p style="color: red;">載入失敗：${error.message}</p>`;
+                }
+            };
+
+            // --- 事件監聽 ---
+            selectAllButton.addEventListener('click', () => {
+                document.querySelectorAll('.file-checkbox').forEach(cb => cb.checked = true);
+            });
+
+            deselectAllButton.addEventListener('click', () => {
+                document.querySelectorAll('.file-checkbox').forEach(cb => cb.checked = false);
+            });
+
+            processButton.addEventListener('click', async () => {
+                const selectedIds = Array.from(document.querySelectorAll('.file-checkbox:checked')).map(cb => parseInt(cb.value, 10));
+                if (selectedIds.length === 0) {
+                    alert('請至少選擇一個要處理的項目。');
+                    return;
+                }
+
+                statusArea.innerHTML = `<p>正在發送處理請求給 ${selectedIds.length} 個項目...</p>`;
+
+                try {
+                    const response = await fetch('/api/processor/start_processing', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({ ids: selectedIds })
+                    });
+                    const result = await response.json();
+
+                    if (!response.ok) {
+                        throw new Error(result.detail || '啟動處理時發生未知錯誤。');
+                    }
+
+                    statusArea.innerHTML = `<p style="color: green;">${result.message} 請稍後刷新列表查看狀態。</p>`;
+                    fetchAndRenderFiles();
+
+                } catch (error) {
+                    statusArea.innerHTML = `<p style="color: red;">請求失敗：${error.message}</p>`;
+                }
+            });
+
+            // 初始載入
+            fetchAndRenderFiles();
+        });
+    </script>
+
+    <nav>
+        <a href="/page1">網址提取</a> |
+        <a href="/page2">批次下載</a> |
+        <a href="/page3">檔案處理</a> |
+        <a href="/page4">AI 分析</a> |
+        <a href="/page5">備份管理</a> |
+        <a href="/prompts">提示詞管理</a> |
+        <a href="/history">歷史報告</a>
+    </nav>
+    <hr>
+
+</body>
+</html>

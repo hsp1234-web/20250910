@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>頁面五：備份管理</title>
+</head>
+<body>
+    <h1>頁面五：備份管理</h1>
+    <p>點擊下方的按鈕，系統將會開始在背景執行備份任務，將資料庫和已下載的檔案壓縮並上傳至 Google Drive。</p>
+
+    <div style="margin-top: 20px;">
+        <button id="backup-button" style="font-size: 1.2em; padding: 10px;">立即備份到 Google Drive</button>
+    </div>
+
+    <div id="status-area" style="margin-top: 20px; font-weight: bold;"></div>
+
+    <script>
+        document.getElementById('backup-button').addEventListener('click', async () => {
+            const statusArea = document.getElementById('status-area');
+            const backupButton = document.getElementById('backup-button');
+
+            statusArea.textContent = '正在發送備份請求...';
+            statusArea.style.color = 'blue';
+            backupButton.disabled = true;
+
+            try {
+                const response = await fetch('/api/backup/start_backup', {
+                    method: 'POST',
+                });
+
+                const result = await response.json();
+
+                if (response.status === 202) {
+                    statusArea.textContent = `成功！${result.message} 備份正在背景執行中。`;
+                    statusArea.style.color = 'green';
+                } else {
+                    throw new Error(result.detail || '啟動備份時發生未知錯誤。');
+                }
+            } catch (error) {
+                statusArea.textContent = `請求失敗：${error.message}`;
+                statusArea.style.color = 'red';
+                backupButton.disabled = false;
+            }
+        });
+    </script>
+
+    <nav>
+        <a href="/page1">網址提取</a> |
+        <a href="/page2">批次下載</a> |
+        <a href="/page3">檔案處理</a> |
+        <a href="/page4">AI 分析</a> |
+        <a href="/page5">備份管理</a> |
+        <a href="/prompts">提示詞管理</a> |
+        <a href="/history">歷史報告</a>
+    </nav>
+    <hr>
+
+</body>
+</html>

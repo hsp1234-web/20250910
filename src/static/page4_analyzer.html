@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>頁面四：AI 分析</title>
+</head>
+<body>
+    <h1>頁面四：AI 分析與歷史報告</h1>
+    <p>請選擇一個已處理完成的檔案和一個要使用的提示詞，然後開始 AI 分析。</p>
+
+    <div class="form-group">
+        <label for="file-select">選擇檔案:</label>
+        <select id="file-select" name="file-select">
+            <option value="">正在載入檔案...</option>
+        </select>
+    </div>
+
+    <div class="form-group">
+        <label for="prompt-select">選擇提示詞:</label>
+        <select id="prompt-select" name="prompt-select">
+            <option value="">正在載入提示詞...</option>
+        </select>
+    </div>
+
+    <div class="form-group">
+        <label for="api-key-input">Google AI API 金鑰:</label>
+        <input type="password" id="api-key-input" style="width: 100%; padding: 8px;" placeholder="請在此輸入您的 API 金鑰">
+    </div>
+
+    <button id="start-analysis-btn">開始分析</button>
+    <div id="analysis-status"></div>
+
+    <style>
+        .form-group { margin-bottom: 15px; }
+        label { display: block; margin-bottom: 5px; }
+        select { width: 100%; padding: 8px; }
+    </style>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const fileSelect = document.getElementById('file-select');
+            const promptSelect = document.getElementById('prompt-select');
+            const startBtn = document.getElementById('start-analysis-btn');
+            const statusDiv = document.getElementById('analysis-status');
+
+            // 填充檔案下拉選單
+            const populateFiles = async () => {
+                try {
+                    const response = await fetch('/api/analyzer/processed_files');
+                    const files = await response.json();
+                    fileSelect.innerHTML = '<option value="">-- 請選擇一個檔案 --</option>';
+                    if (files.length > 0) {
+                        files.forEach(file => {
+                            const option = new Option(`${file.filename}`, file.id);
+                            fileSelect.add(option);
+                        });
+                    } else {
+                        fileSelect.innerHTML = '<option value="">沒有可分析的檔案</option>';
+                        fileSelect.disabled = true;
+                    }
+                } catch (error) {
+                    fileSelect.innerHTML = '<option value="">載入檔案失敗</option>';
+                    console.error('Failed to fetch processed files:', error);
+                }
+            };
+
+            // 填充提示詞下拉選單
+            const populatePrompts = async () => {
+                try {
+                    const response = await fetch('/api/analyzer/prompts');
+                    const prompts = await response.json();
+                    promptSelect.innerHTML = '<option value="">-- 請選擇一個提示詞 --</option>';
+                    for (const key in prompts) {
+                        const option = new Option(key, key);
+                        promptSelect.add(option);
+                    }
+                } catch (error) {
+                    promptSelect.innerHTML = '<option value="">載入提示詞失敗</option>';
+                    console.error('Failed to fetch prompts:', error);
+                }
+            };
+
+            startBtn.addEventListener('click', async () => {
+                const fileId = fileSelect.value;
+                const promptKey = promptSelect.value;
+                const apiKey = document.getElementById('api-key-input').value;
+
+                if (!fileId || !promptKey || !apiKey) {
+                    alert('請務必選擇一個檔案、一個提示詞，並輸入您的 API 金鑰。');
+                    return;
+                }
+
+                statusDiv.textContent = '正在提交分析請求...';
+                statusDiv.style.color = 'blue';
+
+                try {
+                    const response = await fetch('/api/analyzer/start_analysis', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({
+                            file_id: parseInt(fileId, 10),
+                            prompt_key: promptKey,
+                            api_key: apiKey
+                        })
+                    });
+
+                    const result = await response.json();
+                    if (!response.ok) {
+                        throw new Error(result.detail || '啟動分析時發生未知錯誤。');
+                    }
+
+                    statusDiv.textContent = result.message;
+                    statusDiv.style.color = 'green';
+
+                } catch (error) {
+                    statusDiv.textContent = `請求失敗：${error.message}`;
+                    statusDiv.style.color = 'red';
+                }
+            });
+
+            // 初始載入
+            populateFiles();
+            populatePrompts();
+        });
+    </script>
+
+    <nav>
+        <a href="/page1">網址提取</a> |
+        <a href="/page2">批次下載</a> |
+        <a href="/page3">檔案處理</a> |
+        <a href="/page4">AI 分析</a> |
+        <a href="/page5">備份管理</a> |
+        <a href="/prompts">提示詞管理</a> |
+        <a href="/history">歷史報告</a>
+    </nav>
+    <hr>
+
+</body>
+</html>

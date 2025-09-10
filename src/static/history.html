@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>歷史報告</title>
+</head>
+<body>
+    <h1>歷史報告</h1>
+    <p>這裡是過去所有 AI 分析報告的列表。</p>
+
+    <div id="report-list-container">
+        <p>正在載入報告列表...</p>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', async () => {
+            const reportListContainer = document.getElementById('report-list-container');
+
+            try {
+                const response = await fetch('/api/analyzer/reports');
+                const reports = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(reports.detail || '無法獲取報告列表');
+                }
+
+                if (reports.length === 0) {
+                    reportListContainer.innerHTML = '<p>目前沒有任何歷史報告。</p>';
+                    return;
+                }
+
+                let html = '<ul>';
+                reports.forEach(report => {
+                    // The report_path is an absolute path on the server.
+                    // We need a way to serve these files.
+                    // For now, let's just display the path. We'll need a /reports/{id} endpoint later.
+                    // Assuming the report path can be accessed directly for now.
+                    // A better approach would be an endpoint `/api/reports/{report_id}` that returns the file.
+                    // Let's assume the reports are in a publicly accessible "reports" folder.
+                    const reportName = report.report_path.split('/').pop();
+                    html += `<li><a href="/reports/${reportName}" target="_blank">${reportName}</a> (來源: ${report.source_url}, 時間: ${report.created_at})</li>`;
+                });
+                html += '</ul>';
+                reportListContainer.innerHTML = html;
+
+            } catch (error) {
+                reportListContainer.innerHTML = `<p style="color: red;">載入報告失敗：${error.message}</p>`;
+            }
+        });
+    </script>
+
+    <nav>
+        <a href="/page1">網址提取</a> |
+        <a href="/page2">批次下載</a> |
+        <a href="/page3">檔案處理</a> |
+        <a href="/page4">AI 分析</a> |
+        <a href="/page5">備份管理</a> |
+        <a href="/prompts">提示詞管理</a>
+    </nav>
+    <hr>
+</body>
+</html>

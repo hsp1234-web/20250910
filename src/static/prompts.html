@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>提示詞管理</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+            background-color: #F8F9FA;
+            color: #202124;
+            padding: 20px;
+            font-size: 100%;
+            line-height: 1.5;
+        }
+        .container {
+            max-width: 900px;
+            margin: auto;
+            background-color: white;
+            border: 1px solid #e0e0e0;
+            border-radius: 12px;
+            padding: 24px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+        }
+        h1 {
+            font-size: 1.8em;
+            font-weight: 700;
+            border-bottom: 1px solid #e0e0e0;
+            padding-bottom: 16px;
+            margin-bottom: 24px;
+        }
+        .prompt-group {
+            margin-bottom: 24px;
+        }
+        .prompt-group label {
+            display: block;
+            font-weight: 600;
+            margin-bottom: 8px;
+            font-size: 1.1em;
+        }
+        textarea {
+            width: 100%;
+            min-height: 150px;
+            padding: 12px;
+            border-radius: 8px;
+            border: 1px solid #ccc;
+            font-family: monospace;
+            font-size: 0.9em;
+            line-height: 1.6;
+            box-sizing: border-box;
+            resize: vertical;
+        }
+        .controls {
+            text-align: right;
+            margin-top: 24px;
+        }
+        button {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            background-color: #007bff;
+            color: white;
+            font-weight: 600;
+            font-size: 1em;
+            transition: all 0.2s;
+        }
+        button:hover:not(:disabled) {
+            background-color: #0056b3;
+        }
+        button:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+        }
+        .status-message {
+            display: none;
+            padding: 12px;
+            border-radius: 8px;
+            margin-top: 16px;
+            text-align: center;
+            font-weight: 500;
+        }
+        .status-message.success {
+            background-color: #d4edda;
+            color: #155724;
+        }
+        .status-message.error {
+            background-color: #f8d7da;
+            color: #721c24;
+        }
+        .back-link {
+            display: inline-block;
+            margin-bottom: 20px;
+            text-decoration: none;
+            color: #007bff;
+            font-weight: 500;
+        }
+        .back-link:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <a href="/page4" class="back-link">&larr; 返回 AI 分析頁面</a>
+        <p style="margin-top: 1em;"><a href="/history">查看歷史報告</a></p>
+        <h1>提示詞管理</h1>
+        <p>在這裡，您可以檢視和修改系統用於與 AI 溝通的各種提示詞 (Prompts)。修改後請務必儲存。</p>
+
+        <div id="prompts-container">
+            <p>正在從伺服器載入提示詞...</p>
+        </div>
+
+        <div class="controls">
+            <button id="save-btn" disabled>儲存變更</button>
+        </div>
+        <div id="status-area" class="status-message"></div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const promptsContainer = document.getElementById('prompts-container');
+            const saveBtn = document.getElementById('save-btn');
+            const statusArea = document.getElementById('status-area');
+            let originalPrompts = {};
+
+            const fetchPrompts = async () => {
+                try {
+                    const response = await fetch('/api/analyzer/prompts');
+                    if (!response.ok) {
+                        throw new Error(`伺服器錯誤: ${response.statusText}`);
+                    }
+                    const prompts = await response.json();
+                    originalPrompts = prompts;
+                    renderPrompts(prompts);
+                    saveBtn.disabled = false;
+                } catch (error) {
+                    promptsContainer.innerHTML = `<p style="color: red;">載入提示詞失敗: ${error.message}</p>`;
+                }
+            };
+
+            const renderPrompts = (prompts) => {
+                promptsContainer.innerHTML = '';
+                for (const key in prompts) {
+                    if (Object.hasOwnProperty.call(prompts, key)) {
+                        const value = prompts[key];
+                        const group = document.createElement('div');
+                        group.className = 'prompt-group';
+
+                        const label = document.createElement('label');
+                        label.htmlFor = `prompt-${key}`;
+                        label.textContent = key;
+
+                        const textarea = document.createElement('textarea');
+                        textarea.id = `prompt-${key}`;
+                        textarea.name = key;
+                        textarea.value = value;
+
+                        group.appendChild(label);
+                        group.appendChild(textarea);
+                        promptsContainer.appendChild(group);
+                    }
+                }
+            };
+
+            const showStatusMessage = (message, isError = false) => {
+                statusArea.textContent = message;
+                statusArea.className = `status-message ${isError ? 'error' : 'success'}`;
+                statusArea.style.display = 'block';
+                setTimeout(() => {
+                    statusArea.style.display = 'none';
+                }, 5000);
+            };
+
+            saveBtn.addEventListener('click', async () => {
+                saveBtn.disabled = true;
+                saveBtn.textContent = '儲存中...';
+
+                const newPrompts = {};
+                const textareas = promptsContainer.querySelectorAll('textarea');
+                textareas.forEach(textarea => {
+                    newPrompts[textarea.name] = textarea.value;
+                });
+
+                try {
+                    const response = await fetch('/api/analyzer/prompts', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify(newPrompts),
+                    });
+
+                    const result = await response.json();
+                    if (!response.ok) {
+                        throw new Error(result.detail || '儲存失敗');
+                    }
+                    showStatusMessage(result.message || '儲存成功！');
+                    originalPrompts = newPrompts; // Update original state
+                } catch (error) {
+                    showStatusMessage(`儲存失敗: ${error.message}`, true);
+                } finally {
+                    saveBtn.disabled = false;
+                    saveBtn.textContent = '儲存變更';
+                }
+            });
+
+            // Initial load
+            fetchPrompts();
+        });
+    </script>
+</body>
+</html>

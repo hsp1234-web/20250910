@@ -1,0 +1,16 @@
+fastapi==0.116.1
+uvicorn[standard]==0.35.0
+python-multipart==0.0.20
+psutil==5.9.5
+websocket-client==1.8.0
+requests==2.32.4
+# --- 檔案處理功能所需依賴 ---
+python-docx
+PyMuPDF
+python-pptx
+
+# --- Google Drive 備份功能所需依賴 ---
+google-api-python-client
+google-auth-httplib2
+google-auth-oauthlib
+gdown
