@@ -2,6 +2,7 @@ import logging
 import sys
 from pathlib import Path
 import json
+import requests
 
 from fastapi import APIRouter, HTTPException, Request, BackgroundTasks
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -46,13 +47,16 @@ async def get_completed_files():
             conn.close()
 
 # --- 背景任務函式 ---
-def run_processing_task(url_id: int):
+def run_processing_task(url_id: int, port: int):
     """這是在背景執行的單一檔案處理任務。"""
     # --- 延遲導入 (Lazy Import) ---
     from tools.content_extractor import extract_content
 
     log.info(f"背景任務：開始處理檔案 URL ID: {url_id}")
     conn = None
+    final_status = 'failed'
+    result_payload = {}
+
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
@@ -73,25 +77,29 @@ def run_processing_task(url_id: int):
         content_data = extract_content(str(file_path), str(image_output_dir))
         image_paths_json = json.dumps(content_data.get("image_paths", [])) if content_data else "[]"
 
+        final_status = 'processed'
+        result_payload = {"file_hash": file_hash, "image_paths": image_paths_json}
         cursor.execute(
             """
             UPDATE extracted_urls
-            SET status = 'processed', status_message = '處理成功', file_hash = ?, extracted_image_paths = ?
+            SET status = ?, status_message = '處理成功', file_hash = ?, extracted_image_paths = ?
             WHERE id = ?
             """,
-            (file_hash, image_paths_json, url_id)
+            (final_status, file_hash, image_paths_json, url_id)
         )
         conn.commit()
         log.info(f"背景任務：URL ID {url_id} 處理成功。")
 
     except Exception as e:
         log.error(f"背景任務：處理 URL ID {url_id} 時發生嚴重錯誤: {e}", exc_info=True)
+        final_status = 'processing_failed'
+        result_payload = {"error": str(e)}
         if conn and url_id:
             try:
                 cursor = conn.cursor()
                 cursor.execute(
-                    "UPDATE extracted_urls SET status = 'processing_failed', status_message = ? WHERE id = ?",
-                    (str(e), url_id)
+                    "UPDATE extracted_urls SET status = ?, status_message = ? WHERE id = ?",
+                    (final_status, str(e), url_id)
                 )
                 conn.commit()
             except Exception as db_err:
@@ -100,14 +108,33 @@ def run_processing_task(url_id: int):
         if conn:
             conn.close()
 
-@router.post("/api/start_processing")
-async def start_processing(payload: ProcessRequest, background_tasks: BackgroundTasks):
+        # 步驟 4: 無論成功或失敗，都呼叫內部 API 來觸發 WebSocket 通知
+        try:
+            notification_payload = {
+                "task_id": str(url_id),
+                "status": final_status,
+                "result": json.dumps(result_payload),
+                "task_type": "processing" # 新增類型，幫助後端區分
+            }
+            requests.post(
+                f"http://127.0.0.1:{port}/api/internal/notify_task_update",
+                json=notification_payload,
+                timeout=5
+            )
+            log.info(f"背景任務：已為 URL ID {url_id} 發送處理完成通知。")
+        except requests.exceptions.RequestException as e:
+            log.error(f"背景任務：為 URL ID {url_id} 發送處理完成通知時失敗: {e}")
+
+@router.post("/start_processing")
+async def start_processing(payload: ProcessRequest, background_tasks: BackgroundTasks, request: Request):
     """接收要處理的檔案 ID 列表，並為每一個 ID 建立一個背景處理任務。"""
     url_ids = payload.ids
     if not url_ids:
         raise HTTPException(status_code=400, detail="未提供要處理的檔案 ID。")
 
     log.info(f"API: 收到 {len(url_ids)} 個項目的處理請求。")
+
+    port = request.url.port
 
     conn = None
     try:
@@ -120,7 +147,7 @@ async def start_processing(payload: ProcessRequest, background_tasks: Background
             log.info(f"API: 已將 {cursor.rowcount} 個檔案的狀態更新為 'processing'。")
 
         for url_id in url_ids:
-            background_tasks.add_task(run_processing_task, url_id)
+            background_tasks.add_task(run_processing_task, url_id, port)
 
         return JSONResponse(
             content={"message": f"已成功為 {len(url_ids)} 個項目建立背景處理任務。"}

@@ -1321,15 +1321,21 @@ async def notify_task_update(payload: Dict):
     task_id = payload.get("task_id")
     status = payload.get("status")
     result = payload.get("result")
-    log.info(f"🔔 收到來自 Worker 的任務更新通知: Task {task_id} -> {status}")
+    # 從 payload 獲取 task_type，這是從背景任務傳來的，比重新查詢資料庫更可靠
+    task_type = payload.get("task_type", "unknown")
 
-    # JULES'S FIX: 查詢任務類型以發送正確的 WebSocket 訊息
-    task_info = db_client.get_task_status(task_id)
-    task_type = task_info.get("type", "transcribe") if task_info else "transcribe"
+    log.info(f"🔔 收到來自背景任務的更新通知: Task {task_id} ({task_type}) -> {status}")
 
-    message_type = "TRANSCRIPTION_STATUS"
-    if "youtube" in task_type or "gemini" in task_type:
+    # 根據任務類型決定 WebSocket 訊息類型
+    message_type = "GENERIC_UPDATE" # Default
+    if task_type == "download":
+        message_type = "DOWNLOAD_COMPLETE"
+    elif task_type == "processing":
+        message_type = "PROCESSING_COMPLETE"
+    elif "youtube" in task_type or "gemini" in task_type:
         message_type = "YOUTUBE_STATUS"
+    elif "transcribe" in task_type:
+        message_type = "TRANSCRIPTION_STATUS"
 
     log.info(f"根據任務類型 '{task_type}'，將使用 WebSocket 訊息類型: '{message_type}'")
 
@@ -1346,7 +1352,7 @@ async def notify_task_update(payload: Dict):
             "task_id": task_id,
             "status": status,
             "result": result,
-            "task_type": task_type  # 將 task_type 也傳給前端
+            "task_type": task_type
         }
     }
     await manager.broadcast_json(message)

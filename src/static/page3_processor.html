@@ -126,8 +126,18 @@
                 ws.onmessage = (event) => {
                     const data = JSON.parse(event.data);
                     logStatus(`收到 WebSocket 訊息: ${data.type}`, 'blue');
-                    if (data.type === 'DOWNLOAD_COMPLETE' || data.type === 'PROCESSING_COMPLETE') {
-                        logStatus(`偵測到任務完成，正在更新檔案列表...`, 'green');
+                    if (data.type === 'DOWNLOAD_COMPLETE') {
+                        logStatus('偵測到新檔案已下載完成，正在更新列表...', 'green');
+                        setTimeout(fetchAndRenderFiles, 500);
+                    } else if (data.type === 'PROCESSING_COMPLETE') {
+                        const status = data.payload.status;
+                        const taskId = data.payload.task_id;
+                        if (status === 'processed') {
+                            logStatus(`✅ 檔案 #${taskId} 已成功處理完畢。它將從此列表中移除。`, 'green');
+                        } else {
+                            logStatus(`❌ 檔案 #${taskId} 處理失敗。請檢查日誌。`, 'red');
+                        }
+                        // 更新列表以移除已處理的項目
                         setTimeout(fetchAndRenderFiles, 500);
                     }
                 };
