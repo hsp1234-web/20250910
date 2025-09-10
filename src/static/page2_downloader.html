@@ -4,96 +4,77 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>頁面二：批次下載</title>
-    <style>
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-            padding-top: 60px; /* 為固定的導覽列新增頂部間距 */
-            margin: 0;
-        }
-        .navbar {
-            background-color: #343a40;
-            overflow: hidden;
-            width: 100%;
-            position: fixed;
-            top: 0;
-            left: 0;
-            z-index: 1000;
-            display: flex; /* 使用 Flexbox 來佈局 */
-        }
-        .navbar a {
-            color: #f2f2f2;
-            text-align: center;
-            padding: 14px 16px;
-            text-decoration: none;
-            font-size: 16px;
-            flex-grow: 1; /* 讓連結平均分配寬度 */
-        }
-        .navbar a:hover {
-            background-color: #495057;
-        }
-        .navbar a.active {
-            background-color: #007bff;
-            color: white;
-        }
-        .navbar a.home {
-            background-color: #6c757d;
-            flex-grow: 0; /* 首頁按鈕不參與寬度分配 */
-            padding-left: 20px;
-            padding-right: 20px;
-        }
-        .navbar a.home:hover {
-            background-color: #5a6268;
-        }
-        .content {
-            padding: 20px;
-        }
-    </style>
+    <link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body>
     <div class="navbar">
-        <a href="/" class="home">指揮中心</a>
-        <a href="/page1">1. 網址提取</a>
-        <a href="/page2" class="active">2. 批次下載</a>
-        <a href="/page3">3. 檔案處理</a>
-        <a href="/page4">4. AI 分析</a>
-        <a href="/page5">5. 備份管理</a>
+        <a href="/" class="navbar-brand">指揮中心</a>
+        <div class="navbar-toggle" id="navbar-toggle">
+            <span class="bar"></span>
+            <span class="bar"></span>
+            <span class="bar"></span>
+        </div>
+        <ul class="navbar-links" id="navbar-links">
+            <li><a href="/page1">1. 網址提取</a></li>
+            <li><a href="/page2" class="active">2. 批次下載</a></li>
+            <li><a href="/page3">3. 檔案處理</a></li>
+            <li><a href="/page4">4. AI 分析</a></li>
+            <li><a href="/page5">5. 備份管理</a></li>
+        </ul>
     </div>
 
     <div class="content">
-        <h1>頁面二：批次下載</h1>
-        <p>此頁面會列出所有已提取但尚未處理的網址。請勾選您想下載的項目，然後點擊按鈕開始下載。</p>
+        <div class="panel">
+            <h1>頁面二：批次下載</h1>
+            <p>此頁面會列出所有已提取但尚未處理的網址。請勾選您想下載的項目，然後點擊按鈕開始下載。</p>
 
-        <div style="margin-bottom: 10px;">
-            <button id="select-all-button">全選</button>
-            <button id="deselect-all-button">取消全選</button>
+            <div style="margin-bottom: 10px;">
+                <button id="select-all-button">全選</button>
+                <button id="deselect-all-button">取消全選</button>
+            </div>
+
+            <div id="url-list-container">
+                <p>正在載入待處理的網址...</p>
+            </div>
+
+            <div style="margin-top: 20px;">
+                <button id="download-button">開始下載選中項目</button>
+            </div>
         </div>
 
-        <div id="url-list-container">
-            <p>正在載入待處理的網址...</p>
-        </div>
-
-        <div style="margin-top: 20px;">
-            <button id="download-button" style="font-size: 1.2em; padding: 10px;">開始下載選中項目</button>
-        </div>
-
-        <div id="status-area" style="margin-top: 20px; border: 1px solid #ccc; padding: 10px; min-height: 100px; background: #f9f9f9;">
-            <!-- 下載狀態將會顯示在這裡 -->
+        <div class="panel">
+            <h2>狀態日誌</h2>
+            <div id="status-area">
+                <!-- 下載狀態將會顯示在這裡 -->
+            </div>
         </div>
     </div>
 
     <script>
-        document.addEventListener('DOMContentLoaded', async () => {
+        document.addEventListener('DOMContentLoaded', () => {
             const urlListContainer = document.getElementById('url-list-container');
             const selectAllButton = document.getElementById('select-all-button');
             const deselectAllButton = document.getElementById('deselect-all-button');
             const downloadButton = document.getElementById('download-button');
             const statusArea = document.getElementById('status-area');
+            const navbarToggle = document.getElementById('navbar-toggle');
+            const navbarLinks = document.getElementById('navbar-links');
+
+            // --- Hamburger Menu Logic ---
+            navbarToggle.addEventListener('click', () => {
+                navbarLinks.classList.toggle('active');
+            });
+
+            const logStatus = (message, color = 'black') => {
+                const timestamp = new Date().toLocaleTimeString();
+                statusArea.innerHTML = `<p style="color: ${color};">${timestamp}: ${message}</p>` + statusArea.innerHTML;
+            };
 
             const fetchAndRenderUrls = async () => {
                 try {
-                    urlListContainer.innerHTML = '<p>正在載入待處理的網址...</p>';
+                    logStatus('正在從伺服器獲取最新的待處理網址列表...');
                     const response = await fetch('/api/downloader/pending_urls');
-                    if (!response.ok) throw new Error('無法從伺服器獲取網址列表。');
+                    if (!response.ok) throw new Error(`伺服器錯誤 (狀態 ${response.status})`);
 
                     const urls = await response.json();
 
@@ -102,13 +83,14 @@
                         downloadButton.disabled = true;
                         selectAllButton.disabled = true;
                         deselectAllButton.disabled = true;
+                        logStatus('列表為空。');
                         return;
                     }
 
                     let html = '<ul>';
                     urls.forEach(item => {
                         html += `
-                            <li style="list-style-type: none; margin-bottom: 5px;">
+                            <li>
                                 <input type="checkbox" class="url-checkbox" value="${item.id}">
                                 <label>${item.url}</label>
                             </li>
@@ -119,13 +101,14 @@
                     downloadButton.disabled = false;
                     selectAllButton.disabled = false;
                     deselectAllButton.disabled = false;
-
+                    logStatus(`成功載入 ${urls.length} 個待處理的網址。`);
                 } catch (error) {
                     urlListContainer.innerHTML = `<p style="color: red;">載入失敗：${error.message}</p>`;
+                    logStatus(`載入失敗：${error.message}`, 'red');
                 }
             };
 
-            // --- 事件監聽 ---
+            // --- Event Listeners ---
             selectAllButton.addEventListener('click', () => {
                 document.querySelectorAll('.url-checkbox').forEach(cb => cb.checked = true);
             });
@@ -141,7 +124,7 @@
                     return;
                 }
 
-                statusArea.innerHTML = `<p>正在發送下載請求給 ${selectedIds.length} 個項目...</p>`;
+                logStatus(`正在發送下載請求給 ${selectedIds.length} 個項目...`);
 
                 try {
                     const response = await fetch('/api/downloader/start_downloads', {
@@ -155,17 +138,53 @@
                         throw new Error(result.detail || '啟動下載時發生未知錯誤。');
                     }
 
-                    statusArea.innerHTML = `<p style="color: green;">${result.message} 請稍後刷新列表查看狀態。</p>`;
+                    logStatus(result.message, 'green');
                     // 刷新列表以移除已加入佇列的項目
                     await fetchAndRenderUrls();
 
                 } catch (error) {
-                    statusArea.innerHTML = `<p style="color: red;">請求失敗：${error.message}</p>`;
+                    logStatus(`請求失敗：${error.message}`, 'red');
                 }
             });
 
-            // 初始載入
-            await fetchAndRenderUrls();
+            // --- WebSocket Logic for Real-time Updates ---
+            const setupWebSocket = () => {
+                const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                const wsUrl = `${wsProtocol}//${window.location.host}/api/ws`;
+                const ws = new WebSocket(wsUrl);
+
+                ws.onopen = () => {
+                    logStatus('WebSocket 連線成功。等待即時更新...', 'blue');
+                };
+
+                ws.onmessage = (event) => {
+                    const data = JSON.parse(event.data);
+                    logStatus(`收到 WebSocket 訊息: ${data.type}`, 'blue');
+
+                    // 如果有新的 URL 被加入，我們就重新整理列表
+                    if (data.type === 'URLS_EXTRACTED') {
+                        logStatus('偵測到新的 URL 已被提取，正在更新列表...', 'green');
+                        fetchAndRenderUrls();
+                    }
+                    // 也可以監聽下載完成的事件，雖然這個頁面主要關注待辦事項
+                };
+
+                ws.onclose = () => {
+                    logStatus('WebSocket 連線已中斷。5 秒後嘗試重新連線...', 'orange');
+                    setTimeout(setupWebSocket, 5000);
+                };
+
+                ws.onerror = (error) => {
+                    logStatus('WebSocket 發生錯誤。', 'red');
+                    console.error("WebSocket Error:", error);
+                };
+            };
+
+            // Initial Load and Setup
+            (async () => {
+                await fetchAndRenderUrls();
+                setupWebSocket();
+            })();
         });
     </script>
 </body>

@@ -116,6 +116,7 @@ async def lifespan(app: FastAPI):
 
 # --- FastAPI 應用實例 ---
 app = FastAPI(title="鳳凰音訊轉錄儀 API (v3 - 重構)", version="3.0", lifespan=lifespan)
+app.state.manager = manager
 
 # --- 中介軟體 (Middleware) ---
 # JULES: 新增 CORS 中介軟體以允許來自瀏覽器腳本的跨來源請求

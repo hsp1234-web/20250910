@@ -27,10 +27,10 @@ class UrlExtractionRequest(BaseModel):
 
 # --- API 端點 (重構後) ---
 @router.post("/extract_urls", status_code=200)
-async def extract_urls_endpoint(payload: UrlExtractionRequest):
+async def extract_urls_endpoint(payload: UrlExtractionRequest, request: Request):
     """
     接收文字，提取其中的網址，並將其存入資料庫。
-    (此版本經過重構，直接呼叫工具函式，而非使用 subprocess)
+    現在會透過 WebSocket 廣播更新。
     """
     source_text = payload.text
     if not source_text.strip():
@@ -46,6 +46,12 @@ async def extract_urls_endpoint(payload: UrlExtractionRequest):
         # 步驟 2: 如果找到網址，直接呼叫函式將其儲存到資料庫
         if urls_found:
             save_urls_to_db(urls_found, source_text)
+            log.info(f"API: 成功儲存 {count} 個網址，正在廣播通知...")
+            # 步驟 3: 廣播 WebSocket 訊息
+            await request.app.state.manager.broadcast_json({
+                "type": "URLS_EXTRACTED",
+                "payload": {"count": count}
+            })
         else:
             log.info("API: 在提供的文字中未找到任何網址。")
 
