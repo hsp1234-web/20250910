@@ -36,16 +36,28 @@ log = logging.getLogger('url_extractor')
 def extract_urls(text: str) -> list[str]:
     """
     使用正規表示式從給定的文字中提取所有 http/https 網址。
+    此版本經過強化，能更好地處理串接在一起的 URL。
 
     :param text: 要從中提取網址的來源文字。
     :return: 一個包含所有找到的網址的列表。
     """
-    # 這個正規表示式匹配 http:// 或 https:// 開頭的網址
-    # 它會匹配直到遇到空格、換行符或成為字串結尾
+    # 步驟 1: 預處理文字，在每個 "http" 前插入一個空格。
+    # 這有助於分離那些因為缺少空格而串接在一起的 URL。
+    # 例如 "url1https://url2" -> "url1 https://url2"
+    processed_text = re.sub(r'(https?://)', r' \1', text)
+
+    # 步驟 2: 使用一個稍微改良過的正則表示式來匹配 URL。
+    # \S+ 會匹配所有非空白字元，這在大多數情況下是有效的。
     url_pattern = re.compile(r'https?://\S+')
-    urls = url_pattern.findall(text)
-    log.info(f"從文字中提取了 {len(urls)} 個網址。")
-    return urls
+    urls = url_pattern.findall(processed_text)
+
+    # 步驟 3: 清理可能被正則表示式錯誤包含進來的尾隨標點符號。
+    # 例如，如果原文是 "請看 https://example.com."，正則會匹配到 "https://example.com."
+    # 我們需要移除結尾的句號。
+    cleaned_urls = [re.sub(r'[.,;!?\s]+$', '', url) for url in urls]
+
+    log.info(f"從文字中提取了 {len(cleaned_urls)} 個網址。")
+    return cleaned_urls
 
 def save_urls_to_db(urls: list[str], source_text: str):
     """

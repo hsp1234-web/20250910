@@ -1,6 +1,8 @@
 import logging
 import sys
 from pathlib import Path
+import requests
+import json
 
 from fastapi import APIRouter, HTTPException, Request, BackgroundTasks
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -47,14 +49,16 @@ class DownloadRequest(BaseModel):
     ids: List[int]
 
 # --- 背景任務函式 ---
-def run_download_task(url_id: int):
+def run_download_task(url_id: int, port: int):
     """
     這是在背景執行的單一檔案下載任務。
-    它會處理下載、更新資料庫狀態等所有相關邏輯。
+    它會處理下載、更新資料庫狀態，並在最後呼叫內部 API 以觸發 WebSocket 通知。
     """
     log.info(f"背景任務：開始處理下載 URL ID: {url_id}")
     conn = None
-    url_to_download = None
+    final_status = 'failed' # 預設為失敗
+    result_payload = {}
+
     try:
         # 步驟 1: 獲取 URL 資訊
         conn = get_db_connection()
@@ -69,28 +73,25 @@ def run_download_task(url_id: int):
 
         # 步驟 2: 執行下載
         from tools.drive_downloader import download_file
-        # 將檔案下載到專案根目錄下的 'downloads' 資料夾
         download_dir = SRC_DIR.parent / "downloads"
-
-        # 使用 url_id 作為檔名基礎，避免衝突
-        # 注意：我們不知道副檔名，gdown 會自動處理
         file_name = f"download_{url_id}"
-
         downloaded_path = download_file(url_to_download, str(download_dir), file_name)
 
         # 步驟 3: 根據下載結果更新資料庫
         if downloaded_path:
-            # 下載成功
+            final_status = 'completed'
+            result_payload = {"local_path": downloaded_path}
             cursor.execute(
-                "UPDATE extracted_urls SET status = 'completed', local_path = ?, status_message = '下載成功' WHERE id = ?",
-                (downloaded_path, url_id)
+                "UPDATE extracted_urls SET status = ?, local_path = ?, status_message = '下載成功' WHERE id = ?",
+                (final_status, downloaded_path, url_id)
             )
             log.info(f"背景任務：URL ID {url_id} 下載成功，路徑: {downloaded_path}")
         else:
-            # 下載失敗
+            final_status = 'failed'
+            result_payload = {"error": "下載失敗，請檢查日誌"}
             cursor.execute(
-                "UPDATE extracted_urls SET status = 'failed', status_message = '下載失敗，請檢查日誌' WHERE id = ?",
-                (url_id,)
+                "UPDATE extracted_urls SET status = ?, status_message = '下載失敗，請檢查日誌' WHERE id = ?",
+                (final_status, url_id)
             )
             log.error(f"背景任務：URL ID {url_id} 下載失敗。")
 
@@ -98,13 +99,14 @@ def run_download_task(url_id: int):
 
     except Exception as e:
         log.error(f"背景任務：處理 URL ID {url_id} 時發生嚴重錯誤: {e}", exc_info=True)
-        # 如果發生錯誤，也更新資料庫狀態
+        final_status = 'failed'
+        result_payload = {"error": str(e)}
         if conn and url_id:
             try:
                 cursor = conn.cursor()
                 cursor.execute(
-                    "UPDATE extracted_urls SET status = 'failed', status_message = ? WHERE id = ?",
-                    (str(e), url_id)
+                    "UPDATE extracted_urls SET status = ?, status_message = ? WHERE id = ?",
+                    (final_status, str(e), url_id)
                 )
                 conn.commit()
             except Exception as db_err:
@@ -113,9 +115,27 @@ def run_download_task(url_id: int):
         if conn:
             conn.close()
 
+        # 步驟 4: 無論成功或失敗，都呼叫內部 API 來觸發 WebSocket 通知
+        try:
+            # 確保 task_id 在 payload 中是字串
+            notification_payload = {
+                "task_id": str(url_id),
+                "status": final_status,
+                "result": json.dumps(result_payload),
+                "task_type": "download" # 新增類型，幫助後端區分
+            }
+            requests.post(
+                f"http://127.0.0.1:{port}/api/internal/notify_task_update",
+                json=notification_payload,
+                timeout=5
+            )
+            log.info(f"背景任務：已為 URL ID {url_id} 發送完成通知。")
+        except requests.exceptions.RequestException as e:
+            log.error(f"背景任務：為 URL ID {url_id} 發送完成通知時失敗: {e}")
+
 
 @router.post("/start_downloads")
-async def start_downloads(payload: DownloadRequest, background_tasks: BackgroundTasks):
+async def start_downloads(payload: DownloadRequest, background_tasks: BackgroundTasks, request: Request):
     """
     接收要下載的 URL ID 列表，並為每一個 ID 建立一個背景下載任務。
     """
@@ -124,6 +144,11 @@ async def start_downloads(payload: DownloadRequest, background_tasks: Background
         raise HTTPException(status_code=400, detail="未提供要下載的 URL ID。")
 
     log.info(f"API: 收到 {len(url_ids)} 個項目的下載請求。")
+
+    port = request.app.state.port
+    if not port:
+        log.error("API 伺服器埠號尚未被捕獲，無法啟動背景任務。")
+        raise HTTPException(status_code=500, detail="伺服器狀態錯誤，無法獲取通訊埠號。")
 
     conn = None
     try:
@@ -139,7 +164,7 @@ async def start_downloads(payload: DownloadRequest, background_tasks: Background
 
         # 為每個 URL 新增一個背景任務
         for url_id in url_ids:
-            background_tasks.add_task(run_download_task, url_id)
+            background_tasks.add_task(run_download_task, url_id, port)
 
         return JSONResponse(
             content={"message": f"已成功為 {len(url_ids)} 個項目建立背景下載任務。"}

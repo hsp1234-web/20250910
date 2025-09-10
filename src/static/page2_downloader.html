@@ -124,9 +124,13 @@
                 ws.onmessage = (event) => {
                     const data = JSON.parse(event.data);
                     logStatus(`收到 WebSocket 訊息: ${data.type}`, 'blue');
-                    if (data.type === 'URLS_EXTRACTED') {
-                        logStatus('偵測到新的 URL 已被提取，正在更新列表...', 'green');
-                        fetchAndRenderUrls();
+                    if (data.type === 'URLS_EXTRACTED' || data.type === 'DOWNLOAD_COMPLETE') {
+                        let message = data.type === 'URLS_EXTRACTED'
+                            ? '偵測到新的 URL 已被提取，正在更新列表...'
+                            : '偵測到下載任務完成，正在更新列表...';
+                        logStatus(message, 'green');
+                        // 稍作延遲以等待資料庫完全更新
+                        setTimeout(fetchAndRenderUrls, 500);
                     }
                 };
             };
