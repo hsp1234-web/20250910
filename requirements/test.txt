@@ -1,2 +1,13 @@
 httpx
 pytest
+pytest-asyncio
+python-docx
+PyMuPDF
+Pillow
+python-pptx
+fpdf2
+requests
+fastapi
+Jinja2
+gdown
+filetype

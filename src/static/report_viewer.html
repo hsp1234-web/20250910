@@ -96,7 +96,7 @@
             titleElement.textContent = `報告檢視 (ID: ${fileId})`;
 
             try {
-                const response = await fetch(`/api/report/${fileId}`);
+                const response = await fetch(`/api/processor/report/${fileId}`);
                 if (!response.ok) {
                     const errorData = await response.json();
                     throw new Error(errorData.detail || `伺服器錯誤 (狀態 ${response.status})`);
