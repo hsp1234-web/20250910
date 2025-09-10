@@ -11,30 +11,50 @@ log = logging.getLogger(__name__)
 # --- 資料庫路徑設定 ---
 DB_FILE = Path(__file__).parent / "tasks.db"
 
+import os
+
 def get_db_connection():
-    """建立並回傳一個資料庫連線。"""
+    """
+    建立並回傳一個資料庫連線。
+    在測試環境中，會優先使用 TEST_DB_PATH 環境變數指定的資料庫路徑。
+    """
+    # 檢查是否有測試專用的資料庫路徑環境變數
+    db_path = os.environ.get("TEST_DB_PATH") or DB_FILE
+    log.debug(f"正在連線到資料庫: {db_path}")
     try:
         # isolation_level=None 會開啟 autocommit 模式，但我們將手動管理交易
-        conn = sqlite3.connect(DB_FILE, timeout=10) # 增加 timeout
+        conn = sqlite3.connect(db_path, timeout=10) # 增加 timeout
         conn.row_factory = sqlite3.Row # 將回傳結果設定為類似 dict 的物件
         # 啟用 WAL (Write-Ahead Logging) 模式以提高併發性
-        conn.execute("PRAGMA journal_mode=WAL")
+        if db_path != ":memory:": # WAL 模式不完全支援記憶體資料庫
+            conn.execute("PRAGMA journal_mode=WAL")
         return conn
     except sqlite3.Error as e:
         log.error(f"資料庫連線失敗: {e}")
         return None
 
-def initialize_database():
+def initialize_database(conn: sqlite3.Connection = None):
     """
-    初始化資料庫。如果 `tasks` 資料表不存在，就建立它。
+    初始化資料庫。如果資料表不存在，就建立它們。
+    這個函式現在可以接受一個外部的資料庫連線物件，以便在測試中
+    對記憶體資料庫進行操作。
+
+    :param conn: 一個可選的 sqlite3.Connection 物件。如果未提供，
+                 函式會自己建立一個連線到預設的資料庫檔案。
     """
-    log.info(f"正在檢查並初始化資料庫於: {DB_FILE}")
-    # 在嘗試連線前，確保父目錄存在
-    DB_FILE.parent.mkdir(parents=True, exist_ok=True)
-    conn = get_db_connection()
-    if not conn:
-        log.critical("無法建立資料庫連線，初始化失敗。")
-        return
+    log.info(f"正在檢查並初始化資料庫...")
+
+    # 標記是否需要在此函式結束時關閉連線
+    close_conn_at_end = False
+    if conn is None:
+        # 在嘗試連線前，確保父目錄存在
+        DB_FILE.parent.mkdir(parents=True, exist_ok=True)
+        conn = get_db_connection()
+        if not conn:
+            log.critical("無法建立資料庫連線，初始化失敗。")
+            return
+        close_conn_at_end = True
+        log.info(f"使用預設資料庫檔案: {DB_FILE}")
 
     try:
         with conn: # 使用 with 陳述式來自動管理交易
@@ -164,7 +184,8 @@ def initialize_database():
     except sqlite3.Error as e:
         log.error(f"初始化資料庫時發生錯誤: {e}")
     finally:
-        if conn:
+        # 只在函式內部自己建立連線時才關閉它
+        if close_conn_at_end and conn:
             conn.close()
 
 
