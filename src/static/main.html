@@ -3,39 +3,29 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>鳳凰指揮中心</title>
+    <title>鳳凰主頁</title>
     <link rel="stylesheet" href="/static/css/main.css">
 </head>
 <body>
     <div class="navbar">
-        <a href="/" class="navbar-brand">鳳凰指揮中心</a>
-        <div class="navbar-toggle" id="navbar-toggle">
-            <span class="bar"></span>
-            <span class="bar"></span>
-            <span class="bar"></span>
-        </div>
+        <!-- 根據使用者要求，標題已更新，右上角的漢堡圖示已移除 -->
+        <a href="/" class="navbar-brand">鳳凰主頁</a>
         <ul class="navbar-links" id="navbar-links">
-            <!-- 根據新的導覽架構，子頁面連結已移至主選單頁面 -->
+            <!-- 根據新的導覽架構，此處不需連結 -->
         </ul>
     </div>
 
     <div class="content">
         <div class="panel" style="text-align: center;">
-            <h1>歡迎來到鳳凰指揮中心</h1>
+            <!-- 根據使用者要求，標題已更新 -->
+            <h1>歡迎來到鳳凰主頁</h1>
             <p>請選擇您要使用的功能模組。</p>
             <a href="/static/mp3.html" class="button">音訊轉錄儀</a>
-            <a href="/menu" class="button secondary">文件分析儀</a>
+            <!-- 根據使用者要求，連結已修正，指向 page1 -->
+            <a href="/page1" class="button secondary">文件分析儀</a>
         </div>
     </div>
 
-    <script>
-        // JavaScript to toggle the hamburger menu
-        const navbarToggle = document.getElementById('navbar-toggle');
-        const navbarLinks = document.getElementById('navbar-links');
-
-        navbarToggle.addEventListener('click', () => {
-            navbarLinks.classList.toggle('active');
-        });
-    </script>
+    <!-- 根據使用者要求，用於切換漢堡選單的 JavaScript 已移除 -->
 </body>
 </html>

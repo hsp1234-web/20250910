@@ -4,12 +4,20 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>頁面一：網址提取</title>
+    <link rel="stylesheet" href="/static/css/nav.css">
     <link rel="stylesheet" href="/static/css/page1.css">
 </head>
 <body>
-    <header class="page-header">
-        <a href="/menu" class="back-to-menu">« 返回主選單</a>
-    </header>
+    <nav class="top-nav">
+        <ul>
+            <li><a href="/">鳳凰主頁</a></li>
+            <li><a href="/page1" class="active">網址提取</a></li>
+            <li><a href="/page2">批次下載</a></li>
+            <li><a href="/page3">檔案處理</a></li>
+            <li><a href="/page4">AI 分析</a></li>
+            <li><a href="/page5">備份管理</a></li>
+        </ul>
+    </nav>
 
     <div class="content">
         <h1>頁面一：網址提取與查詢</h1>
@@ -48,14 +56,10 @@
             try {
                 const response = await fetch('/api/ingestion/extract_urls', {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
+                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ text: text }),
                 });
-
                 const result = await response.json();
-
                 if (response.ok) {
                     statusMessage.textContent = `成功！${result.message} 提取到 ${result.urls_found_count} 個網址。`;
                     statusMessage.style.color = 'green';
@@ -69,52 +73,37 @@
             }
         });
 
-        // --- 搜尋功能邏輯 ---
         const searchInput = document.getElementById('search-input');
         const searchButton = document.getElementById('search-button');
         const searchResults = document.getElementById('search-results');
-
         const performSearch = async () => {
             const query = searchInput.value.trim();
             if (!query) {
                 searchResults.innerHTML = '<p style="color: orange;">請輸入查詢關鍵字。</p>';
                 return;
             }
-
             searchResults.innerHTML = '<p>正在查詢中...</p>';
-
             try {
                 const response = await fetch(`/api/ingestion/search_urls?q=${encodeURIComponent(query)}`);
                 const results = await response.json();
-
-                if (!response.ok) {
-                    throw new Error(results.detail || '搜尋時發生錯誤');
-                }
-
+                if (!response.ok) throw new Error(results.detail || '搜尋時發生錯誤');
                 if (results.length === 0) {
                     searchResults.innerHTML = '<p>找不到符合條件的網址。</p>';
                     return;
                 }
-
                 let html = '<ul>';
                 results.forEach(item => {
                     html += `<li>${item.url} <small>(提取於: ${item.created_at})</small></li>`;
                 });
                 html += '</ul>';
                 searchResults.innerHTML = html;
-
             } catch (error) {
                 searchResults.innerHTML = `<p style="color: red;">查詢失敗：${error.message}</p>`;
             }
         };
-
         searchButton.addEventListener('click', performSearch);
-
-        // 讓使用者按下 Enter 鍵也能觸發搜尋
         searchInput.addEventListener('keyup', (event) => {
-            if (event.key === 'Enter') {
-                performSearch();
-            }
+            if (event.key === 'Enter') performSearch();
         });
     </script>
 </body>
