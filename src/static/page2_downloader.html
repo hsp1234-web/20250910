@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>頁面二：批次下載</title>
     <link rel="stylesheet" href="/static/css/nav.css">
+    <link rel="stylesheet" href="/static/css/common.css">
     <link rel="stylesheet" href="/static/css/page2.css">
 </head>
 <body>
@@ -39,7 +40,10 @@
         </div>
 
         <div class="panel">
-            <h2>狀態日誌</h2>
+            <div class="panel-header">
+                <h2>狀態日誌</h2>
+                <button id="copy-log-button" class="copy-button" title="複製日誌">📄</button>
+            </div>
             <div id="status-area">
                 <!-- 下載狀態將會顯示在這裡 -->
             </div>
@@ -62,8 +66,25 @@
             const statusArea = document.getElementById('status-area');
             const completedListContainer = document.getElementById('completed-list-container');
 
+            const formatTaipeiTime = (isoString) => {
+                if (!isoString) return '無效時間';
+                // 創建一個 Date 物件。JS Date 會自動處理 ISO 8601 字串（包含 Z 或時區偏移）
+                // 並將其轉換為瀏覽器本地時區。由於我們的後端和資料庫都已統一為台北時間，
+                // 這裡的轉換是可靠的。
+                const date = new Date(isoString);
+
+                const year = date.getFullYear();
+                const month = (date.getMonth() + 1).toString().padStart(2, '0');
+                const day = date.getDate().toString().padStart(2, '0');
+                const hours = date.getHours().toString().padStart(2, '0');
+                const minutes = date.getMinutes().toString().padStart(2, '0');
+                const seconds = date.getSeconds().toString().padStart(2, '0');
+
+                return `${year}/${month}/${day} ${hours}:${minutes}:${seconds}`;
+            };
+
             const logStatus = (message, color = 'black') => {
-                const timestamp = new Date().toLocaleTimeString();
+                const timestamp = formatTaipeiTime(new Date().toISOString());
                 statusArea.insertAdjacentHTML('afterbegin', `<p style="color: ${color};">${timestamp}: ${message}</p>`);
             };
 
@@ -159,7 +180,7 @@
 
                     let html = '<ul>';
                     files.forEach(file => {
-                        const completedDate = new Date(file.completed_at).toLocaleString('zh-TW');
+                        const completedDate = formatTaipeiTime(file.completed_at);
                         html += `<li>- '${file.filename}' (${completedDate})</li>`;
                     });
                     html += '</ul>';
@@ -168,6 +189,23 @@
                     completedListContainer.innerHTML = `<p style="color: red;">載入已完成列表失敗：${error.message}</p>`;
                 }
             };
+
+            const copyLogButton = document.getElementById('copy-log-button');
+            copyLogButton.addEventListener('click', () => {
+                const logContent = statusArea.innerText;
+                navigator.clipboard.writeText(logContent).then(() => {
+                    const originalIcon = copyLogButton.innerText;
+                    copyLogButton.innerText = '✅';
+                    copyLogButton.disabled = true;
+                    setTimeout(() => {
+                        copyLogButton.innerText = originalIcon;
+                        copyLogButton.disabled = false;
+                    }, 3000);
+                }).catch(err => {
+                    console.error('無法複製日誌: ', err);
+                    alert('複製失敗，請手動複製。');
+                });
+            });
 
             (async () => {
                 await Promise.all([
