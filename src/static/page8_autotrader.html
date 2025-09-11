@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>頁面八：自動交易分析</title>
+    <link rel="stylesheet" href="/static/css/nav.css">
+    <link rel="stylesheet" href="/static/css/page4.css"> <!-- 借用頁面四的樣式 -->
+    <style>
+        .status-badge {
+            padding: 0.2em 0.6em;
+            border-radius: 0.8em;
+            font-size: 0.8em;
+            color: white;
+            font-weight: bold;
+            white-space: nowrap;
+        }
+        .status-PENDING { background-color: #a0aec0; } /* gray */
+        .status-PROCESSING, .status-STAGE_1_EXTRACTING { background-color: #4299e1; } /* blue */
+        .status-COMPLETE { background-color: #48bb78; } /* green */
+        .status-ERROR { background-color: #f56565; } /* red */
+
+        .progress-bar-container {
+            width: 100%;
+            background-color: #e2e8f0; /* slate-200 */
+            border-radius: 9999px;
+            height: 0.75rem;
+        }
+        .progress-bar-fill {
+            background-color: #4299e1; /* blue-500 */
+            height: 100%;
+            border-radius: 9999px;
+            transition: width 0.5s ease-in-out;
+        }
+        .progress-bar-fill.bg-green-500 { background-color: #48bb78; }
+        .progress-bar-fill.bg-red-500 { background-color: #f56565; }
+    </style>
+</head>
+<body>
+    <nav class="top-nav">
+        <ul>
+            <li><a href="/">鳳凰主頁</a></li>
+            <li><a href="/page1">網址提取</a></li>
+            <li><a href="/page2">批次下載</a></li>
+            <li><a href="/page3">檔案處理</a></li>
+            <li><a href="/page4">AI 分析 (舊)</a></li>
+            <li><a href="/page5">備份管理</a></li>
+            <li><a href="/page6">金鑰管理</a></li>
+            <li><a href="/page7">提示詞管理</a></li>
+            <li><a href="/page8" class="active">自動交易分析</a></li>
+        </ul>
+    </nav>
+
+    <div class="content">
+        <div class="analysis-starter">
+            <h1>啟動新的自動交易分析</h1>
+            <p>請選擇一個已處理完成的檔案，系統將根據預設的交易分析流程進行處理。</p>
+
+            <div class="form-group">
+                <label for="file-select">選擇檔案:</label>
+                <select id="file-select" name="file-select">
+                    <option value="">正在載入檔案...</option>
+                </select>
+            </div>
+
+            <button id="start-analysis-btn">啟動分析</button>
+            <div id="start-status"></div>
+        </div>
+
+        <hr class="divider">
+
+        <div class="history-section">
+            <h2>分析任務歷史紀錄</h2>
+            <table id="history-table">
+                <thead>
+                    <tr>
+                        <th>任務ID</th>
+                        <th>狀態</th>
+                        <th>進度</th>
+                        <th>建立時間</th>
+                        <th>報告</th>
+                    </tr>
+                </thead>
+                <tbody id="history-tbody"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const fileSelect = document.getElementById('file-select');
+            const startBtn = document.getElementById('start-analysis-btn');
+            const startStatusDiv = document.getElementById('start-status');
+            const historyTbody = document.getElementById('history-tbody');
+
+            let socket;
+
+            const connectWebSocket = () => {
+                const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                const wsUrl = `${wsProtocol}//${window.location.host}/ws/status`;
+                socket = new WebSocket(wsUrl);
+
+                socket.onopen = () => console.log("WebSocket 連線已建立。");
+                socket.onmessage = (event) => {
+                    console.log("收到 WebSocket 訊息:", event.data);
+                    const data = JSON.parse(event.data);
+                    if (data.type === 'STATUS_UPDATE') {
+                        updateTaskInTable(data.payload);
+                    }
+                };
+                socket.onclose = () => {
+                    console.log("WebSocket 連線已關閉。5秒後嘗試重新連線...");
+                    setTimeout(connectWebSocket, 5000);
+                };
+                socket.onerror = (error) => console.error("WebSocket 發生錯誤:", error);
+            };
+
+            const populateFiles = async () => {
+                try {
+                    const response = await fetch('/api/analyzer/processed_files');
+                    if (!response.ok) throw new Error('無法獲取檔案列表');
+                    const files = await response.json();
+                    fileSelect.innerHTML = '<option value="">-- 請選擇一個檔案 --</option>';
+                    if (files.length > 0) {
+                        files.forEach(file => {
+                            const option = new Option(file.filename, file.id);
+                            fileSelect.add(option);
+                        });
+                    } else {
+                        fileSelect.innerHTML = '<option value="">沒有可分析的檔案</option>';
+                        fileSelect.disabled = true;
+                    }
+                } catch (error) {
+                    fileSelect.innerHTML = `<option value="">載入失敗: ${error.message}</option>`;
+                }
+            };
+
+            const renderTaskRow = (task) => {
+                const rowId = `task-row-${task.id}`;
+                let row = document.getElementById(rowId);
+                if (!row) {
+                    row = document.createElement('tr');
+                    row.id = rowId;
+                    historyTbody.prepend(row); // 新任務加到最上面
+                }
+
+                const statusBadge = `<span class="status-badge status-${task.status}">${task.status}</span>`;
+                const reportLink = task.status === 'COMPLETE' && task.final_report_path
+                    ? `<a href="${task.final_report_path}" target="_blank">查看報告</a>`
+                    : 'N/A';
+
+                const progressHtml = `
+                    <div class="progress-bar-container">
+                        <div class="progress-bar-fill" style="width: 0%;" id="progress-${task.id}"></div>
+                    </div>
+                    <span id="progress-msg-${task.id}" class="text-sm text-slate-600"></span>
+                `;
+
+                row.innerHTML = `
+                    <td>${task.id}</td>
+                    <td id="status-${task.id}">${statusBadge}</td>
+                    <td>${progressHtml}</td>
+                    <td>${new Date(task.created_at).toLocaleString()}</td>
+                    <td id="report-${task.id}">${reportLink}</td>
+                `;
+                return row;
+            };
+
+            const updateTaskInTable = (update) => {
+                const rowId = `task-row-${update.taskId}`;
+                let row = document.getElementById(rowId);
+                if (!row) { // 如果任務是新的，先渲染整行
+                    fetchTasks(); // 重新獲取整個列表以包含新任務
+                    return;
+                }
+
+                const statusCell = document.getElementById(`status-${update.taskId}`);
+                const progressBar = document.getElementById(`progress-${update.taskId}`);
+                const progressMsg = document.getElementById(`progress-msg-${update.taskId}`);
+                const reportCell = document.getElementById(`report-${update.taskId}`);
+
+                if (statusCell) statusCell.innerHTML = `<span class="status-badge status-${update.status}">${update.status}</span>`;
+                if (progressBar) progressBar.style.width = `${update.progress}%`;
+                if (progressMsg) progressMsg.textContent = update.message;
+
+                if (update.status === 'COMPLETE') {
+                    if (progressBar) progressBar.classList.add('bg-green-500');
+                    if (reportCell) reportCell.innerHTML = `<a href="/reports/..." target="_blank">查看報告</a>`; // Placeholder
+                } else if (update.status === 'ERROR') {
+                    if (progressBar) progressBar.classList.add('bg-red-500');
+                    if (progressMsg) progressMsg.textContent = `錯誤: ${update.message}`;
+                }
+            };
+
+            const fetchTasks = async () => {
+                try {
+                    const response = await fetch('/api/analyzer/analysis_tasks');
+                    if (!response.ok) throw new Error('無法獲取任務列表');
+                    const tasks = await response.json();
+                    historyTbody.innerHTML = '';
+                    if (tasks.length === 0) {
+                        historyTbody.innerHTML = '<tr><td colspan="5">目前沒有任何分析任務。</td></tr>';
+                    } else {
+                        tasks.forEach(task => renderTaskRow(task));
+                    }
+                } catch (error) {
+                    console.error('Failed to fetch tasks:', error);
+                    historyTbody.innerHTML = `<tr><td colspan="5">載入歷史失敗: ${error.message}</td></tr>`;
+                }
+            };
+
+            startBtn.addEventListener('click', async () => {
+                const fileId = fileSelect.value;
+                if (!fileId) {
+                    alert('請務必選擇一個檔案。');
+                    return;
+                }
+
+                startStatusDiv.textContent = '正在提交分析請求...';
+                try {
+                    const response = await fetch('/api/analyzer/start_analysis', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({ file_id: parseInt(fileId, 10) })
+                    });
+                    const result = await response.json();
+                    if (!response.ok) throw new Error(result.detail || '啟動分析時發生未知錯誤。');
+                    startStatusDiv.textContent = result.message;
+                    setTimeout(() => fetchTasks(), 1000); // 稍等一下再刷新列表
+                } catch (error) {
+                    startStatusDiv.textContent = `請求失敗：${error.message}`;
+                }
+            });
+
+            // --- 初始化 ---
+            populateFiles();
+            fetchTasks();
+            connectWebSocket();
+        });
+    </script>
+</body>
+</html>
