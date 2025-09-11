@@ -4,4 +4,4 @@ psutil==5.9.8
 Jinja2==3.1.4
 requests
 pytz
-python-magic
+filetype==1.2.0

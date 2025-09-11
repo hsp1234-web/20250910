@@ -10,3 +10,4 @@ requests
 fastapi
 Jinja2
 gdown
+filetype

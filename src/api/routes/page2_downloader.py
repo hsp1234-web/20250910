@@ -92,28 +92,28 @@ def run_download_task(url_id: int, port: int):
     result_payload = {}
 
     try:
-        # 步驟 1: 獲取 URL 與建立時間
+        # 步驟 1: 獲取 URL 和 created_at 資訊
         conn = get_db_connection()
         cursor = conn.cursor()
-        # 同時獲取 url 和 created_at
         cursor.execute("SELECT url, created_at FROM extracted_urls WHERE id = ?", (url_id,))
         row = cursor.fetchone()
         if not row:
             raise ValueError(f"在資料庫中找不到 ID 為 {url_id} 的 URL。")
 
         url_to_download = row['url']
-        created_at = row['created_at'] # 獲取建立時間
-        log.info(f"背景任務：準備從 {url_to_download} 下載 (建立於: {created_at})...")
+        created_at_str = row['created_at']
+        log.info(f"背景任務：準備從 {url_to_download} 下載 (建立時間: {created_at_str})...")
 
-        # 步驟 2: 執行下載
+        # 步驟 2: 執行智慧化下載
         from tools.drive_downloader import download_file
         download_dir = SRC_DIR.parent / "downloads"
-        # 將 url_id 和 created_at 傳遞給下載器
+
+        # 呼叫新的下載函式，傳入必要的 ID 和時間戳
         downloaded_path = download_file(
             url=url_to_download,
             output_dir=str(download_dir),
             url_id=url_id,
-            created_at=created_at
+            created_at_str=created_at_str
         )
 
         # 步驟 3: 根據下載結果更新資料庫
@@ -126,7 +126,7 @@ def run_download_task(url_id: int, port: int):
             )
             log.info(f"背景任務：URL ID {url_id} 下載成功，路徑: {downloaded_path}")
         else:
-            final_status = 'failed'
+            final_status = 'download_failed' # 使用更具體的狀態
             result_payload = {"error": "下載失敗，請檢查日誌"}
             cursor.execute(
                 "UPDATE extracted_urls SET status = ?, status_message = '下載失敗，請檢查日誌' WHERE id = ?",

@@ -89,15 +89,15 @@ async def get_report_content(file_id: int):
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute(
-            "SELECT extracted_image_paths FROM extracted_urls WHERE id = ? AND status = 'processed'",
+            "SELECT extracted_text, extracted_image_paths FROM extracted_urls WHERE id = ? AND status = 'processed'",
             (file_id,)
         )
         row = cursor.fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="找不到指定 ID 的已處理報告。")
 
-        # 模擬文字內容
-        placeholder_text = "這裡是從文件中提取的文字內容的預留位置。未來的版本將會實作文字提取功能。"
+        # 從資料庫獲取真實的文字內容
+        text_content = row['extracted_text'] or "沒有可用的文字內容。"
 
         # 處理圖片
         compressed_image_paths = []
@@ -106,20 +106,17 @@ async def get_report_content(file_id: int):
             original_image_paths = json.loads(original_image_paths_json)
 
             # 定義壓縮圖片的儲存目錄
-            # SRC_DIR 是 src，我們希望存到專案根目錄下的 downloads/compressed_images
             compressed_output_dir = SRC_DIR.parent / "downloads" / "compressed_images"
 
             for img_path in original_image_paths:
                 compressed_path = compress_image(img_path, str(compressed_output_dir))
                 if compressed_path:
                     # 我們需要回傳一個可從前端訪問的相對 URL 路徑
-                    # 假設 'downloads' 在專案根目錄，且 FastAPI 靜態檔案設定會處理它
-                    # 我們需要將絕對路徑轉換為相對 web 路徑
                     web_path = Path(compressed_path).relative_to(SRC_DIR.parent).as_posix()
                     compressed_image_paths.append(web_path)
 
         return JSONResponse(content={
-            "text_content": placeholder_text,
+            "text_content": text_content,
             "image_paths": compressed_image_paths
         })
 
@@ -139,7 +136,7 @@ def run_processing_task(url_id: int, port: int):
 
     log.info(f"背景任務：開始處理檔案 URL ID: {url_id}")
     conn = None
-    final_status = 'failed'
+    final_status = 'processing_failed' # 預設為失敗
     result_payload = {}
     file_path = None  # 初始化 file_path 以確保在 finally 區塊中可用
 
@@ -161,17 +158,20 @@ def run_processing_task(url_id: int, port: int):
 
         image_output_dir = file_path.parent / "extracted_images"
         content_data = extract_content(str(file_path), str(image_output_dir))
+
+        # 從提取結果中獲取文字和圖片路徑
+        text_content = content_data.get("text", "") if content_data else ""
         image_paths_json = json.dumps(content_data.get("image_paths", [])) if content_data else "[]"
 
         final_status = 'processed'
-        result_payload = {"file_hash": file_hash, "image_paths": image_paths_json}
+        result_payload = {"file_hash": file_hash, "image_paths": image_paths_json, "text_length": len(text_content)}
         cursor.execute(
             """
             UPDATE extracted_urls
-            SET status = ?, status_message = '處理成功', file_hash = ?, extracted_image_paths = ?
+            SET status = ?, status_message = '處理成功', file_hash = ?, extracted_image_paths = ?, extracted_text = ?
             WHERE id = ?
             """,
-            (final_status, file_hash, image_paths_json, url_id)
+            (final_status, file_hash, image_paths_json, text_content, url_id)
         )
         conn.commit()
         log.info(f"背景任務：URL ID {url_id} 處理成功。")
