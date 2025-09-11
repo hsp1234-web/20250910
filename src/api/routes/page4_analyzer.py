@@ -155,16 +155,31 @@ def run_ai_analysis_task(file_ids: List[int], server_port: int):
 
 @router.get("/processed_files")
 async def get_processed_files():
-    """獲取所有狀態為 'processed' 的檔案列表。"""
+    """獲取所有可供分析或已分析的檔案列表（狀態為 'processed', 'analyzed', 'error'）。"""
     conn = None
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        # 現在我們選擇狀態為 'processed' 或 'analyzed' (如果允許重新分析)
-        # 為了簡單起見，我們只選擇 'processed'
-        cursor.execute("SELECT id, url, local_path FROM extracted_urls WHERE status = 'processed' ORDER BY created_at DESC")
+        # 選擇所有相關狀態的檔案
+        sql = """
+            SELECT id, url, local_path, status, status_message
+            FROM extracted_urls
+            WHERE status IN ('processed', 'analyzed', 'error')
+            ORDER BY created_at DESC
+        """
+        cursor.execute(sql)
         rows = cursor.fetchall()
-        results = [{"id": row['id'], "url": row['url'], "filename": Path(row['local_path']).name} for row in rows if row['local_path']]
+
+        results = []
+        for row in rows:
+            if row['local_path']:
+                results.append({
+                    "id": row['id'],
+                    "url": row['url'],
+                    "filename": Path(row['local_path']).name,
+                    "status": row['status'],
+                    "status_message": row['status_message']
+                })
         return results
     except Exception as e:
         log.error(f"API: 獲取已處理檔案時發生錯誤: {e}", exc_info=True)
@@ -195,25 +210,29 @@ async def start_analysis(request: Request, payload: AnalysisRequest, background_
 
 @router.get("/reports")
 async def get_reports():
-    """獲取所有已生成的分析報告列表。"""
+    """獲取所有已生成的分析報告列表，並提供可公開訪問的 URL。"""
     conn = None
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
         sql = """
-            SELECT r.id, r.report_path, r.created_at, u.url
+            SELECT r.id, r.report_path, r.created_at, u.url, u.id as source_file_id
             FROM reports r
             JOIN extracted_urls u ON r.source_url_id = u.id
             ORDER BY r.created_at DESC
         """
         cursor.execute(sql)
         rows = cursor.fetchall()
-        results = [{
-            "id": row['id'],
-            "report_path": row['report_path'],
-            "created_at": row['created_at'],
-            "source_url": row['url']
-        } for row in rows]
+        results = []
+        for row in rows:
+            report_path = Path(row['report_path'])
+            results.append({
+                "id": row['id'],
+                "report_url": f"/reports/{report_path.name}", # 產生可公開訪問的 URL
+                "created_at": row['created_at'],
+                "source_url": row['url'],
+                "source_file_id": row['source_file_id'] # 將原始檔案ID也一併回傳
+            })
         return results
     except Exception as e:
         log.error(f"API: 獲取報告列表時發生錯誤: {e}", exc_info=True)

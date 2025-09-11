@@ -164,6 +164,18 @@
         });
 
         fetchKeys();
+
+        const centerActiveNavButton = () => {
+            const activeNavButton = document.querySelector('.top-nav a.active');
+            if (activeNavButton) {
+                activeNavButton.scrollIntoView({
+                    behavior: 'smooth',
+                    inline: 'center',
+                    block: 'nearest'
+                });
+            }
+        };
+        setTimeout(centerActiveNavButton, 100);
     });
     </script>
 </body>

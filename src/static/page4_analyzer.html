@@ -65,6 +65,7 @@
 
     <script>
         document.addEventListener('DOMContentLoaded', () => {
+            let allReportsData = []; // 用於儲存所有報告的資料，方便查找
             const fileListContainer = document.getElementById('file-list-container');
             const selectAllButton = document.getElementById('select-all-button');
             const deselectAllButton = document.getElementById('deselect-all-button');
@@ -97,13 +98,13 @@
 
             const fetchAndRenderFiles = async () => {
                 try {
-                    logStatus('正在獲取可分析的檔案列表...');
+                    logStatus('正在獲取檔案列表...');
                     const response = await fetch('/api/analyzer/processed_files');
                     if (!response.ok) throw new Error(`伺服器錯誤 (狀態 ${response.status})`);
                     const files = await response.json();
 
                     if (files.length === 0) {
-                        fileListContainer.innerHTML = '<p>目前沒有已處理完成、可供分析的檔案。</p>';
+                        fileListContainer.innerHTML = '<p>目前沒有可供分析或已分析的檔案。</p>';
                         startAnalysisBtn.disabled = true;
                         selectAllButton.disabled = true;
                         deselectAllButton.disabled = true;
@@ -116,62 +117,125 @@
                             <thead>
                                 <tr>
                                     <th><input type="checkbox" id="select-all-header-checkbox"></th>
-                                    <th>檔案名稱</th>
-                                    <th>原始連結</th>
+                                    <th>檔案名稱 (點擊查看原始連結)</th>
+                                    <th>狀態</th>
+                                    <th>動作</th>
                                 </tr>
                             </thead>
                             <tbody>`;
+
+                    let hasProcessableFiles = false;
                     files.forEach(file => {
+                        let checkboxHtml = '<td></td>';
+                        let actionsHtml = '<td>-</td>';
+
+                        const statusMap = {
+                            'processed': '<span class="status-processed">可供分析</span>',
+                            'analyzing': '<span class="status-analyzing">正在分析...</span>',
+                            'analyzed': '<span class="status-analyzed">分析完成</span>',
+                            'error': `<span class="status-error" title="${file.status_message || ''}">分析失敗</span>`
+                        };
+                        const statusDisplay = statusMap[file.status] || file.status;
+
+                        if (file.status === 'processed') {
+                            checkboxHtml = `<td><input type="checkbox" class="file-checkbox" value="${file.id}"></td>`;
+                            hasProcessableFiles = true;
+                        } else if (file.status === 'analyzed') {
+                            actionsHtml = `
+                                <td>
+                                    <button class="view-report-btn" data-file-id="${file.id}">查看報告</button>
+                                    <button class="reanalyze-btn" data-file-id="${file.id}">重新分析</button>
+                                </td>`;
+                        } else if (file.status === 'error') {
+                            actionsHtml = `
+                                <td>
+                                    <button class="retry-btn" data-file-id="${file.id}">重試</button>
+                                    <button class="view-error-btn" title="${file.status_message || '無詳細資訊'}">查看錯誤</button>
+                                </td>`;
+                        }
+
                         html += `
                             <tr>
-                                <td><input type="checkbox" class="file-checkbox" value="${file.id}"></td>
-                                <td>${file.filename}</td>
-                                <td class="url-cell"><a href="${file.url}" title="${file.url}" target="_blank">${file.url}</a></td>
+                                ${checkboxHtml}
+                                <td><a href="${file.url}" title="原始連結：${file.url}" target="_blank">${file.filename}</a></td>
+                                <td>${statusDisplay}</td>
+                                ${actionsHtml}
                             </tr>`;
                     });
                     html += '</tbody></table>';
                     fileListContainer.innerHTML = html;
 
-                    document.getElementById('select-all-header-checkbox').addEventListener('change', (e) => {
-                        document.querySelectorAll('.file-checkbox').forEach(cb => cb.checked = e.target.checked);
-                    });
+                    const headerCheckbox = document.getElementById('select-all-header-checkbox');
+                    if (headerCheckbox) {
+                        headerCheckbox.addEventListener('change', (e) => {
+                            document.querySelectorAll('.file-checkbox').forEach(cb => cb.checked = e.target.checked);
+                        });
+                        headerCheckbox.disabled = !hasProcessableFiles;
+                    }
 
-                    startAnalysisBtn.disabled = false;
-                    selectAllButton.disabled = false;
-                    deselectAllButton.disabled = false;
-                    logStatus(`成功載入 ${files.length} 個可分析的檔案。`);
+                    startAnalysisBtn.disabled = !hasProcessableFiles;
+                    selectAllButton.disabled = !hasProcessableFiles;
+                    deselectAllButton.disabled = !hasProcessableFiles;
+
+                    logStatus(`成功載入 ${files.length} 個檔案。`);
 
                 } catch (error) {
-                    const errorMsg = `載入可分析檔案列表失敗：${error.message}`;
+                    const errorMsg = `載入檔案列表失敗：${error.message}`;
                     fileListContainer.innerHTML = `<p style="color: red;">${errorMsg}</p>`;
                     logStatus(errorMsg, 'red');
+                }
+            };
+
+            const startAnalysis = async (fileIds) => {
+                if (!fileIds || fileIds.length === 0) {
+                    alert('沒有提供要分析的項目 ID。');
+                    return;
+                }
+                logStatus(`正在為 ${fileIds.length} 個項目發送分析請求...`);
+                try {
+                    const response = await fetch('/api/analyzer/start_analysis', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({ file_ids: fileIds })
+                    });
+                    const result = await response.json();
+                    if (!response.ok) throw new Error(result.detail || '啟動分析時發生未知錯誤。');
+                    logStatus(result.message, 'green');
+                    await fetchAndRenderFiles();
+                } catch (error) {
+                    logStatus(`請求失敗：${error.message}`, 'red');
                 }
             };
 
             selectAllButton.addEventListener('click', () => document.querySelectorAll('.file-checkbox').forEach(cb => cb.checked = true));
             deselectAllButton.addEventListener('click', () => document.querySelectorAll('.file-checkbox').forEach(cb => cb.checked = false));
 
-            startAnalysisBtn.addEventListener('click', async () => {
+            startAnalysisBtn.addEventListener('click', () => {
                 const selectedIds = Array.from(document.querySelectorAll('.file-checkbox:checked')).map(cb => parseInt(cb.value, 10));
                 if (selectedIds.length === 0) {
                     alert('請至少選擇一個要分析的項目。');
                     return;
                 }
-                logStatus(`正在為 ${selectedIds.length} 個項目發送分析請求...`);
-                try {
-                    // 後端將會被修改為接收一個 ID 列表
-                    const response = await fetch('/api/analyzer/start_analysis', {
-                        method: 'POST',
-                        headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({ file_ids: selectedIds }) // 將傳送一個列表
-                    });
-                    const result = await response.json();
-                    if (!response.ok) throw new Error(result.detail || '啟動分析時發生未知錯誤。');
-                    logStatus(result.message, 'green');
-                    // 刷新可分析列表（被選中的應該會進入處理中狀態，從列表中消失）
-                    await fetchAndRenderFiles();
-                } catch (error) {
-                    logStatus(`請求失敗：${error.message}`, 'red');
+                startAnalysis(selectedIds);
+            });
+
+            fileListContainer.addEventListener('click', (e) => {
+                const target = e.target;
+                const fileId = target.dataset.fileId ? parseInt(target.dataset.fileId, 10) : null;
+
+                if ((target.classList.contains('reanalyze-btn') || target.classList.contains('retry-btn')) && fileId) {
+                    startAnalysis([fileId]);
+                } else if (target.classList.contains('view-error-btn')) {
+                    alert(target.title || '沒有提供錯誤詳情。');
+                } else if (target.classList.contains('view-report-btn') && fileId) {
+                    const report = allReportsData.find(r => r.source_file_id === fileId);
+                    if (report && report.report_url) {
+                        window.open(report.report_url, '_blank');
+                    } else {
+                        alert(`檔案 ID ${fileId} 對應的報告尚未生成或找不到，請稍後再試。`);
+                        // 作為備用，可以觸發一次報告刷新
+                        fetchAndRenderReports();
+                    }
                 }
             });
 
@@ -180,16 +244,17 @@
                     const response = await fetch('/api/analyzer/reports');
                     if (!response.ok) throw new Error(`伺服器錯誤 (狀態 ${response.status})`);
                     const reports = await response.json();
+                    allReportsData = reports; // 更新全域報告資料
 
                     if (reports.length === 0) {
                         completedListContainer.innerHTML = '<p>目前沒有已生成的報告。</p>';
                         return;
                     }
-                    // 注意：報告的 API 路徑是 /reports/{id}，不是 /api/reports/{id}
+
                     let html = '<ul>';
                     reports.forEach(report => {
                         const reportDate = formatTaipeiTime(report.created_at);
-                        html += `<li>- ${reportDate}: <a href="/report/${report.id}" target="_blank">查看報告 (來源: ${report.source_url})</a></li>`;
+                        html += `<li>- ${reportDate}: <a href="${report.report_url}" target="_blank">查看報告 (來源: ${report.source_url})</a></li>`;
                     });
                     html += '</ul>';
                     completedListContainer.innerHTML = html;
@@ -245,6 +310,18 @@
                 ]);
                 setupWebSocket();
             })();
+
+            const centerActiveNavButton = () => {
+                const activeNavButton = document.querySelector('.top-nav a.active');
+                if (activeNavButton) {
+                    activeNavButton.scrollIntoView({
+                        behavior: 'smooth',
+                        inline: 'center',
+                        block: 'nearest'
+                    });
+                }
+            };
+            setTimeout(centerActiveNavButton, 100);
         });
     </script>
 </body>
