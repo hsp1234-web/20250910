@@ -15,6 +15,7 @@ SRC_DIR = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(SRC_DIR))
 
 from db.database import get_db_connection
+from core import key_manager
 
 # --- 常數與設定 ---
 log = logging.getLogger(__name__)
@@ -27,7 +28,6 @@ PROMPTS_FILE_PATH = SRC_DIR / "prompts" / "default_prompts.json"
 class AnalysisRequest(BaseModel):
     file_id: int
     prompt_key: str
-    api_key: str # AI 金鑰需要從前端傳遞
 
 # --- HTML 頁面路由 ---
 # (這些路由現在由 ui.py 處理，此處保留空白)
@@ -139,7 +139,18 @@ def run_ai_analysis_task(file_id: int, prompt_key: str, api_key: str):
 @router.post("/start_analysis")
 async def start_analysis(payload: AnalysisRequest, background_tasks: BackgroundTasks):
     log.info(f"API: 收到 AI 分析請求，檔案 ID: {payload.file_id}")
-    background_tasks.add_task(run_ai_analysis_task, payload.file_id, payload.prompt_key, payload.api_key)
+
+    # 從金鑰池中獲取一個有效的金鑰
+    api_key = key_manager.get_valid_key()
+    if not api_key:
+        log.error("API: 無法啟動分析，因為金鑰池中沒有任何有效的 API 金鑰。")
+        raise HTTPException(
+            status_code=428, # Precondition Required
+            detail="金鑰池中沒有有效的 API 金鑰。請先至「金鑰管理」頁面新增並驗證金鑰。"
+        )
+
+    log.info(f"API: 已從金鑰池選取一個有效金鑰來執行任務。")
+    background_tasks.add_task(run_ai_analysis_task, payload.file_id, payload.prompt_key, api_key)
     return JSONResponse(content={"message": f"已成功為檔案 ID {payload.file_id} 建立背景分析任務。"})
 
 @router.get("/reports")

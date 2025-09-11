@@ -5,6 +5,13 @@ import filetype
 import uuid
 from datetime import datetime
 from pathlib import Path
+import sys
+
+# --- 路徑修正 ---
+SRC_DIR = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(SRC_DIR))
+
+from core.time_utils import format_iso_for_filename
 
 def download_file(url: str, output_dir: str, url_id: int, created_at_str: str) -> str | None:
     """
@@ -45,15 +52,8 @@ def download_file(url: str, output_dir: str, url_id: int, created_at_str: str) -
             logging.info(f"偵測到檔案類型: {kind.mime} -> 副檔名: {extension}")
 
         # 步驟 3: 根據傳入的時間和 ID 建立最終檔名
-        try:
-            # 將資料庫中的時間字串轉換為 datetime 物件
-            created_at_dt = datetime.strptime(created_at_str, '%Y-%m-%d %H:%M:%S')
-            # 格式化為 ISO 8601-like 的字串
-            timestamp = created_at_dt.strftime('%Y-%m-%dT%H-%M-%S')
-        except (ValueError, TypeError):
-            logging.warning(f"無法解析傳入的時間戳 '{created_at_str}'，將使用目前的 UTC 時間。")
-            timestamp = datetime.utcnow().strftime('%Y-%m-%dT%H-%M-%S')
-
+        # 我們現在使用集中的時間工具來處理時間戳，確保時區正確
+        timestamp = format_iso_for_filename(created_at_str)
         final_filename = f"{timestamp}_file_{url_id}{extension}"
         final_path = Path(output_dir) / final_filename
 

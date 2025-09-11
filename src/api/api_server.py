@@ -52,6 +52,7 @@ ROOT_DIR = Path(__file__).resolve().parent.parent.parent
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%dT%H:%M:%S%z',
     handlers=[logging.StreamHandler()] # 輸出到控制台
 )
 log = logging.getLogger('api_server')
@@ -147,7 +148,7 @@ async def add_server_port_to_state(request: Request, call_next):
 
 
 # --- 整合模組化路由 ---
-from api.routes import ui, page1_ingestion, page2_downloader, page3_processor, page4_analyzer, page5_backup
+from api.routes import ui, page1_ingestion, page2_downloader, page3_processor, page4_analyzer, page5_backup, page6_keys, page7_prompts
 
 # UI 路由 (提供 HTML 頁面)
 app.include_router(ui.router, tags=["UI"])
@@ -156,8 +157,10 @@ app.include_router(ui.router, tags=["UI"])
 app.include_router(page1_ingestion.router, prefix="/api/ingestion", tags=["API: 網址提取"])
 app.include_router(page2_downloader.router, prefix="/api/downloader", tags=["API: 批次下載"])
 app.include_router(page3_processor.router, prefix="/api/processor", tags=["API: 檔案處理"])
-app.include_router(page4_analyzer.router, prefix="/api/analyzer", tags=["API: AI 分析與提示詞"])
+app.include_router(page4_analyzer.router, prefix="/api/analyzer", tags=["API: AI 分析"])
 app.include_router(page5_backup.router, prefix="/api/backup", tags=["API: 備份管理"])
+app.include_router(page6_keys.router, prefix="/api", tags=["API: 金鑰管理"])
+app.include_router(page7_prompts.router, prefix="/api", tags=["API: 提示詞管理"])
 
 # --- 路徑設定 ---
 # 新的上傳檔案儲存目錄
