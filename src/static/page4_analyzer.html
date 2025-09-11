@@ -6,6 +6,31 @@
     <title>頁面四：AI 分析</title>
     <link rel="stylesheet" href="/static/css/nav.css">
     <link rel="stylesheet" href="/static/css/page4.css">
+    <style>
+        /* 新增的結果顯示區域樣式 */
+        .result-container {
+            margin-top: 20px;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            background-color: #f9f9f9;
+            display: none; /* 預設隱藏 */
+        }
+        .result-container h2 {
+            margin-top: 0;
+            color: #333;
+            border-bottom: 2px solid #eee;
+            padding-bottom: 10px;
+        }
+        #analysis-result {
+            white-space: pre-wrap; /* 自動換行 */
+            word-wrap: break-word;
+            background-color: #fff;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+    </style>
 </head>
 <body>
     <nav class="top-nav">
@@ -44,8 +69,14 @@
             </select>
         </div>
 
-        <button id="start-analysis-btn">使用金鑰池中的有效金鑰開始分析</button>
+        <button id="start-analysis-btn">開始分析</button>
         <div id="analysis-status"></div>
+
+        <!-- 新增的結果顯示區域 -->
+        <div id="result-container" class="result-container">
+            <h2>分析結果</h2>
+            <pre id="analysis-result"></pre>
+        </div>
     </div>
 
     <script>
@@ -54,20 +85,25 @@
             const promptSelect = document.getElementById('prompt-select');
             const startBtn = document.getElementById('start-analysis-btn');
             const statusDiv = document.getElementById('analysis-status');
+            const resultContainer = document.getElementById('result-container');
+            const resultPre = document.getElementById('analysis-result');
 
             const populateFiles = async () => {
                 try {
-                    const response = await fetch('/api/analyzer/processed_files');
+                    // 這個端點將在下一步驟中建立
+                    const response = await fetch('/api/processor/processed');
+                    if (!response.ok) throw new Error('無法獲取已處理檔案列表');
                     const files = await response.json();
                     fileSelect.innerHTML = '<option value="">-- 請選擇一個檔案 --</option>';
                     if (files.length > 0) {
                         files.forEach(file => {
-                            const option = new Option(`${file.filename}`, file.id);
+                            const option = new Option(file.filename || `檔案 #${file.id}`, file.id);
                             fileSelect.add(option);
                         });
                     } else {
                         fileSelect.innerHTML = '<option value="">沒有可分析的檔案</option>';
                         fileSelect.disabled = true;
+                        startBtn.disabled = true;
                     }
                 } catch (error) {
                     fileSelect.innerHTML = '<option value="">載入檔案失敗</option>';
@@ -77,12 +113,17 @@
 
             const populatePrompts = async () => {
                 try {
-                    const response = await fetch('/api/analyzer/prompts');
+                    // 根據日誌，全域提示詞路由是 /api/prompts
+                    const response = await fetch('/api/prompts');
+                    if (!response.ok) throw new Error('無法獲取提示詞列表');
                     const prompts = await response.json();
                     promptSelect.innerHTML = '<option value="">-- 請選擇一個提示詞 --</option>';
                     for (const key in prompts) {
-                        const option = new Option(key, key);
-                        promptSelect.add(option);
+                        // 只顯示包含 "description" 的物件，以過濾掉簡單字串提示詞
+                        if (prompts[key] && typeof prompts[key] === 'object' && prompts[key].description) {
+                            const option = new Option(prompts[key].description, key);
+                            promptSelect.add(option);
+                        }
                     }
                 } catch (error) {
                     promptSelect.innerHTML = '<option value="">載入提示詞失敗</option>';
@@ -101,10 +142,11 @@
 
                 statusDiv.textContent = '正在提交分析請求...';
                 statusDiv.style.color = 'blue';
+                resultContainer.style.display = 'none'; // 隱藏舊結果
 
                 try {
-                    // 後端現在會自動從金鑰池中選取金鑰，所以不再需要傳遞 api_key
-                    const response = await fetch('/api/analyzer/start_analysis', {
+                    // 這個端點將在下一步驟中建立
+                    const response = await fetch('/api/analyzer/run_analysis', {
                         method: 'POST',
                         headers: {'Content-Type': 'application/json'},
                         body: JSON.stringify({
@@ -114,9 +156,18 @@
                     });
 
                     const result = await response.json();
-                    if (!response.ok) throw new Error(result.detail || '啟動分析時發生未知錯誤。');
-                    statusDiv.textContent = result.message;
+
+                    if (!response.ok) {
+                        throw new Error(result.detail || '分析時發生未知錯誤。');
+                    }
+
+                    statusDiv.textContent = '分析成功！';
                     statusDiv.style.color = 'green';
+
+                    // 美化並顯示 JSON 結果
+                    resultPre.textContent = JSON.stringify(result, null, 2);
+                    resultContainer.style.display = 'block'; // 顯示結果容器
+
                 } catch (error) {
                     statusDiv.textContent = `請求失敗：${error.message}`;
                     statusDiv.style.color = 'red';
