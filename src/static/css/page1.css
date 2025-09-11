@@ -87,3 +87,51 @@ button:hover {
     border-bottom: 1px solid #eee;
     word-break: break-all;
 }
+
+/* --- 結果表格樣式 --- */
+.table-container {
+    margin-top: 25px;
+    width: 100%;
+    overflow-x: auto; /* 核心：在小螢幕上啟用水平捲動 */
+    border: 1px solid #dee2e6;
+    border-radius: 5px;
+    display: none; /* 預設隱藏，由 JS 控制顯示 */
+}
+
+#result-table {
+    width: 100%;
+    border-collapse: collapse;
+    white-space: nowrap; /* 確保內容不換行，以觸發水平捲動 */
+}
+
+#result-table th, #result-table td {
+    padding: 12px 15px;
+    border-bottom: 1px solid #dee2e6;
+    text-align: left;
+    vertical-align: middle;
+}
+
+#result-table th {
+    background-color: #f8f9fa;
+    font-weight: 600;
+    color: #495057;
+}
+
+#result-table tbody tr:hover {
+    background-color: #f1f3f5;
+}
+
+#result-table td a {
+    color: #007bff;
+    text-decoration: none;
+    display: inline-block;
+    max-width: 400px; /* 避免連結在寬螢幕上過長 */
+    overflow: hidden;
+    text-overflow: ellipsis; /* 顯示 ... */
+    vertical-align: middle;
+}
+
+#result-table td a:hover {
+    text-decoration: underline;
+    color: #0056b3;
+}
