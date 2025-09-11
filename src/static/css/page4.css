@@ -65,7 +65,8 @@ select:disabled {
     background-color: #e9ecef;
 }
 
-button {
+/* The main action button should be full width */
+button#start-analysis-btn {
     padding: 12px 25px;
     font-size: 1.1em;
     color: #fff;
@@ -76,6 +77,20 @@ button {
     transition: background-color 0.3s;
     width: 100%;
 }
+
+/* All other buttons should not be full-width and have a different style */
+button {
+    padding: 8px 16px;
+    font-size: 1em;
+    color: #fff;
+    background-color: #007bff;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    transition: background-color 0.3s;
+    /* width: 100% is removed */
+}
+
 
 button:hover {
     background-color: #0056b3;

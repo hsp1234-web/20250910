@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>優化版 - 提示詞管理 (V2)</title>
+    <!-- 引入專案標準導覽列樣式 -->
+    <link rel="stylesheet" href="/static/css/nav.css">
     <!-- 引入 Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- 引入 Google Fonts -->
@@ -35,22 +37,18 @@
 </head>
 <body class="antialiased text-slate-800">
 
-    <!-- 頁首導覽列 (模擬) -->
-    <nav class="bg-slate-800 shadow-md">
-        <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div class="flex items-center justify-between h-16">
-                <div class="flex items-center">
-                    <span class="font-bold text-white text-xl">鳳凰系統</span>
-                </div>
-                 <div class="hidden md:block">
-                    <div class="ml-10 flex items-baseline space-x-4">
-                        <a href="#" class="text-slate-300 hover:bg-slate-700 hover:text-white px-3 py-2 rounded-md text-sm font-medium">主頁</a>
-                        <a href="#" class="bg-slate-900 text-white px-3 py-2 rounded-md text-sm font-medium" aria-current="page">提示詞管理</a>
-                        <a href="#" class="text-slate-300 hover:bg-slate-700 hover:text-white px-3 py-2 rounded-md text-sm font-medium">金鑰管理</a>
-                    </div>
-                </div>
-            </div>
-        </div>
+    <!-- 標準應用程式導覽列 -->
+    <nav class="top-nav">
+        <ul>
+            <li><a href="/">鳳凰主頁</a></li>
+            <li><a href="/page1">網址提取</a></li>
+            <li><a href="/page2">批次下載</a></li>
+            <li><a href="/page3">檔案處理</a></li>
+            <li><a href="/page4">AI 分析</a></li>
+            <li><a href="/page5">備份管理</a></li>
+            <li><a href="/page6">金鑰管理</a></li>
+            <li><a href="/page7" class="active">提示詞管理</a></li>
+        </ul>
     </nav>
 
     <!-- 主要內容區 -->
