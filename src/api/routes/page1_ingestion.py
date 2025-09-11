@@ -14,7 +14,7 @@ SRC_DIR = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(SRC_DIR))
 
 # 現在可以安全地匯入我們的工具了
-from tools.url_extractor import extract_urls, save_urls_to_db
+from tools.url_extractor import parse_chat_log, save_urls_to_db
 
 # --- 常數與設定 ---
 log = logging.getLogger(__name__)
@@ -29,38 +29,35 @@ class UrlExtractionRequest(BaseModel):
 @router.post("/extract_urls", status_code=200)
 async def extract_urls_endpoint(payload: UrlExtractionRequest, request: Request):
     """
-    接收文字，提取其中的網址，並將其存入資料庫。
-    現在會透過 WebSocket 廣播更新。
+    [新版] 接收文字，使用新的解析器解析，並回傳結構化資料。
     """
     source_text = payload.text
     if not source_text.strip():
         raise HTTPException(status_code=400, detail="提供的文字不可為空。")
 
-    log.info(f"API: 收到提取網址的請求，文字長度: {len(source_text)}")
+    log.info(f"API: 收到解析聊天紀錄的請求，文字長度: {len(source_text)}")
 
     try:
-        # 步驟 1: 直接呼叫函式來提取網址
-        urls_found = extract_urls(source_text)
-        count = len(urls_found)
+        # 步驟 1: 呼叫新的解析器
+        parsed_data = parse_chat_log(source_text)
+        count = len(parsed_data)
 
-        # 步驟 2: 如果找到網址，直接呼叫函式將其儲存到資料庫
-        if urls_found:
-            save_urls_to_db(urls_found, source_text)
-            log.info(f"API: 成功儲存 {count} 個網址，正在廣播通知...")
-            # 步驟 3: 廣播 WebSocket 訊息
+        # [步驟四完成] - 重新啟用儲存功能
+        if parsed_data:
+            # 現在 save_urls_to_db 已更新，可以處理新的結構
+            save_urls_to_db(parsed_data, source_text)
+            log.info(f"API: 成功解析並儲存 {count} 筆資料，正在廣播通知...")
+            # 廣播 WebSocket 訊息 (如果需要)
             await request.app.state.manager.broadcast_json({
                 "type": "URLS_EXTRACTED",
                 "payload": {"count": count}
             })
         else:
-            log.info("API: 在提供的文字中未找到任何網址。")
+            log.info("API: 在提供的文字中未找到任何可解析的資料。")
 
-        return JSONResponse(
-            content={
-                "message": "網址提取與儲存成功。",
-                "urls_found_count": count
-            }
-        )
+        # 步驟 2: 直接回傳解析後的結構化資料列表給前端
+        return JSONResponse(content=parsed_data)
+
     except Exception as e:
         log.error(f"API: 處理網址提取請求時發生未預期錯誤: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"伺服器發生內部錯誤: {e}")
