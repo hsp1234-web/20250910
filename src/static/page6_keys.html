@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>頁面六：金鑰管理</title>
+    <link rel="stylesheet" href="/static/css/nav.css">
+    <link rel="stylesheet" href="/static/css/common.css">
+    <link rel="stylesheet" href="/static/css/page6.css">
+</head>
+<body>
+    <nav class="top-nav">
+        <ul>
+            <li><a href="/">鳳凰主頁</a></li>
+            <li><a href="/page1">網址提取</a></li>
+            <li><a href="/page2">批次下載</a></li>
+            <li><a href="/page3">檔案處理</a></li>
+            <li><a href="/page4">AI 分析</a></li>
+            <li><a href="/page5">備份管理</a></li>
+            <li><a href="/page6" class="active">金鑰管理</a></li>
+            <li><a href="/page7">提示詞管理</a></li>
+        </ul>
+    </nav>
+
+    <div class="content">
+        <div class="panel">
+            <h1>金鑰管理</h1>
+            <p>此頁面用於管理您的 Google API 金鑰池。有效的金鑰將被用於 AI 分析任務。</p>
+        </div>
+
+        <div class="panel">
+            <h2>新增金鑰</h2>
+            <div class="form-group">
+                <input type="password" id="new-key-input" placeholder="在此貼上新的 API 金鑰">
+                <input type="text" id="new-key-name-input" placeholder="為金鑰設定一個別名 (可選)">
+                <button id="add-key-btn">新增並驗證</button>
+            </div>
+            <div id="add-key-status"></div>
+        </div>
+
+        <div class="panel">
+            <div class="panel-header">
+                <h2>金鑰池</h2>
+                <button id="validate-all-btn">重新驗證所有金鑰</button>
+            </div>
+            <div id="key-list-container">
+                <p>正在載入金鑰列表...</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    document.addEventListener('DOMContentLoaded', () => {
+        const keyListContainer = document.getElementById('key-list-container');
+        const addKeyBtn = document.getElementById('add-key-btn');
+        const newKeyInput = document.getElementById('new-key-input');
+        const newKeyNameInput = document.getElementById('new-key-name-input');
+        const addKeyStatus = document.getElementById('add-key-status');
+        const validateAllBtn = document.getElementById('validate-all-btn');
+
+        const renderStatus = (element, message, isError = false) => {
+            element.textContent = message;
+            element.style.color = isError ? 'red' : 'green';
+            setTimeout(() => { element.textContent = ''; }, 5000);
+        };
+
+        const renderKeyList = (keys) => {
+            if (keys.length === 0) {
+                keyListContainer.innerHTML = '<p>目前沒有已儲存的金鑰。</p>';
+                return;
+            }
+            let html = '<ul class="key-list">';
+            keys.forEach(key => {
+                const statusClass = key.is_valid ? 'status-valid' : (key.is_valid === false ? 'status-invalid' : 'status-unknown');
+                const statusText = key.is_valid ? '有效' : (key.is_valid === false ? '無效' : '未知');
+                const lastValidated = key.last_validated ? new Date(key.last_validated).toLocaleString('zh-TW') : '從未';
+
+                html += `
+                    <li class="key-item">
+                        <span class="key-name">${key.name}</span>
+                        <span class="key-hash">雜湊值: ...${key.key_hash.slice(-8)}</span>
+                        <span class="key-status ${statusClass}">${statusText}</span>
+                        <span class="key-validated">上次驗證: ${lastValidated}</span>
+                        <button class="delete-btn" data-hash="${key.key_hash}">刪除</button>
+                    </li>
+                `;
+            });
+            html += '</ul>';
+            keyListContainer.innerHTML = html;
+        };
+
+        const fetchKeys = async () => {
+            try {
+                const response = await fetch('/api/keys');
+                if (!response.ok) throw new Error('無法獲取金鑰列表');
+                const keys = await response.json();
+                renderKeyList(keys);
+            } catch (error) {
+                keyListContainer.innerHTML = `<p style="color: red;">${error.message}</p>`;
+            }
+        };
+
+        addKeyBtn.addEventListener('click', async () => {
+            const key = newKeyInput.value.trim();
+            const name = newKeyNameInput.value.trim();
+            if (!key) {
+                renderStatus(addKeyStatus, 'API 金鑰不可為空。', true);
+                return;
+            }
+            addKeyBtn.disabled = true;
+            addKeyBtn.textContent = '驗證中...';
+            try {
+                const response = await fetch('/api/keys', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ api_key: key, name: name || null })
+                });
+                const result = await response.json();
+                if (!response.ok) throw new Error(result.detail || '新增失敗');
+                renderStatus(addKeyStatus, result.message, false);
+                newKeyInput.value = '';
+                newKeyNameInput.value = '';
+                fetchKeys();
+            } catch (error) {
+                renderStatus(addKeyStatus, `錯誤: ${error.message}`, true);
+            } finally {
+                addKeyBtn.disabled = false;
+                addKeyBtn.textContent = '新增並驗證';
+            }
+        });
+
+        keyListContainer.addEventListener('click', async (e) => {
+            if (e.target.classList.contains('delete-btn')) {
+                const keyHash = e.target.dataset.hash;
+                if (!confirm(`您確定要刪除雜湊值結尾為 ...${keyHash.slice(-8)} 的金鑰嗎？`)) {
+                    return;
+                }
+                try {
+                    const response = await fetch(`/api/keys/${keyHash}`, { method: 'DELETE' });
+                    const result = await response.json();
+                    if (!response.ok) throw new Error(result.detail || '刪除失敗');
+                    fetchKeys();
+                } catch (error) {
+                    alert(`刪除失敗: ${error.message}`);
+                }
+            }
+        });
+
+        validateAllBtn.addEventListener('click', async () => {
+            validateAllBtn.disabled = true;
+            validateAllBtn.textContent = '正在驗證所有金鑰...';
+            keyListContainer.innerHTML = '<p>請稍候，正在逐一驗證所有金鑰...</p>';
+            try {
+                const response = await fetch('/api/keys/validate', { method: 'POST' });
+                const result = await response.json();
+                if (!response.ok) throw new Error(result.detail || '驗證失敗');
+                renderKeyList(result.keys);
+            } catch (error) {
+                 keyListContainer.innerHTML = `<p style="color: red;">驗證時發生錯誤: ${error.message}</p>`;
+            } finally {
+                validateAllBtn.disabled = false;
+                validateAllBtn.textContent = '重新驗證所有金鑰';
+            }
+        });
+
+        fetchKeys();
+    });
+    </script>
+</body>
+</html>

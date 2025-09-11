@@ -114,3 +114,50 @@ button:disabled {
     margin: 0 0 5px 0;
     padding: 0;
 }
+
+/* --- 已處理報告列表樣式 --- */
+.processed-list {
+    list-style-type: none; /* 移除預設的圓點 */
+    padding: 0;
+    margin: 0;
+    border: 1px solid #dee2e6;
+    border-radius: 5px;
+    overflow: hidden; /* 確保子元素的圓角正確顯示 */
+}
+
+.processed-item {
+    display: flex;
+    justify-content: space-between; /* 將檔名和按鈕推到兩側 */
+    align-items: center; /* 垂直置中 */
+    padding: 12px 15px;
+    border-bottom: 1px solid #eee;
+}
+
+.processed-item:last-child {
+    border-bottom: none;
+}
+
+/* 檔名樣式 */
+.processed-item span {
+    flex-grow: 1; /* 讓檔名佔用多餘空間 */
+    margin-right: 15px; /* 與按鈕之間保持距離 */
+    word-break: break-all; /* 長檔名自動換行 */
+}
+
+/* 查看報告按鈕樣式 */
+.processed-item .view-button {
+    flex-shrink: 0; /* 防止按鈕被壓縮 */
+    text-decoration: none;
+    color: #007bff;
+    font-weight: 500;
+    padding: 5px 10px;
+    border: 1px solid #007bff;
+    border-radius: 5px;
+    transition: all 0.2s ease-in-out;
+}
+
+.processed-item .view-button:hover {
+    background-color: #007bff;
+    color: #fff;
+    text-decoration: none;
+}

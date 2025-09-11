@@ -16,6 +16,8 @@
             <li><a href="/page3">檔案處理</a></li>
             <li><a href="/page4" class="active">AI 分析</a></li>
             <li><a href="/page5">備份管理</a></li>
+            <li><a href="/page6">金鑰管理</a></li>
+            <li><a href="/page7">提示詞管理</a></li>
         </ul>
     </nav>
 
@@ -30,6 +32,11 @@
             </select>
         </div>
 
+        <div class="management-links">
+            <a href="/page6" class="button-link">管理 API 金鑰</a>
+            <a href="/page7" class="button-link">管理提示詞</a>
+        </div>
+
         <div class="form-group">
             <label for="prompt-select">選擇提示詞:</label>
             <select id="prompt-select" name="prompt-select">
@@ -37,12 +44,7 @@
             </select>
         </div>
 
-        <div class="form-group">
-            <label for="api-key-input">Google AI API 金鑰:</label>
-            <input type="password" id="api-key-input" placeholder="請在此輸入您的 API 金鑰">
-        </div>
-
-        <button id="start-analysis-btn">開始分析</button>
+        <button id="start-analysis-btn">使用金鑰池中的有效金鑰開始分析</button>
         <div id="analysis-status"></div>
     </div>
 
@@ -91,10 +93,9 @@
             startBtn.addEventListener('click', async () => {
                 const fileId = fileSelect.value;
                 const promptKey = promptSelect.value;
-                const apiKey = document.getElementById('api-key-input').value;
 
-                if (!fileId || !promptKey || !apiKey) {
-                    alert('請務必選擇一個檔案、一個提示詞，並輸入您的 API 金鑰。');
+                if (!fileId || !promptKey) {
+                    alert('請務必選擇一個檔案和一個提示詞。');
                     return;
                 }
 
@@ -102,13 +103,13 @@
                 statusDiv.style.color = 'blue';
 
                 try {
+                    // 後端現在會自動從金鑰池中選取金鑰，所以不再需要傳遞 api_key
                     const response = await fetch('/api/analyzer/start_analysis', {
                         method: 'POST',
                         headers: {'Content-Type': 'application/json'},
                         body: JSON.stringify({
                             file_id: parseInt(fileId, 10),
-                            prompt_key: promptKey,
-                            api_key: apiKey
+                            prompt_key: promptKey
                         })
                     });
 
