@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>頁面二：批次下載</title>
     <link rel="stylesheet" href="/static/css/nav.css">
+    <link rel="stylesheet" href="/static/css/common.css">
     <link rel="stylesheet" href="/static/css/page2.css">
 </head>
 <body>
@@ -39,7 +40,10 @@
         </div>
 
         <div class="panel">
-            <h2>狀態日誌</h2>
+            <div class="panel-header">
+                <h2>狀態日誌</h2>
+                <button id="copy-log-button" class="copy-button" title="複製日誌">📄</button>
+            </div>
             <div id="status-area">
                 <!-- 下載狀態將會顯示在這裡 -->
             </div>
@@ -62,8 +66,36 @@
             const statusArea = document.getElementById('status-area');
             const completedListContainer = document.getElementById('completed-list-container');
 
+            const formatTaipeiTime = (isoString) => {
+                if (!isoString) return '無效時間';
+                try {
+                    const date = new Date(isoString);
+                    // 使用 Intl.DateTimeFormat API，這是處理時區轉換最可靠的標準方法。
+                    // 它可以正確地將傳入的 UTC 時間（或任何帶有時區資訊的 ISO 字串）轉換到指定的 'Asia/Taipei' 時區。
+                    const formatter = new Intl.DateTimeFormat('en-CA', { // 使用 'en-CA' 可產生 YYYY-MM-DD 格式
+                        timeZone: 'Asia/Taipei',
+                        year: 'numeric',
+                        month: '2-digit',
+                        day: '2-digit',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                        second: '2-digit',
+                        hour12: false
+                    });
+
+                    // 格式化後會得到類似 "2025-09-11, 09:37:01" 的字串
+                    const formattedString = formatter.format(date);
+                    // 將其轉換為我們想要的 "YYYY/MM/DD HH:mm:ss" 格式
+                    return formattedString.replace(/-/g, '/').replace(',', '');
+
+                } catch (e) {
+                    console.error("時間格式化失敗:", e, "輸入值:", isoString);
+                    return '時間格式錯誤';
+                }
+            };
+
             const logStatus = (message, color = 'black') => {
-                const timestamp = new Date().toLocaleTimeString();
+                const timestamp = formatTaipeiTime(new Date().toISOString());
                 statusArea.insertAdjacentHTML('afterbegin', `<p style="color: ${color};">${timestamp}: ${message}</p>`);
             };
 
@@ -159,7 +191,7 @@
 
                     let html = '<ul>';
                     files.forEach(file => {
-                        const completedDate = new Date(file.completed_at).toLocaleString('zh-TW');
+                        const completedDate = formatTaipeiTime(file.completed_at);
                         html += `<li>- '${file.filename}' (${completedDate})</li>`;
                     });
                     html += '</ul>';
@@ -168,6 +200,23 @@
                     completedListContainer.innerHTML = `<p style="color: red;">載入已完成列表失敗：${error.message}</p>`;
                 }
             };
+
+            const copyLogButton = document.getElementById('copy-log-button');
+            copyLogButton.addEventListener('click', () => {
+                const logContent = statusArea.innerText;
+                navigator.clipboard.writeText(logContent).then(() => {
+                    const originalIcon = copyLogButton.innerText;
+                    copyLogButton.innerText = '✅';
+                    copyLogButton.disabled = true;
+                    setTimeout(() => {
+                        copyLogButton.innerText = originalIcon;
+                        copyLogButton.disabled = false;
+                    }, 3000);
+                }).catch(err => {
+                    console.error('無法複製日誌: ', err);
+                    alert('複製失敗，請手動複製。');
+                });
+            });
 
             (async () => {
                 await Promise.all([
