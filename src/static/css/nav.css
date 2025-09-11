@@ -1,40 +1,62 @@
 /* src/static/css/nav.css */
-/* 新的、固定的頂部導覽列樣式 */
+/* 全新改造的導覽列樣式 (V2 - 水平捲動) */
 .top-nav {
     background-color: #343a40;
-    overflow: hidden;
+    padding: 8px 0; /* 上下留白 */
     box-shadow: 0 2px 5px rgba(0,0,0,0.2);
-    /* 移除了 position: fixed 及相關屬性，使其變為靜態佈局 */
+    width: 100%;
 }
 
 .top-nav ul {
     list-style-type: none;
     margin: 0;
-    padding: 0;
+    padding: 0 10px; /* 左右留白，避免按鈕貼邊 */
     display: flex;
-    justify-content: flex-start; /* 從左邊開始排列 */
-    align-items: center;
+    overflow-x: auto; /* 核心：啟用水平捲動 */
+    white-space: nowrap; /* 防止按鈕換行 */
+    -webkit-overflow-scrolling: touch; /* 在 iOS 上提供流暢的捲動體驗 */
+}
+
+/* 美化捲軸樣式 (適用於 Webkit 核心的瀏覽器，如 Chrome, Safari) */
+.top-nav ul::-webkit-scrollbar {
+    height: 6px;
+}
+.top-nav ul::-webkit-scrollbar-track {
+    background: #4a4a4a;
+}
+.top-nav ul::-webkit-scrollbar-thumb {
+    background: #888;
+    border-radius: 3px;
+}
+.top-nav ul::-webkit-scrollbar-thumb:hover {
+    background: #555;
+}
+
+.top-nav li {
+    margin: 0 4px; /* 按鈕之間的間距 */
 }
 
 .top-nav li a {
     display: block;
     color: white;
     text-align: center;
-    padding: 14px 16px;
+    padding: 10px 15px;
     text-decoration: none;
     font-size: 16px;
-    transition: background-color 0.3s, color 0.3s;
+    font-weight: 500;
+    border-radius: 8px; /* 圓角，使其更像按鈕 */
+    transition: background-color 0.2s, transform 0.1s;
+    min-width: 100px; /* 確保按鈕有最小寬度 */
 }
 
 .top-nav li a:hover {
     background-color: #575d63;
-    color: white;
+    transform: translateY(-1px);
 }
 
 .top-nav li a.active {
     background-color: #007bff;
     color: white;
     font-weight: bold;
+    box-shadow: 0 2px 4px rgba(0, 123, 255, 0.4);
 }
-
-/* body 的 padding-top 已被移除，因為導覽列不再是 fixed 定位 */

@@ -22,11 +22,12 @@ SRC_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SRC_DIR))
 
 # --- 本地匯入 ---
-# 在路徑修正後，我們可以從 db 模組匯入
+# 在路徑修正後，我們可以從 db 和 core 模組匯入
 try:
     from db.database import get_db_connection
+    from core.time_utils import get_current_taipei_time_iso
 except ImportError:
-    print("無法匯入 get_db_connection。請確保路徑設定正確且 __init__.py 檔案存在。")
+    print("無法匯入模組。請確保路徑設定正確且 __init__.py 檔案存在。")
     sys.exit(1)
 
 # --- 日誌設定 ---
@@ -66,11 +67,13 @@ def save_urls_to_db(urls: list[str], source_text: str):
     try:
         with conn:
             cursor = conn.cursor()
-            # 準備要插入的多筆資料
-            data_to_insert = [(url, source_text) for url in urls]
+            # 獲取當前標準化的台北時間
+            created_at_iso = get_current_taipei_time_iso()
+            # 準備要插入的多筆資料，現在包含正確的時間戳
+            data_to_insert = [(url, source_text, created_at_iso) for url in urls]
             # 使用 executemany 來高效地插入多筆記錄
             cursor.executemany(
-                "INSERT INTO extracted_urls (url, source_text, status) VALUES (?, ?, 'pending')",
+                "INSERT INTO extracted_urls (url, source_text, created_at, status) VALUES (?, ?, ?, 'pending')",
                 data_to_insert
             )
         log.info(f"成功將 {len(urls)} 個網址儲存到資料庫。")
