@@ -115,11 +115,38 @@
                         logStatus('列表為空。');
                         return;
                     }
-                    let html = '<ul>';
+                    let html = `
+                        <table class="results-table">
+                            <thead>
+                                <tr>
+                                    <th>選取</th>
+                                    <th>ID</th>
+                                    <th>項目詳情</th>
+                                    <th>加入時間</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                    `;
                     urls.forEach(item => {
-                        html += `<li><input type="checkbox" class="url-checkbox" value="${item.id}"><label>${item.url}</label></li>`;
+                        const createdDate = formatTaipeiTime(item.created_at);
+                        // 組合 LINE 訊息時間，如果不存在則顯示空字串
+                        const messageTime = item.message_date && item.message_time
+                            ? `(${item.message_date} ${item.message_time})`
+                            : '';
+
+                        // 組合要在連結中顯示的文字
+                        const linkText = `${item.id} ${messageTime} ${item.url}`;
+
+                        html += `
+                            <tr>
+                                <td><input type="checkbox" class="url-checkbox" value="${item.id}"></td>
+                                <td>${item.id}</td>
+                                <td class="url-cell"><a href="${item.url}" title="${linkText}" target="_blank">${linkText}</a></td>
+                                <td>${createdDate}</td>
+                            </tr>
+                        `;
                     });
-                    html += '</ul>';
+                    html += `</tbody></table>`;
                     urlListContainer.innerHTML = html;
                     downloadButton.disabled = false;
                     selectAllButton.disabled = false;
@@ -191,12 +218,30 @@
                         return;
                     }
 
-                    let html = '<ul>';
+                    let html = `
+                        <table class="results-table">
+                            <thead>
+                                <tr>
+                                    <th>ID</th>
+                                    <th>檔名</th>
+                                    <th>來源 URL</th>
+                                    <th>完成時間</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                    `;
                     files.forEach(file => {
                         const completedDate = formatTaipeiTime(file.completed_at);
-                        html += `<li>- '${file.filename}' (${completedDate})</li>`;
+                        html += `
+                            <tr>
+                                <td>${file.id}</td>
+                                <td class="url-cell">${file.filename}</td>
+                                <td class="url-cell"><a href="${file.url}" title="${file.url}" target="_blank">${file.url}</a></td>
+                                <td>${completedDate}</td>
+                            </tr>
+                        `;
                     });
-                    html += '</ul>';
+                    html += `</tbody></table>`;
                     completedListContainer.innerHTML = html;
                 } catch (error) {
                     completedListContainer.innerHTML = `<p style="color: red;">載入已完成列表失敗：${error.message}</p>`;

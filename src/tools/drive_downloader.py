@@ -51,10 +51,10 @@ def download_file(url: str, output_dir: str, url_id: int, created_at_str: str) -
             extension = f".{kind.extension}"
             logging.info(f"偵測到檔案類型: {kind.mime} -> 副檔名: {extension}")
 
-        # 步驟 3: 根據傳入的時間和 ID 建立最終檔名
-        # 我們現在使用集中的時間工具來處理時間戳，確保時區正確
+        # 步驟 3: 根據使用者要求，使用「url_id」和「時間戳」建立最終檔名
+        # 新格式為: 編號_時間戳.副檔名 (例如: 123_2025-09-11T09-30-00.docx)
         timestamp = format_iso_for_filename(created_at_str)
-        final_filename = f"{timestamp}_file_{url_id}{extension}"
+        final_filename = f"{url_id}_{timestamp}{extension}"
         final_path = Path(output_dir) / final_filename
 
         # 步驟 4: 將暫存檔重新命名為最終檔名

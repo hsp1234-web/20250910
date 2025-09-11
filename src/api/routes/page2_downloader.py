@@ -26,15 +26,27 @@ router = APIRouter()
 async def get_pending_urls():
     """
     獲取所有狀態為 'pending' 的網址列表。
+    現在也會獲取 message_date 和 message_time 以便在前端顯示。
     """
     log.info("API: 收到獲取待處理網址列表的請求。")
     conn = None
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute("SELECT id, url, created_at FROM extracted_urls WHERE status = 'pending' ORDER BY created_at DESC")
+        cursor.execute(
+            "SELECT id, url, created_at, message_date, message_time FROM extracted_urls WHERE status = 'pending' ORDER BY created_at DESC"
+        )
         rows = cursor.fetchall()
-        results = [{"id": row[0], "url": row[1], "created_at": row[2]} for row in rows]
+        results = [
+            {
+                "id": row['id'],
+                "url": row['url'],
+                "created_at": row['created_at'],
+                "message_date": row['message_date'],
+                "message_time": row['message_time'],
+            }
+            for row in rows
+        ]
         return JSONResponse(content=results)
     except Exception as e:
         log.error(f"API: 獲取待處理網址時發生錯誤: {e}", exc_info=True)
