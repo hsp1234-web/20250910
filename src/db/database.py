@@ -163,6 +163,7 @@ def initialize_database(conn: sqlite3.Connection = None):
 
             # --- 為 extracted_urls 進行簡易遷移，新增狀態相關欄位 ---
             url_migrations = {
+                "author": "TEXT", # 新增作者欄位
                 "status": "TEXT DEFAULT 'pending'",
                 "status_message": "TEXT",
                 "local_path": "TEXT",

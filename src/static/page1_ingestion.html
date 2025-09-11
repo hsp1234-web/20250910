@@ -31,6 +31,24 @@
 
         <div id="status-message" style="margin-top: 20px; font-weight: bold;"></div>
 
+        <!-- 結果顯示區域 -->
+        <div id="result-container" class="table-container">
+            <table id="result-table">
+                <thead>
+                    <tr>
+                        <th>日期</th>
+                        <th>時間</th>
+                        <th>作者</th>
+                        <th>連結</th>
+                    </tr>
+                </thead>
+                <tbody id="result-body">
+                    <!-- JS 動態填入 -->
+                </tbody>
+            </table>
+        </div>
+
+
         <hr style="margin: 30px 0;">
 
         <h2>查詢已提取的網址</h2>
@@ -43,6 +61,11 @@
         const textInput = document.getElementById('text-input');
         const submitButton = document.getElementById('submit-button');
         const statusMessage = document.getElementById('status-message');
+        const resultBody = document.getElementById('result-body');
+        const resultContainer = document.getElementById('result-container');
+
+        // 頁面載入時先隱藏表格
+        resultContainer.style.display = 'none';
 
         submitButton.addEventListener('click', async () => {
             const text = textInput.value;
@@ -54,6 +77,8 @@
 
             statusMessage.textContent = '正在處理中，請稍候...';
             statusMessage.style.color = 'blue';
+            resultBody.innerHTML = ''; // 清空舊結果
+            resultContainer.style.display = 'none'; // 隱藏表格
 
             try {
                 const response = await fetch('/api/ingestion/extract_urls', {
@@ -61,20 +86,61 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ text: text }),
                 });
-                const result = await response.json();
-                if (response.ok) {
-                    statusMessage.textContent = `成功！${result.message} 提取到 ${result.urls_found_count} 個網址。`;
-                    statusMessage.style.color = 'green';
-                } else {
-                    statusMessage.textContent = `錯誤：${result.detail || '未知錯誤'}`;
-                    statusMessage.style.color = 'red';
+
+                if (!response.ok) {
+                    const errorResult = await response.json();
+                    throw new Error(errorResult.detail || '伺服器發生錯誤');
                 }
+
+                const result = await response.json();
+
+                if (result.length === 0) {
+                    statusMessage.textContent = '未在文字中找到可解析的「作者-連結」組合。';
+                    statusMessage.style.color = 'orange';
+                    return;
+                }
+
+                statusMessage.textContent = `成功解析到 ${result.length} 筆資料。`;
+                statusMessage.style.color = 'green';
+
+                result.forEach(item => {
+                    const row = document.createElement('tr');
+
+                    const dateCell = document.createElement('td');
+                    dateCell.textContent = item.date || '---'; // 如果日期為 null 則顯示 ---
+
+                    const timeCell = document.createElement('td');
+                    timeCell.textContent = item.time;
+
+                    const authorCell = document.createElement('td');
+                    authorCell.textContent = item.author;
+
+                    const urlCell = document.createElement('td');
+                    const link = document.createElement('a');
+                    link.href = item.url;
+                    link.textContent = item.url.length > 80 ? item.url.substring(0, 80) + '...' : item.url;
+                    link.title = item.url; // 滑鼠懸浮時顯示完整網址
+                    link.target = '_blank';
+                    link.rel = 'noopener noreferrer';
+                    urlCell.appendChild(link);
+
+                    row.appendChild(dateCell);
+                    row.appendChild(timeCell);
+                    row.appendChild(authorCell);
+                    row.appendChild(urlCell);
+
+                    resultBody.appendChild(row);
+                });
+
+                resultContainer.style.display = 'block'; // 顯示表格
+
             } catch (error) {
-                statusMessage.textContent = `發生網路或腳本錯誤：${error.message}`;
+                statusMessage.textContent = `發生錯誤：${error.message}`;
                 statusMessage.style.color = 'red';
             }
         });
 
+        // --- 下方的搜尋功能維持不變 ---
         const searchInput = document.getElementById('search-input');
         const searchButton = document.getElementById('search-button');
         const searchResults = document.getElementById('search-results');
