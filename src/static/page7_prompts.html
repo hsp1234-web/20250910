@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>頁面七：提示詞管理</title>
+    <link rel="stylesheet" href="/static/css/nav.css">
+    <link rel="stylesheet" href="/static/css/common.css">
+    <link rel="stylesheet" href="/static/css/page7.css">
+</head>
+<body>
+    <nav class="top-nav">
+        <ul>
+            <li><a href="/">鳳凰主頁</a></li>
+            <li><a href="/page1">網址提取</a></li>
+            <li><a href="/page2">批次下載</a></li>
+            <li><a href="/page3">檔案處理</a></li>
+            <li><a href="/page4">AI 分析</a></li>
+            <li><a href="/page5">備份管理</a></li>
+            <li><a href="/page6">金鑰管理</a></li>
+            <li><a href="/page7" class="active">提示詞管理</a></li>
+        </ul>
+    </nav>
+
+    <div class="content">
+        <div class="panel">
+            <h1>提示詞管理</h1>
+            <p>在此頁面管理用於 AI 分析任務的提示詞。您可以新增、編輯或刪除提示詞。</p>
+        </div>
+
+        <div class="editor-layout">
+            <div class="prompt-list-panel">
+                <h2>提示詞列表</h2>
+                <div id="prompt-list-controls">
+                    <button id="new-prompt-btn">＋ 新增提示詞</button>
+                </div>
+                <div id="prompt-list" class="prompt-grid">
+                    <p>正在載入...</p>
+                </div>
+            </div>
+
+            <div class="prompt-editor-panel">
+                <h2 id="editor-title">選擇一個提示詞以開始編輯</h2>
+                <div id="editor-container" class="hidden">
+                    <div class="form-group">
+                        <label for="prompt-key-input">鍵名 (Key):</label>
+                        <input type="text" id="prompt-key-input" placeholder="例如：summary_v2">
+                    </div>
+                    <div class="form-group">
+                        <label for="prompt-content-textarea">內容 (JSON):</label>
+                        <textarea id="prompt-content-textarea" rows="20" placeholder="請在此輸入有效的 JSON 內容..."></textarea>
+                        <div id="json-validation-status"></div>
+                    </div>
+                    <div class="editor-actions">
+                        <button id="save-prompt-btn">儲存變更</button>
+                        <button id="delete-prompt-btn" class="delete-btn">刪除此提示詞</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    document.addEventListener('DOMContentLoaded', () => {
+        const promptList = document.getElementById('prompt-list');
+        const newPromptBtn = document.getElementById('new-prompt-btn');
+        const editorContainer = document.getElementById('editor-container');
+        const editorTitle = document.getElementById('editor-title');
+        const promptKeyInput = document.getElementById('prompt-key-input');
+        const promptContentTextarea = document.getElementById('prompt-content-textarea');
+        const savePromptBtn = document.getElementById('save-prompt-btn');
+        const deletePromptBtn = document.getElementById('delete-prompt-btn');
+        const jsonValidationStatus = document.getElementById('json-validation-status');
+
+        let prompts = {};
+        let selectedKey = null;
+        let originalKey = null;
+
+        const renderPromptList = () => {
+            promptList.innerHTML = '';
+            const keys = Object.keys(prompts).sort();
+            if (keys.length === 0) {
+                promptList.innerHTML = '<p>沒有可用的提示詞。</p>';
+                return;
+            }
+            keys.forEach(key => {
+                const card = document.createElement('div');
+                card.className = 'prompt-card';
+                card.dataset.key = key;
+                if (key === selectedKey) {
+                    card.classList.add('active');
+                }
+
+                const content = prompts[key];
+                const description = content.description || '無描述';
+
+                card.innerHTML = `
+                    <h3 class="prompt-card-title">${key}</h3>
+                    <p class="prompt-card-desc">${description}</p>
+                `;
+                promptList.appendChild(card);
+            });
+        };
+
+        const fetchPrompts = async () => {
+            try {
+                const response = await fetch('/api/prompts');
+                if (!response.ok) throw new Error('無法獲取提示詞列表');
+                prompts = await response.json();
+                renderPromptList();
+            } catch (error) {
+                promptList.innerHTML = `<li><span style="color: red;">${error.message}</span></li>`;
+            }
+        };
+
+        const showEditor = (key) => {
+            selectedKey = key;
+            originalKey = key;
+            const promptContent = prompts[key];
+
+            editorTitle.textContent = `正在編輯: ${key}`;
+            promptKeyInput.value = key;
+            promptContentTextarea.value = JSON.stringify(promptContent, null, 4);
+            editorContainer.classList.remove('hidden');
+            renderPromptList();
+        };
+
+        const clearEditor = () => {
+            selectedKey = null;
+            originalKey = null;
+            editorTitle.textContent = '選擇一個提示詞以開始編輯';
+            promptKeyInput.value = '';
+            promptContentTextarea.value = '';
+            editorContainer.classList.add('hidden');
+            renderPromptList();
+        };
+
+        promptList.addEventListener('click', (e) => {
+            const card = e.target.closest('.prompt-card');
+            if (card) {
+                const key = card.dataset.key;
+                if (key) {
+                    showEditor(key);
+                }
+            }
+        });
+
+        newPromptBtn.addEventListener('click', () => {
+            selectedKey = null;
+            originalKey = null;
+            editorTitle.textContent = '新增提示詞';
+            promptKeyInput.value = `new_prompt_${Date.now()}`;
+            promptContentTextarea.value = JSON.stringify({
+                "description": "新的提示詞描述",
+                "prompt": "請在此輸入您的提示內容..."
+            }, null, 4);
+            editorContainer.classList.remove('hidden');
+            promptKeyInput.focus();
+            renderPromptList();
+        });
+
+        const validateJson = () => {
+            try {
+                JSON.parse(promptContentTextarea.value);
+                jsonValidationStatus.textContent = 'JSON 格式有效';
+                jsonValidationStatus.className = 'status-valid';
+                return true;
+            } catch (e) {
+                jsonValidationStatus.textContent = `JSON 格式無效: ${e.message}`;
+                jsonValidationStatus.className = 'status-invalid';
+                return false;
+            }
+        };
+        promptContentTextarea.addEventListener('input', validateJson);
+
+        savePromptBtn.addEventListener('click', async () => {
+            if (!validateJson()) {
+                alert('無法儲存，因為 JSON 內容格式錯誤。');
+                return;
+            }
+
+            const newKey = promptKeyInput.value.trim();
+            if (!newKey) {
+                alert('鍵名不可為空。');
+                return;
+            }
+
+            const content = JSON.parse(promptContentTextarea.value);
+
+            // 如果鍵名被修改，且新鍵名不是舊鍵名，且新鍵名已存在，則不允許
+            if (originalKey && newKey !== originalKey && prompts[newKey]) {
+                alert(`無法將鍵名從 '${originalKey}' 改為 '${newKey}'，因為目標鍵名已存在。`);
+                return;
+            }
+
+            try {
+                // 儲存新的或更新的
+                const response = await fetch('/api/prompts', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ key: newKey, content: content })
+                });
+                const result = await response.json();
+                if (!response.ok) throw new Error(result.detail || '儲存失敗');
+
+                // 如果鍵名被修改，需要刪除舊的鍵
+                if (originalKey && newKey !== originalKey) {
+                    const deleteResponse = await fetch(`/api/prompts/${originalKey}`, { method: 'DELETE' });
+                    if (!deleteResponse.ok) {
+                        // 即使刪除舊的失敗，新的也已儲存，提示用戶即可
+                        alert(`警告：已成功儲存為新的鍵名 '${newKey}'，但刪除舊的鍵名 '${originalKey}' 失敗。`);
+                    }
+                }
+
+                await fetchPrompts();
+                showEditor(newKey); // 重新選中（可能是新的）鍵
+
+            } catch (error) {
+                alert(`儲存失敗: ${error.message}`);
+            }
+        });
+
+        deletePromptBtn.addEventListener('click', async () => {
+            if (!originalKey) return;
+
+            if (!confirm(`您確定要永久刪除提示詞 '${originalKey}' 嗎？此操作無法復原。`)) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/prompts/${originalKey}`, { method: 'DELETE' });
+                const result = await response.json();
+                if (!response.ok) throw new Error(result.detail || '刪除失敗');
+
+                await fetchPrompts();
+                clearEditor();
+
+            } catch (error) {
+                alert(`刪除失敗: ${error.message}`);
+            }
+        });
+
+        fetchPrompts();
+    });
+    </script>
+</body>
+</html>

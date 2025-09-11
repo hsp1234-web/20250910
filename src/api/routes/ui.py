@@ -35,6 +35,14 @@ async def serve_page4(request: Request):
 async def serve_page5(request: Request):
     return templates.TemplateResponse("page5_backup.html", {"request": request})
 
+@router.get("/page6", response_class=HTMLResponse)
+async def serve_page6(request: Request):
+    return templates.TemplateResponse("page6_keys.html", {"request": request})
+
+@router.get("/page7", response_class=HTMLResponse)
+async def serve_page7(request: Request):
+    return templates.TemplateResponse("page7_prompts.html", {"request": request})
+
 @router.get("/prompts", response_class=HTMLResponse)
 async def serve_prompts_ui(request: Request):
     return templates.TemplateResponse("prompts.html", {"request": request})
