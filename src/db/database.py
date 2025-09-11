@@ -142,6 +142,7 @@ def initialize_database(conn: sqlite3.Connection = None):
                 status_message TEXT,
                 local_path TEXT,
                 file_hash TEXT,
+                extracted_text TEXT,
                 extracted_image_paths TEXT
             )
             ''')
@@ -166,7 +167,8 @@ def initialize_database(conn: sqlite3.Connection = None):
                 "status_message": "TEXT",
                 "local_path": "TEXT",
                 "file_hash": "TEXT",
-                "extracted_image_paths": "TEXT"
+                "extracted_image_paths": "TEXT",
+                "extracted_text": "TEXT"
             }
             for col, col_type in url_migrations.items():
                 try:

@@ -1,3 +1,32 @@
+## 1004號 - 2025-09-11T02:28:59.558868+08:00
+
+### feat(processor): 完整實作文件文字提取與報告顯示功能
+
+- **動機**:
+    使用者回報，在「報告檢視器」中，雖然可以看到從文件中提取出的圖片，但文字內容部分只顯示一個預留位置。經查，這是因為後端的文字提取、儲存與查詢功能從未被完整實作。
+- **核心變更**:
+    - **資料庫升級 (`src/db/database.py`)**:
+        - 在 `extracted_urls` 資料表中新增了一個 `extracted_text` (TEXT類型) 欄位，專門用來儲存從文件中提取出的文字內容。
+        - 同時更新了資料庫的遷移邏輯，以確保對舊有資料庫的相容性。
+    - **實作內容提取器 (`src/tools/content_extractor.py`)**:
+        - 為 `extract_content` 函式增加了真正的文字提取能力。
+        - 針對 PDF (`.pdf`) 檔案，使用 `PyMuPDF` (fitz) 函式庫逐頁提取文字。
+        - 針對 Word (`.docx`) 檔案，使用 `python-docx` 函式庫逐段提取文字。
+        - 針對 PowerPoint (`.pptx`) 檔案，使用 `python-pptx` 函式庫遍歷投影片中的所有形狀以提取文字。
+    - **更新檔案處理邏輯 (`src/api/routes/page3_processor.py`)**:
+        - 修改了 `run_processing_task` 背景任務。現在，它會從 `extract_content` 的回傳結果中獲取文字，並將其儲存到資料庫中對應紀錄的 `extracted_text` 新欄位。
+    - **更新報告 API (`src/api/routes/page3_processor.py`)**:
+        - 修改了 `get_report_content` API 端點。它不再回傳預留位置文字，而是從資料庫中讀取 `extracted_text` 欄位的真實內容，並將其回傳給前端。
+    - **強化整合測試 (`tests/test_integration.py`)**:
+        - 根據使用者的建議，擴充了 `test_real_file_processing_task` 整合測試。
+        - 新增了多個斷言 (assertions)，用於在檔案處理流程結束後，驗證資料庫中的 `extracted_text` 欄位是否被正確填充了預期的文字內容。
+        - 在除錯過程中，為測試環境補齊了所有在 `requirements/*.txt` 中定義的依賴套件，確保了測試環境的完整性。
+- **成果**:
+    1. 成功地從無到有，完整地實作了文件文字提取功能。
+    2. 現在，使用者在報告檢視器中可以看到真實的、從原始檔案中提取出的文字內容，徹底解決了功能缺失的問題。
+    3. 透過自動化整合測試確保了新功能的穩定性與正確性。
+
+---
 ## 1003號 - 2025-09-11T02:04:14.841857+08:00
 
 ### fix(core): 全面修復檔案處理流程並建立測試套件

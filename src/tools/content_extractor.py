@@ -56,6 +56,30 @@ def extract_images_from_docx(file_path: Path, output_dir: Path) -> list[Path]:
         log.error(f"從 DOCX '{file_path.name}' 提取圖片時發生錯誤: {e}", exc_info=True)
     return image_paths
 
+def extract_text_from_pdf(file_path: Path) -> str:
+    """從 PDF 檔案中提取所有文字。"""
+    text_content = ""
+    try:
+        pdf_document = fitz.open(file_path)
+        for page in pdf_document:
+            text_content += page.get_text()
+        log.info(f"從 PDF '{file_path.name}' 中成功提取文字。")
+    except Exception as e:
+        log.error(f"從 PDF '{file_path.name}' 提取文字時發生錯誤: {e}", exc_info=True)
+    return text_content
+
+def extract_text_from_docx(file_path: Path) -> str:
+    """從 DOCX 檔案中提取所有文字。"""
+    text_content = ""
+    try:
+        doc = docx.Document(file_path)
+        for para in doc.paragraphs:
+            text_content += para.text + "\n"
+        log.info(f"從 DOCX '{file_path.name}' 中成功提取文字。")
+    except Exception as e:
+        log.error(f"從 DOCX '{file_path.name}' 提取文字時發生錯誤: {e}", exc_info=True)
+    return text_content
+
 def extract_images_from_pptx(file_path: Path, output_dir: Path) -> list[Path]:
     """從 PPTX 檔案中提取所有圖片。"""
     image_paths = []
@@ -79,6 +103,19 @@ def extract_images_from_pptx(file_path: Path, output_dir: Path) -> list[Path]:
         log.error(f"從 PPTX '{file_path.name}' 提取圖片時發生錯誤: {e}", exc_info=True)
     return image_paths
 
+def extract_text_from_pptx(file_path: Path) -> str:
+    """從 PPTX 檔案中提取所有文字。"""
+    text_content = ""
+    try:
+        prs = Presentation(file_path)
+        for slide in prs.slides:
+            for shape in slide.shapes:
+                if hasattr(shape, "text"):
+                    text_content += shape.text + "\n"
+        log.info(f"從 PPTX '{file_path.name}' 中成功提取文字。")
+    except Exception as e:
+        log.error(f"從 PPTX '{file_path.name}' 提取文字時發生錯誤: {e}", exc_info=True)
+    return text_content
 
 def extract_content(file_path_str: str, image_output_dir_str: str) -> dict | None:
     """
@@ -98,21 +135,25 @@ def extract_content(file_path_str: str, image_output_dir_str: str) -> dict | Non
 
     ext = file_path.suffix.lower()
     image_paths = []
+    text_content = ""
 
     if ext == '.pdf':
         image_paths = extract_images_from_pdf(file_path, output_dir)
+        text_content = extract_text_from_pdf(file_path)
     elif ext == '.docx':
         image_paths = extract_images_from_docx(file_path, output_dir)
+        text_content = extract_text_from_docx(file_path)
     elif ext == '.pptx':
         image_paths = extract_images_from_pptx(file_path, output_dir)
+        text_content = extract_text_from_pptx(file_path)
     else:
         log.warning(f"不支援的檔案類型: {ext}。跳過內容提取。")
         return {
-            "text": "", # 未來可以加入文字提取邏輯
+            "text": "",
             "image_paths": []
         }
 
     return {
-        "text": "", # 未來可以加入文字提取邏輯
+        "text": text_content,
         "image_paths": [str(p) for p in image_paths] # 回傳字串路徑列表
     }

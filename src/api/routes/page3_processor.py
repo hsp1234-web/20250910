@@ -89,15 +89,15 @@ async def get_report_content(file_id: int):
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute(
-            "SELECT extracted_image_paths FROM extracted_urls WHERE id = ? AND status = 'processed'",
+            "SELECT extracted_text, extracted_image_paths FROM extracted_urls WHERE id = ? AND status = 'processed'",
             (file_id,)
         )
         row = cursor.fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="找不到指定 ID 的已處理報告。")
 
-        # 模擬文字內容
-        placeholder_text = "這裡是從文件中提取的文字內容的預留位置。未來的版本將會實作文字提取功能。"
+        # 從資料庫獲取真實的文字內容
+        text_content = row['extracted_text'] if row['extracted_text'] else "文件中未提取到任何文字。"
 
         # 處理圖片
         compressed_image_paths = []
@@ -119,7 +119,7 @@ async def get_report_content(file_id: int):
                     compressed_image_paths.append(web_path)
 
         return JSONResponse(content={
-            "text_content": placeholder_text,
+            "text_content": text_content,
             "image_paths": compressed_image_paths
         })
 
@@ -161,17 +161,21 @@ def run_processing_task(url_id: int, port: int):
 
         image_output_dir = file_path.parent / "extracted_images"
         content_data = extract_content(str(file_path), str(image_output_dir))
+
+        # 從 content_data 中提取文字和圖片路徑
+        extracted_text = content_data.get("text", "") if content_data else ""
         image_paths_json = json.dumps(content_data.get("image_paths", [])) if content_data else "[]"
 
         final_status = 'processed'
+        # 注意：我們不在 result_payload 中傳遞整個文字內容，因為它可能很大
         result_payload = {"file_hash": file_hash, "image_paths": image_paths_json}
         cursor.execute(
             """
             UPDATE extracted_urls
-            SET status = ?, status_message = '處理成功', file_hash = ?, extracted_image_paths = ?
+            SET status = ?, status_message = '處理成功', file_hash = ?, extracted_image_paths = ?, extracted_text = ?
             WHERE id = ?
             """,
-            (final_status, file_hash, image_paths_json, url_id)
+            (final_status, file_hash, image_paths_json, extracted_text, url_id)
         )
         conn.commit()
         log.info(f"背景任務：URL ID {url_id} 處理成功。")

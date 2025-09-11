@@ -141,9 +141,22 @@ def test_real_file_processing_task(db_conn, tmp_path, dummy_image_path, file_cre
     except (json.JSONDecodeError, IndexError):
         pytest.fail("extracted_image_paths 欄位不是一個有效的、包含路徑的 JSON 列表")
 
+    # 驗證文字是否已提取
+    assert result["extracted_text"] is not None, "extracted_text 欄位不應為 None"
+    assert isinstance(result["extracted_text"], str), "extracted_text 應為字串"
+    assert len(result["extracted_text"].strip()) > 0, "提取的文字內容不應為空"
+
+    # 根據檔案類型檢查特定的文字內容
+    if file_type == "DOCX":
+        assert "這是DOCX文件" in result["extracted_text"]
+    elif file_type == "PDF":
+        # 注意：FPDF 在測試中可能不會輸出完全相同的文字，但我們可以檢查關鍵字
+        assert "This is a PDF document" in result["extracted_text"]
+
     print(f"\n✅ {file_type} 檔案整合測試成功!")
     print(f"  - 狀態更新為: {result['status']}")
     print(f"  - 提取的圖片: {result['extracted_image_paths']}")
+    print(f"  - 提取的文字 (前50字): {result['extracted_text'][:50]}...")
 
 
 def test_drive_downloader_new_logic(tmp_path, monkeypatch):
