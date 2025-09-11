@@ -5,7 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>頁面四：AI 分析</title>
     <link rel="stylesheet" href="/static/css/nav.css">
-    <link rel="stylesheet" href="/static/css/page4.css">
+    <link rel="stylesheet" href="/static/css/common.css">
+    <link rel="stylesheet" href="/static/css/page4.css"> <!-- 使用 page4 的 css -->
 </head>
 <body>
     <nav class="top-nav">
@@ -22,109 +23,228 @@
     </nav>
 
     <div class="content">
-        <h1>頁面四：AI 分析與歷史報告</h1>
-        <p>請選擇一個已處理完成的檔案和一個要使用的提示詞，然後開始 AI 分析。</p>
+        <div class="panel">
+            <h1>頁面四：AI 分析與歷史報告</h1>
+            <p>請勾選您想分析的項目，然後點擊按鈕開始分析。分析流程將採用在「提示詞管理」頁面設定的兩階段提示詞。</p>
+             <div class="management-links">
+                <a href="/page6" class="button-link">管理 API 金鑰</a>
+                <a href="/page7" class="button-link">管理提示詞</a>
+            </div>
 
-        <div class="form-group">
-            <label for="file-select">選擇檔案:</label>
-            <select id="file-select" name="file-select">
-                <option value="">正在載入檔案...</option>
-            </select>
+            <div style="margin-bottom: 10px; margin-top: 20px;">
+                <button id="select-all-button">全選</button>
+                <button id="deselect-all-button">取消全選</button>
+            </div>
+
+            <div id="file-list-container">
+                <p>正在載入已處理的檔案...</p>
+            </div>
+
+            <div style="margin-top: 20px;">
+                <button id="start-analysis-btn">開始分析選中項目</button>
+            </div>
         </div>
 
-        <div class="management-links">
-            <a href="/page6" class="button-link">管理 API 金鑰</a>
-            <a href="/page7" class="button-link">管理提示詞</a>
+        <div class="panel">
+            <div class="panel-header">
+                <h2>狀態日誌</h2>
+                <button id="copy-log-button" class="copy-button" title="複製日誌">📄</button>
+            </div>
+            <div id="status-area">
+                <!-- 分析狀態將會顯示在這裡 -->
+            </div>
         </div>
 
-        <div class="form-group">
-            <label for="prompt-select">選擇提示詞:</label>
-            <select id="prompt-select" name="prompt-select">
-                <option value="">正在載入提示詞...</option>
-            </select>
+        <div class="panel">
+            <h2>已生成報告</h2>
+            <div id="completed-list-container">
+                <p>此處會顯示已成功生成的分析報告。</p>
+            </div>
         </div>
-
-        <button id="start-analysis-btn">使用金鑰池中的有效金鑰開始分析</button>
-        <div id="analysis-status"></div>
     </div>
 
     <script>
         document.addEventListener('DOMContentLoaded', () => {
-            const fileSelect = document.getElementById('file-select');
-            const promptSelect = document.getElementById('prompt-select');
-            const startBtn = document.getElementById('start-analysis-btn');
-            const statusDiv = document.getElementById('analysis-status');
+            const fileListContainer = document.getElementById('file-list-container');
+            const selectAllButton = document.getElementById('select-all-button');
+            const deselectAllButton = document.getElementById('deselect-all-button');
+            const startAnalysisBtn = document.getElementById('start-analysis-btn');
+            const statusArea = document.getElementById('status-area');
+            const completedListContainer = document.getElementById('completed-list-container');
+            const copyLogButton = document.getElementById('copy-log-button');
 
-            const populateFiles = async () => {
+            const formatTaipeiTime = (isoString) => {
+                if (!isoString) return '無效時間';
                 try {
+                    const date = new Date(isoString);
+                    const formatter = new Intl.DateTimeFormat('en-CA', {
+                        timeZone: 'Asia/Taipei',
+                        year: 'numeric', month: '2-digit', day: '2-digit',
+                        hour: '2-digit', minute: '2-digit', second: '2-digit',
+                        hour12: false
+                    });
+                    return formatter.format(date).replace(/-/g, '/').replace(',', '');
+                } catch (e) {
+                    console.error("時間格式化失敗:", e, "輸入值:", isoString);
+                    return '時間格式錯誤';
+                }
+            };
+
+            const logStatus = (message, color = 'black') => {
+                const timestamp = formatTaipeiTime(new Date().toISOString());
+                statusArea.insertAdjacentHTML('afterbegin', `<p style="color: ${color};">${timestamp}: ${message}</p>`);
+            };
+
+            const fetchAndRenderFiles = async () => {
+                try {
+                    logStatus('正在獲取可分析的檔案列表...');
                     const response = await fetch('/api/analyzer/processed_files');
+                    if (!response.ok) throw new Error(`伺服器錯誤 (狀態 ${response.status})`);
                     const files = await response.json();
-                    fileSelect.innerHTML = '<option value="">-- 請選擇一個檔案 --</option>';
-                    if (files.length > 0) {
-                        files.forEach(file => {
-                            const option = new Option(`${file.filename}`, file.id);
-                            fileSelect.add(option);
-                        });
-                    } else {
-                        fileSelect.innerHTML = '<option value="">沒有可分析的檔案</option>';
-                        fileSelect.disabled = true;
+
+                    if (files.length === 0) {
+                        fileListContainer.innerHTML = '<p>目前沒有已處理完成、可供分析的檔案。</p>';
+                        startAnalysisBtn.disabled = true;
+                        selectAllButton.disabled = true;
+                        deselectAllButton.disabled = true;
+                        logStatus('列表為空。');
+                        return;
                     }
+
+                    let html = `
+                        <table class="results-table">
+                            <thead>
+                                <tr>
+                                    <th><input type="checkbox" id="select-all-header-checkbox"></th>
+                                    <th>檔案名稱</th>
+                                    <th>原始連結</th>
+                                </tr>
+                            </thead>
+                            <tbody>`;
+                    files.forEach(file => {
+                        html += `
+                            <tr>
+                                <td><input type="checkbox" class="file-checkbox" value="${file.id}"></td>
+                                <td>${file.filename}</td>
+                                <td class="url-cell"><a href="${file.url}" title="${file.url}" target="_blank">${file.url}</a></td>
+                            </tr>`;
+                    });
+                    html += '</tbody></table>';
+                    fileListContainer.innerHTML = html;
+
+                    document.getElementById('select-all-header-checkbox').addEventListener('change', (e) => {
+                        document.querySelectorAll('.file-checkbox').forEach(cb => cb.checked = e.target.checked);
+                    });
+
+                    startAnalysisBtn.disabled = false;
+                    selectAllButton.disabled = false;
+                    deselectAllButton.disabled = false;
+                    logStatus(`成功載入 ${files.length} 個可分析的檔案。`);
+
                 } catch (error) {
-                    fileSelect.innerHTML = '<option value="">載入檔案失敗</option>';
-                    console.error('Failed to fetch processed files:', error);
+                    const errorMsg = `載入可分析檔案列表失敗：${error.message}`;
+                    fileListContainer.innerHTML = `<p style="color: red;">${errorMsg}</p>`;
+                    logStatus(errorMsg, 'red');
                 }
             };
 
-            const populatePrompts = async () => {
-                try {
-                    const response = await fetch('/api/analyzer/prompts');
-                    const prompts = await response.json();
-                    promptSelect.innerHTML = '<option value="">-- 請選擇一個提示詞 --</option>';
-                    for (const key in prompts) {
-                        const option = new Option(key, key);
-                        promptSelect.add(option);
-                    }
-                } catch (error) {
-                    promptSelect.innerHTML = '<option value="">載入提示詞失敗</option>';
-                    console.error('Failed to fetch prompts:', error);
-                }
-            };
+            selectAllButton.addEventListener('click', () => document.querySelectorAll('.file-checkbox').forEach(cb => cb.checked = true));
+            deselectAllButton.addEventListener('click', () => document.querySelectorAll('.file-checkbox').forEach(cb => cb.checked = false));
 
-            startBtn.addEventListener('click', async () => {
-                const fileId = fileSelect.value;
-                const promptKey = promptSelect.value;
-
-                if (!fileId || !promptKey) {
-                    alert('請務必選擇一個檔案和一個提示詞。');
+            startAnalysisBtn.addEventListener('click', async () => {
+                const selectedIds = Array.from(document.querySelectorAll('.file-checkbox:checked')).map(cb => parseInt(cb.value, 10));
+                if (selectedIds.length === 0) {
+                    alert('請至少選擇一個要分析的項目。');
                     return;
                 }
-
-                statusDiv.textContent = '正在提交分析請求...';
-                statusDiv.style.color = 'blue';
-
+                logStatus(`正在為 ${selectedIds.length} 個項目發送分析請求...`);
                 try {
-                    // 後端現在會自動從金鑰池中選取金鑰，所以不再需要傳遞 api_key
+                    // 後端將會被修改為接收一個 ID 列表
                     const response = await fetch('/api/analyzer/start_analysis', {
                         method: 'POST',
                         headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({
-                            file_id: parseInt(fileId, 10),
-                            prompt_key: promptKey
-                        })
+                        body: JSON.stringify({ file_ids: selectedIds }) // 將傳送一個列表
                     });
-
                     const result = await response.json();
                     if (!response.ok) throw new Error(result.detail || '啟動分析時發生未知錯誤。');
-                    statusDiv.textContent = result.message;
-                    statusDiv.style.color = 'green';
+                    logStatus(result.message, 'green');
+                    // 刷新可分析列表（被選中的應該會進入處理中狀態，從列表中消失）
+                    await fetchAndRenderFiles();
                 } catch (error) {
-                    statusDiv.textContent = `請求失敗：${error.message}`;
-                    statusDiv.style.color = 'red';
+                    logStatus(`請求失敗：${error.message}`, 'red');
                 }
             });
 
-            populateFiles();
-            populatePrompts();
+            const fetchAndRenderReports = async () => {
+                try {
+                    const response = await fetch('/api/analyzer/reports');
+                    if (!response.ok) throw new Error(`伺服器錯誤 (狀態 ${response.status})`);
+                    const reports = await response.json();
+
+                    if (reports.length === 0) {
+                        completedListContainer.innerHTML = '<p>目前沒有已生成的報告。</p>';
+                        return;
+                    }
+                    // 注意：報告的 API 路徑是 /reports/{id}，不是 /api/reports/{id}
+                    let html = '<ul>';
+                    reports.forEach(report => {
+                        const reportDate = formatTaipeiTime(report.created_at);
+                        html += `<li>- ${reportDate}: <a href="/report/${report.id}" target="_blank">查看報告 (來源: ${report.source_url})</a></li>`;
+                    });
+                    html += '</ul>';
+                    completedListContainer.innerHTML = html;
+                } catch (error) {
+                    completedListContainer.innerHTML = `<p style="color: red;">載入報告列表失敗：${error.message}</p>`;
+                }
+            };
+
+            const setupWebSocket = () => {
+                const ws = new WebSocket(`${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/api/ws`);
+                ws.onopen = () => logStatus('WebSocket 連線成功。等待即時更新...', 'blue');
+                ws.onclose = () => {
+                    logStatus('WebSocket 連線已中斷。5 秒後嘗試重新連線...', 'orange');
+                    setTimeout(setupWebSocket, 5000);
+                };
+                ws.onerror = (error) => console.error("WebSocket Error:", error);
+                ws.onmessage = (event) => {
+                    const data = JSON.parse(event.data);
+                    logStatus(`收到 WebSocket 訊息: ${data.type}`, 'blue');
+                    if (data.type === 'ANALYSIS_PROGRESS') {
+                         logStatus(`[進度] ${data.message}`, 'purple');
+                    } else if (data.type === 'ANALYSIS_COMPLETE') {
+                        logStatus(`[完成] ${data.message}`, 'green');
+                        // 稍作延遲以等待資料庫完全更新
+                        setTimeout(() => {
+                            fetchAndRenderFiles();
+                            fetchAndRenderReports();
+                        }, 500);
+                    }
+                };
+            };
+
+            copyLogButton.addEventListener('click', () => {
+                const logContent = statusArea.innerText;
+                navigator.clipboard.writeText(logContent).then(() => {
+                    const originalIcon = copyLogButton.innerText;
+                    copyLogButton.innerText = '✅';
+                    copyLogButton.disabled = true;
+                    setTimeout(() => {
+                        copyLogButton.innerText = originalIcon;
+                        copyLogButton.disabled = false;
+                    }, 3000);
+                }).catch(err => {
+                    console.error('無法複製日誌: ', err);
+                    alert('複製失敗，請手動複製。');
+                });
+            });
+
+            (async () => {
+                await Promise.all([
+                    fetchAndRenderFiles(),
+                    fetchAndRenderReports()
+                ]);
+                setupWebSocket();
+            })();
         });
     </script>
 </body>

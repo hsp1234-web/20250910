@@ -183,9 +183,19 @@ def initialize_database(conn: sqlite3.Connection = None):
                         pass
                     else:
                         raise # 對於其他錯誤，則重新引發
+
+            # --- 為 reports 表格新增 structured_data 欄位 ---
+            try:
+                cursor.execute("ALTER TABLE reports ADD COLUMN structured_data TEXT")
+                log.info("欄位 'structured_data' 已成功新增至 'reports' 資料表。")
+            except sqlite3.OperationalError as e:
+                if "duplicate column name" in str(e):
+                    pass
+                else:
+                    raise
             # --- 結束 ---
 
-        log.info("✅ 資料庫初始化完成。`tasks`, `system_logs`, `app_state`, `extracted_urls` 資料表已存在。")
+        log.info("✅ 資料庫初始化完成。`tasks`, `system_logs`, `app_state`, `extracted_urls`, `reports` 資料表已存在。")
     except sqlite3.Error as e:
         log.error(f"初始化資料庫時發生錯誤: {e}")
     finally:

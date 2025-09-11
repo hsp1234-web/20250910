@@ -3,244 +3,180 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>頁面七：提示詞管理</title>
-    <link rel="stylesheet" href="/static/css/nav.css">
-    <link rel="stylesheet" href="/static/css/common.css">
-    <link rel="stylesheet" href="/static/css/page7.css">
+    <title>優化版 - 提示詞管理 (V2)</title>
+    <!-- 引入 Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- 引入 Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
+    <style>
+        /* 自訂字體與基本樣式 */
+        body {
+            font-family: 'Inter', 'Noto Sans TC', sans-serif;
+            background-color: #f8fafc; /* Tailwind slate-50 */
+        }
+        /* 美化捲軸 */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #f1f5f9; /* slate-100 */
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #cbd5e1; /* slate-300 */
+            border-radius: 10px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8; /* slate-400 */
+        }
+    </style>
 </head>
-<body>
-    <nav class="top-nav">
-        <ul>
-            <li><a href="/">鳳凰主頁</a></li>
-            <li><a href="/page1">網址提取</a></li>
-            <li><a href="/page2">批次下載</a></li>
-            <li><a href="/page3">檔案處理</a></li>
-            <li><a href="/page4">AI 分析</a></li>
-            <li><a href="/page5">備份管理</a></li>
-            <li><a href="/page6">金鑰管理</a></li>
-            <li><a href="/page7" class="active">提示詞管理</a></li>
-        </ul>
-    </nav>
+<body class="antialiased text-slate-800">
 
-    <div class="content">
-        <div class="panel">
-            <h1>提示詞管理</h1>
-            <p>在此頁面管理用於 AI 分析任務的提示詞。您可以新增、編輯或刪除提示詞。</p>
-        </div>
-
-        <div class="editor-layout">
-            <div class="prompt-list-panel">
-                <h2>提示詞列表</h2>
-                <div id="prompt-list-controls">
-                    <button id="new-prompt-btn">＋ 新增提示詞</button>
+    <!-- 頁首導覽列 (模擬) -->
+    <nav class="bg-slate-800 shadow-md">
+        <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex items-center justify-between h-16">
+                <div class="flex items-center">
+                    <span class="font-bold text-white text-xl">鳳凰系統</span>
                 </div>
-                <div id="prompt-list" class="prompt-grid">
-                    <p>正在載入...</p>
+                 <div class="hidden md:block">
+                    <div class="ml-10 flex items-baseline space-x-4">
+                        <a href="#" class="text-slate-300 hover:bg-slate-700 hover:text-white px-3 py-2 rounded-md text-sm font-medium">主頁</a>
+                        <a href="#" class="bg-slate-900 text-white px-3 py-2 rounded-md text-sm font-medium" aria-current="page">提示詞管理</a>
+                        <a href="#" class="text-slate-300 hover:bg-slate-700 hover:text-white px-3 py-2 rounded-md text-sm font-medium">金鑰管理</a>
+                    </div>
                 </div>
             </div>
+        </div>
+    </nav>
 
-            <div class="prompt-editor-panel">
-                <h2 id="editor-title">選擇一個提示詞以開始編輯</h2>
-                <div id="editor-container" class="hidden">
+    <!-- 主要內容區 -->
+    <div class="max-w-5xl mx-auto py-8 sm:px-6 lg:px-8">
+        <div class="px-4 py-6 sm:px-0">
+
+            <!-- 頁面標題 -->
+            <div class="px-4 md:px-0 mb-8">
+                <h1 class="text-3xl font-bold leading-tight text-slate-900">交易分析流程 - 提示詞管理</h1>
+                <p class="mt-2 text-md text-slate-600">此頁面用於設定交易報告自動化流程中，兩個核心 AI 階段所使用的提示詞。</p>
+            </div>
+
+            <!-- 提示詞編輯區 -->
+            <div class="space-y-8">
+
+                <!-- 階段一：資料提取 -->
+                <div class="bg-white rounded-xl shadow-md p-6 border border-slate-200">
+                    <h2 class="text-2xl font-bold text-slate-900">第一階段：結構化資料提取</h2>
+                    <p class="mt-2 mb-4 text-slate-600">此提示詞指示 AI 從原始文章中提取交易策略的關鍵資訊，並以 JSON 格式回傳。</p>
                     <div class="form-group">
-                        <label for="prompt-key-input">鍵名 (Key):</label>
-                        <input type="text" id="prompt-key-input" placeholder="例如：summary_v2">
+                        <label for="stage1-textarea" class="block text-sm font-medium text-slate-700 mb-2">提示詞內容：</label>
+                        <textarea id="stage1-textarea" rows="15" class="block w-full px-3 py-2 bg-white border border-slate-300 rounded-md shadow-sm placeholder-slate-400 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm font-mono"></textarea>
                     </div>
-                    <div class="form-group">
-                        <label for="prompt-content-textarea">內容 (JSON):</label>
-                        <textarea id="prompt-content-textarea" rows="20" placeholder="請在此輸入有效的 JSON 內容..."></textarea>
-                        <div id="json-validation-status"></div>
-                    </div>
-                    <div class="editor-actions">
-                        <button id="save-prompt-btn">儲存變更</button>
-                        <button id="delete-prompt-btn" class="delete-btn">刪除此提示詞</button>
+                    <div class="mt-4 text-right">
+                        <button id="save-stage1-btn" class="bg-blue-600 text-white font-semibold py-2 px-6 rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50 transition-colors duration-200">
+                            儲存第一階段提示詞
+                        </button>
                     </div>
                 </div>
+
+                <!-- 階段二：報告生成 -->
+                <div class="bg-white rounded-xl shadow-md p-6 border border-slate-200">
+                    <h2 class="text-2xl font-bold text-slate-900">第二階段：HTML 報告生成</h2>
+                    <p class="mt-2 mb-4 text-slate-600">此提示詞指示 AI 扮演財經編輯，將後端處理好的所有數據（策略、股價、回測結果）整合成一份精美的 HTML 報告。</p>
+                    <div class="form-group">
+                        <label for="stage2-textarea" class="block text-sm font-medium text-slate-700 mb-2">提示詞內容：</label>
+                        <textarea id="stage2-textarea" rows="15" class="block w-full px-3 py-2 bg-white border border-slate-300 rounded-md shadow-sm placeholder-slate-400 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm font-mono"></textarea>
+                    </div>
+                     <div class="mt-4 text-right">
+                        <button id="save-stage2-btn" class="bg-blue-600 text-white font-semibold py-2 px-6 rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50 transition-colors duration-200">
+                            儲存第二階段提示詞
+                        </button>
+                    </div>
+                </div>
+
             </div>
         </div>
     </div>
 
     <script>
     document.addEventListener('DOMContentLoaded', () => {
-        const promptList = document.getElementById('prompt-list');
-        const newPromptBtn = document.getElementById('new-prompt-btn');
-        const editorContainer = document.getElementById('editor-container');
-        const editorTitle = document.getElementById('editor-title');
-        const promptKeyInput = document.getElementById('prompt-key-input');
-        const promptContentTextarea = document.getElementById('prompt-content-textarea');
-        const savePromptBtn = document.getElementById('save-prompt-btn');
-        const deletePromptBtn = document.getElementById('delete-prompt-btn');
-        const jsonValidationStatus = document.getElementById('json-validation-status');
+        // DOM 元素獲取
+        const stage1Textarea = document.getElementById('stage1-textarea');
+        const saveStage1Btn = document.getElementById('save-stage1-btn');
+        const stage2Textarea = document.getElementById('stage2-textarea');
+        const saveStage2Btn = document.getElementById('save-stage2-btn');
 
+        // 狀態變數
         let prompts = {};
-        let selectedKey = null;
-        let originalKey = null;
 
-        const renderPromptList = () => {
-            promptList.innerHTML = '';
-            const keys = Object.keys(prompts).sort();
-            if (keys.length === 0) {
-                promptList.innerHTML = '<p>沒有可用的提示詞。</p>';
-                return;
-            }
-            keys.forEach(key => {
-                const card = document.createElement('div');
-                card.className = 'prompt-card';
-                card.dataset.key = key;
-                if (key === selectedKey) {
-                    card.classList.add('active');
-                }
+        /**
+         * 從後端(此處為模擬)獲取提示詞並渲染到介面
+         */
+        const loadAndRenderPrompts = () => {
+             // **模擬後端 API 呼叫**
+            const mockPrompts = {
+                "stage_1_extraction_prompt": `請您扮演一位專業的量化交易策略師。請仔細閱讀以下提供的財經分析內容，並嚴格按照指定的JSON格式，提取所有相關的交易策略資訊。
 
-                const content = prompts[key];
-                const description = content.description || '無描述';
+必要欄位：
+- "report_title" (string): 根據文章內容生成一個5-10個字的精簡報告標題。
+- "product_symbol" (string): 商品的代號，例如股票代號 "2330.TW" 或期貨代號 "TXF2"。請使用 Yahoo Finance API 相容的代號。
+- "document_date" (string): 根據文件內容或上下文推斷出的文件日期，格式為 "YYYY-MM-DD"。
+- "strategy_summary" (string): 用2-3句話簡潔總結這個交易策略的核心邏輯。
 
-                card.innerHTML = `
-                    <h3 class="prompt-card-title">${key}</h3>
-                    <p class="prompt-card-desc">${description}</p>
-                `;
-                promptList.appendChild(card);
-            });
+如果某個欄位的資訊在文件中沒有明確提及，請在該欄位中填入 null。
+請直接回傳 JSON 物件，不要包含任何額外的解釋或 Markdown 標記。`,
+                "stage_2_generation_prompt": `請您扮演一位頂尖的財經報告編輯。您將會收到一份包含多種數據的完整資料包。您的任務是將這些資料完美地整合成一份專業、精美、且易於閱讀的單頁 HTML 報告。
+
+請嚴格遵守以下指示：
+1.  **整體風格**：報告需採用現代化、簡潔的設計風格。使用 Tailwind CSS 進行排版。
+2.  **圖表整合**：報告中需要包含一個使用 Chart.js 繪製的績效回測圖。我會提供給您 Chart.js 所需的 'labels' 和 'data' 陣列，請您將這些數據嵌入到 HTML 的 <script> 區塊中。
+3.  **表格呈現**：我會提供關鍵績效指標和交易紀錄的數據，請您使用帶有表頭的 HTML <table> 將它們清晰地呈現出來。
+4.  **內容撰寫**：請根據我提供的「策略摘要」，撰寫報告的文字分析部分。
+5.  **所有內容**：報告中的所有文字都必須使用流暢的繁體中文。
+
+我提供的資料包將會是這個結構：
+{
+    "report_title": "報告標題",
+    "strategy_summary": "策略摘要文字",
+    "chart_data": { "labels": [...], "equity_curve": [...] },
+    "key_metrics_table": [ { "指標": "...", "數值": "..." }, ... ],
+    "trade_log_table": [ { "進場日期": "...", "出場日期": "...", "損益": "..." } ],
+    "source_image_url": "原始參考圖片的URL"
+}
+
+請您根據以上資料，生成一份完整的、包含 <style> 和 <script> 標籤的 HTML 檔案。`
+            };
+
+            prompts = mockPrompts;
+            stage1Textarea.value = prompts.stage_1_extraction_prompt || '';
+            stage2Textarea.value = prompts.stage_2_generation_prompt || '';
+            console.log("模擬提示詞已載入。");
         };
 
-        const fetchPrompts = async () => {
-            try {
-                const response = await fetch('/api/prompts');
-                if (!response.ok) throw new Error('無法獲取提示詞列表');
-                prompts = await response.json();
-                renderPromptList();
-            } catch (error) {
-                promptList.innerHTML = `<li><span style="color: red;">${error.message}</span></li>`;
-            }
-        };
+        // --- 事件監聽器 ---
 
-        const showEditor = (key) => {
-            selectedKey = key;
-            originalKey = key;
-            const promptContent = prompts[key];
-
-            editorTitle.textContent = `正在編輯: ${key}`;
-            promptKeyInput.value = key;
-            promptContentTextarea.value = JSON.stringify(promptContent, null, 4);
-            editorContainer.classList.remove('hidden');
-            renderPromptList();
-        };
-
-        const clearEditor = () => {
-            selectedKey = null;
-            originalKey = null;
-            editorTitle.textContent = '選擇一個提示詞以開始編輯';
-            promptKeyInput.value = '';
-            promptContentTextarea.value = '';
-            editorContainer.classList.add('hidden');
-            renderPromptList();
-        };
-
-        promptList.addEventListener('click', (e) => {
-            const card = e.target.closest('.prompt-card');
-            if (card) {
-                const key = card.dataset.key;
-                if (key) {
-                    showEditor(key);
-                }
-            }
+        // 點擊 "儲存第一階段提示詞" 按鈕
+        saveStage1Btn.addEventListener('click', () => {
+            const newPrompt = stage1Textarea.value;
+            prompts.stage_1_extraction_prompt = newPrompt;
+            // 在真實應用中，這裡會有一個 API 呼叫
+            console.log("Simulating save for Stage 1 prompt:", newPrompt);
+            alert('第一階段提示詞已成功（模擬）儲存！');
         });
 
-        newPromptBtn.addEventListener('click', () => {
-            selectedKey = null;
-            originalKey = null;
-            editorTitle.textContent = '新增提示詞';
-            promptKeyInput.value = `new_prompt_${Date.now()}`;
-            promptContentTextarea.value = JSON.stringify({
-                "description": "新的提示詞描述",
-                "prompt": "請在此輸入您的提示內容..."
-            }, null, 4);
-            editorContainer.classList.remove('hidden');
-            promptKeyInput.focus();
-            renderPromptList();
+        // 點擊 "儲存第二階段提示詞" 按鈕
+        saveStage2Btn.addEventListener('click', () => {
+            const newPrompt = stage2Textarea.value;
+            prompts.stage_2_generation_prompt = newPrompt;
+            // 在真實應用中，這裡會有一個 API 呼叫
+            console.log("Simulating save for Stage 2 prompt:", newPrompt);
+            alert('第二階段提示詞已成功（模擬）儲存！');
         });
 
-        const validateJson = () => {
-            try {
-                JSON.parse(promptContentTextarea.value);
-                jsonValidationStatus.textContent = 'JSON 格式有效';
-                jsonValidationStatus.className = 'status-valid';
-                return true;
-            } catch (e) {
-                jsonValidationStatus.textContent = `JSON 格式無效: ${e.message}`;
-                jsonValidationStatus.className = 'status-invalid';
-                return false;
-            }
-        };
-        promptContentTextarea.addEventListener('input', validateJson);
-
-        savePromptBtn.addEventListener('click', async () => {
-            if (!validateJson()) {
-                alert('無法儲存，因為 JSON 內容格式錯誤。');
-                return;
-            }
-
-            const newKey = promptKeyInput.value.trim();
-            if (!newKey) {
-                alert('鍵名不可為空。');
-                return;
-            }
-
-            const content = JSON.parse(promptContentTextarea.value);
-
-            // 如果鍵名被修改，且新鍵名不是舊鍵名，且新鍵名已存在，則不允許
-            if (originalKey && newKey !== originalKey && prompts[newKey]) {
-                alert(`無法將鍵名從 '${originalKey}' 改為 '${newKey}'，因為目標鍵名已存在。`);
-                return;
-            }
-
-            try {
-                // 儲存新的或更新的
-                const response = await fetch('/api/prompts', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ key: newKey, content: content })
-                });
-                const result = await response.json();
-                if (!response.ok) throw new Error(result.detail || '儲存失敗');
-
-                // 如果鍵名被修改，需要刪除舊的鍵
-                if (originalKey && newKey !== originalKey) {
-                    const deleteResponse = await fetch(`/api/prompts/${originalKey}`, { method: 'DELETE' });
-                    if (!deleteResponse.ok) {
-                        // 即使刪除舊的失敗，新的也已儲存，提示用戶即可
-                        alert(`警告：已成功儲存為新的鍵名 '${newKey}'，但刪除舊的鍵名 '${originalKey}' 失敗。`);
-                    }
-                }
-
-                await fetchPrompts();
-                showEditor(newKey); // 重新選中（可能是新的）鍵
-
-            } catch (error) {
-                alert(`儲存失敗: ${error.message}`);
-            }
-        });
-
-        deletePromptBtn.addEventListener('click', async () => {
-            if (!originalKey) return;
-
-            if (!confirm(`您確定要永久刪除提示詞 '${originalKey}' 嗎？此操作無法復原。`)) {
-                return;
-            }
-
-            try {
-                const response = await fetch(`/api/prompts/${originalKey}`, { method: 'DELETE' });
-                const result = await response.json();
-                if (!response.ok) throw new Error(result.detail || '刪除失敗');
-
-                await fetchPrompts();
-                clearEditor();
-
-            } catch (error) {
-                alert(`刪除失敗: ${error.message}`);
-            }
-        });
-
-        fetchPrompts();
+        // --- 初始載入 ---
+        loadAndRenderPrompts();
     });
     </script>
 </body>

@@ -135,3 +135,17 @@ def get_valid_key() -> Optional[str]:
         return None
     # 簡單輪詢策略
     return valid_keys[0]["key_value"]
+
+def get_all_valid_keys_for_manager() -> List[Dict[str, str]]:
+    """
+    獲取所有有效的金鑰，格式為 GeminiManager 所需的列表。
+    格式: [{'name': 'key_name', 'value': 'key_value'}, ...]
+    """
+    keys = _load_keys()
+    valid_keys = [k for k in keys if k.get("is_valid")]
+
+    manager_keys = [
+        {"name": key.get("name", f"Key-{i+1}"), "value": key["key_value"]}
+        for i, key in enumerate(valid_keys)
+    ]
+    return manager_keys
