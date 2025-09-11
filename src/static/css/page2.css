@@ -70,29 +70,60 @@ button:disabled {
     cursor: not-allowed;
 }
 
-#url-list-container ul {
-    list-style: none;
-    padding: 0;
-    max-height: 400px;
-    overflow-y: auto;
+#url-list-container, #completed-list-container {
+    width: 100%;
+    overflow-x: auto; /* Enable horizontal scrolling on small screens */
     border: 1px solid #dee2e6;
     border-radius: 5px;
+    margin-top: 15px;
 }
 
-#url-list-container li {
-    padding: 10px;
-    border-bottom: 1px solid #eee;
-    display: flex;
-    align-items: center;
-    word-break: break-all;
+.results-table {
+    width: 100%;
+    border-collapse: collapse;
+    white-space: nowrap; /* Prevents content from wrapping, forcing scroll */
 }
 
-#url-list-container li:last-child {
-    border-bottom: none;
+.results-table th, .results-table td {
+    padding: 12px 15px;
+    border-bottom: 1px solid #dee2e6;
+    text-align: left;
+    vertical-align: middle;
 }
 
-#url-list-container input[type="checkbox"] {
-    margin-right: 10px;
+.results-table th {
+    background-color: #f8f9fa;
+    font-weight: 600;
+    color: #495057;
+    position: sticky;
+    top: 0;
+}
+
+.results-table tbody tr:hover {
+    background-color: #f1f3f5;
+}
+
+.results-table .url-cell {
+    max-width: 450px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.results-table .url-cell a {
+    color: #007bff;
+    text-decoration: none;
+    vertical-align: middle;
+}
+
+.results-table .url-cell a:hover {
+    text-decoration: underline;
+    color: #0056b3;
+}
+
+.results-table input[type="checkbox"] {
+    cursor: pointer;
+    vertical-align: middle;
 }
 
 #status-area {

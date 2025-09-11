@@ -12,17 +12,33 @@ SRC_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SRC_DIR))
 
 from core.time_utils import format_iso_for_filename
+from core.filename_utils import sanitize_for_filename
+from typing import Optional
 
-def download_file(url: str, output_dir: str, url_id: int, created_at_str: str) -> str | None:
+def download_file(
+    url: str,
+    output_dir: str,
+    url_id: int,
+    author: Optional[str],
+    message_date: Optional[str],
+    message_time: Optional[str]
+) -> Optional[str]:
     """
     從指定的 URL (特別是 Google Drive) 智慧地檔案。
     - 會使用 filetype 函式庫來強制偵測檔案的副檔名。
-    - 會使用傳入的 created_at 時間戳和 url_id 來建立統一的檔名。
+    - 檔名會根據條件式時間戳和作者資訊建立。
+
+    命名規則:
+    - 格式: [ID]_[淨化後作者]_[時間戳].副檔名
+    - 作者: 移除特殊字元，用底線取代。
+    - 時間戳: 優先使用 message_date/time，若無則省略時間戳部分。
 
     :param url: 檔案的 Google Drive 分享連結。
     :param output_dir: 儲存檔案的目錄。
     :param url_id: 該 URL 在資料庫中的 ID。
-    :param created_at_str: 該 URL 在資料庫中的建立時間字串 (YYYY-MM-DD HH:MM:SS)。
+    :param author: 作者名稱字串，可能為 None。
+    :param message_date: 訊息的日期字串 (YYYY-MM-DD)，可能為 None。
+    :param message_time: 訊息的時間字串 (HH:MM)，可能為 None。
     :return: 最終儲存的檔案路徑，或在失敗時回傳 None。
     """
     os.makedirs(output_dir, exist_ok=True)
@@ -51,10 +67,24 @@ def download_file(url: str, output_dir: str, url_id: int, created_at_str: str) -
             extension = f".{kind.extension}"
             logging.info(f"偵測到檔案類型: {kind.mime} -> 副檔名: {extension}")
 
-        # 步驟 3: 根據傳入的時間和 ID 建立最終檔名
-        # 我們現在使用集中的時間工具來處理時間戳，確保時區正確
-        timestamp = format_iso_for_filename(created_at_str)
-        final_filename = f"{timestamp}_file_{url_id}{extension}"
+        # 步驟 3: 根據最終需求建立檔名
+        parts = [str(url_id)]
+
+        # Part 1: 作者 (淨化後)
+        if author:
+            sanitized_author = sanitize_for_filename(author)
+            parts.append(sanitized_author)
+
+        # Part 2: 時間戳 (條件式)
+        if message_date and message_time:
+            source_timestamp_str = f"{message_date}T{message_time}:00"
+            timestamp = format_iso_for_filename(source_timestamp_str)
+            parts.append(timestamp)
+            logging.info(f"使用 LINE 訊息時間 '{source_timestamp_str}' 產生檔名。")
+        else:
+            logging.info(f"無 LINE 訊息時間，檔名將不包含時間戳。")
+
+        final_filename = f"{'_'.join(parts)}{extension}"
         final_path = Path(output_dir) / final_filename
 
         # 步驟 4: 將暫存檔重新命名為最終檔名
