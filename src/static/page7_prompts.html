@@ -15,10 +15,11 @@
             <li><a href="/page1">網址提取</a></li>
             <li><a href="/page2">批次下載</a></li>
             <li><a href="/page3">檔案處理</a></li>
-            <li><a href="/page4">AI 分析</a></li>
+            <li><a href="/page4">AI 分析 (舊)</a></li>
             <li><a href="/page5">備份管理</a></li>
             <li><a href="/page6">金鑰管理</a></li>
             <li><a href="/page7" class="active">提示詞管理</a></li>
+            <li><a href="/page8">自動交易分析</a></li>
         </ul>
     </nav>
 
@@ -154,7 +155,7 @@
                 "description": "新的提示詞描述",
                 "prompt": "請在此輸入您的提示內容..."
             }, null, 4);
-            editorContainer.classList.remove('hidden');
+            editorContainer.classList.add('hidden');
             promptKeyInput.focus();
             renderPromptList();
         });
