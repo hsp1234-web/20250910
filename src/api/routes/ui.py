@@ -43,6 +43,10 @@ async def serve_page6(request: Request):
 async def serve_page7(request: Request):
     return templates.TemplateResponse("page7_prompts.html", {"request": request})
 
+@router.get("/page8", response_class=HTMLResponse)
+async def serve_page8(request: Request):
+    return templates.TemplateResponse("page8_autotrader.html", {"request": request})
+
 @router.get("/prompts", response_class=HTMLResponse)
 async def serve_prompts_ui(request: Request):
     return templates.TemplateResponse("prompts.html", {"request": request})
