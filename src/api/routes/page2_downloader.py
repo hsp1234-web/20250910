@@ -92,28 +92,32 @@ def run_download_task(url_id: int, port: int):
     result_payload = {}
 
     try:
-        # 步驟 1: 獲取 URL 和 created_at 資訊
+        # 步驟 1: 獲取 URL 和所有必要的時間資訊
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute("SELECT url, created_at FROM extracted_urls WHERE id = ?", (url_id,))
+        # 同時獲取 message_date 和 message_time，用於條件式命名
+        cursor.execute("SELECT url, message_date, message_time FROM extracted_urls WHERE id = ?", (url_id,))
         row = cursor.fetchone()
         if not row:
             raise ValueError(f"在資料庫中找不到 ID 為 {url_id} 的 URL。")
 
         url_to_download = row['url']
-        created_at_str = row['created_at']
-        log.info(f"背景任務：準備從 {url_to_download} 下載 (建立時間: {created_at_str})...")
+        # 獲取可能為 None 的「小作文時間」
+        message_date = row['message_date']
+        message_time = row['message_time']
+        log.info(f"背景任務：準備從 {url_to_download} 下載 (ID: {url_id})...")
 
         # 步驟 2: 執行智慧化下載
         from tools.drive_downloader import download_file
         download_dir = SRC_DIR.parent / "downloads"
 
-        # 呼叫新的下載函式，傳入必要的 ID 和時間戳
+        # 呼叫更新後的下載函式，傳入所有必要的時間資訊
         downloaded_path = download_file(
             url=url_to_download,
             output_dir=str(download_dir),
             url_id=url_id,
-            created_at_str=created_at_str
+            message_date=message_date,
+            message_time=message_time
         )
 
         # 步驟 3: 根據下載結果更新資料庫
