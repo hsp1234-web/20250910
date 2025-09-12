@@ -1,3 +1,17 @@
+## 1024號 - 2025-09-13T03:15:58.683655+08:00
+
+### fix(api): 修正金鑰管理頁面的 API 路由錯誤
+
+- **動機**: 使用者回報，在金鑰管理頁面（頁面六）新增金鑰時，雖然會短暫顯示「金鑰有效」，但隨後就會跳出「Not Found」的錯誤，且無法獲取已有的金鑰列表。日誌顯示前端在呼叫 `GET /api/keys` 和 `POST /api/keys` 時均收到 404 錯誤。
+- **核心變更**:
+    - **根本原因定位**: 經過對 `src/api/api_server.py` 的分析，發現 `page6_keys.py` 的路由被掛載時，被加上了 `/api/keys` 的前綴。然而，在 `src/api/routes/page6_keys.py` 檔案內部，獲取和新增金鑰的路由又被錯誤地定義為 `@router.get("/keys")` 和 `@router.post("/keys")`。這導致最終的 API 路徑變成了重複的 `/api/keys/keys`，與前端預期的路徑不符，因此產生 404 錯誤。
+    - **程式碼修復 (`src/api/routes/page6_keys.py`)**:
+        - 將 `@router.get("/keys", ...)` 的路徑修正為 `@router.get("/", ...)`。
+        - 將 `@router.post("/keys", ...)` 的路徑修正為 `@router.post("/", ...)`。
+        - 將 `@router.delete("/keys/{key_hash}", ...)` 的路徑修正為 `@router.delete("/{key_hash}", ...)`。
+- **成果**: 此次修復校正了後端 API 的路由定義，使其與主應用程式的路由前綴能夠正確組合。現在，`GET /api/keys` 和 `POST /api/keys` 等端點將能被前端正確訪問，金鑰管理頁面的新增、刪除和列表功能應已恢復正常。
+
+---
 ## 1023號 - 2025-09-13T02:59:24.967012+08:00
 
 ### fix(core): 全面修復金鑰管理功能並加固系統穩定性
