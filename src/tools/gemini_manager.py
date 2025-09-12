@@ -37,6 +37,42 @@ class GeminiManager:
         self._lock = threading.Lock()
         logging.info(f"Gemini 管理器已初始化，共載入 {len(self.key_pool)} 組 API 金鑰。")
 
+    def list_available_models(self) -> List[str]:
+        """
+        列出所有支援 'generateContent' 方法的可用 Gemini 模型。
+        會使用金鑰池中的一個金鑰來進行查詢。
+
+        Returns:
+            一個包含模型名稱字串的列表。
+
+        Raises:
+            ValueError: 如果金鑰池為空。
+            Exception: 如果 API 呼叫失敗。
+        """
+        if not genai:
+            logging.warning("無法列出模型，因為 google.generativeai 未安裝。")
+            return []
+
+        with self._lock:
+            if not self.key_pool:
+                raise ValueError("無法列出模型，因為金鑰池是空的。")
+            # 使用第一個金鑰進行操作，但不出列
+            api_key = self.key_pool[0]
+
+        logging.info(f"正在使用金鑰 '{api_key.name}' 查詢可用的模型...")
+        try:
+            genai.configure(api_key=api_key.key)
+            available_models = []
+            for m in genai.list_models():
+                if 'generateContent' in m.supported_generation_methods:
+                    available_models.append(m.name)
+            logging.info(f"查詢成功，找到 {len(available_models)} 個可用模型。")
+            return available_models
+        except Exception as e:
+            logging.error(f"使用金鑰 '{api_key.name}' 查詢模型時發生錯誤: {e}", exc_info=True)
+            # 如果查詢失敗，我們將異常向上拋出，讓 API 層來處理並回傳適當的 HTTP 錯誤。
+            raise e
+
     def _api_call_wrapper(self, task_name: str, model_name: str, prompt_content: List[Any], output_format: str = 'json'):
         if not genai:
             return None, "google.generativeai not installed", "N/A"

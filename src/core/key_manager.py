@@ -79,7 +79,7 @@ def get_all_keys() -> List[Dict[str, Any]]:
     ]
 
 def add_key(key_value: str, key_name: Optional[str] = None) -> Dict[str, Any]:
-    """新增一個金鑰到金鑰池。"""
+    """新增一個金鑰到金鑰池，並立即進行驗證。"""
     if not key_value or not key_value.strip():
         raise ValueError("API 金鑰不可為空。")
 
@@ -89,16 +89,16 @@ def add_key(key_value: str, key_name: Optional[str] = None) -> Dict[str, Any]:
     if any(k["key_hash"] == key_hash for k in keys):
         raise ValueError("此 API 金鑰已存在。")
 
-    # 新增金鑰時不再自動驗證，狀態預設為 None (未驗證)
-    # 驗證操作應由使用者在前端透過 validate_all_keys 觸發
-    is_valid = None
+    # 立即驗證金鑰
+    is_valid = _validate_single_key(key_value)
+    validation_time = datetime.now().isoformat()
 
     new_key = {
         "name": key_name or f"Key-{len(keys) + 1}",
-        "key_value": key_value, # 注意：儲存原始金鑰
+        "key_value": key_value,
         "key_hash": key_hash,
         "is_valid": is_valid,
-        "last_validated": None # 初始時沒有驗證過
+        "last_validated": validation_time
     }
     keys.append(new_key)
     _save_keys(keys)
@@ -108,6 +108,14 @@ def add_key(key_value: str, key_name: Optional[str] = None) -> Dict[str, Any]:
         "key_hash": new_key["key_hash"],
         "is_valid": new_key["is_valid"]
     }
+
+def test_key(api_key: str) -> bool:
+    """
+    公開的函式，用於測試單一 API 金鑰的有效性，而不將其儲存。
+    """
+    if not api_key:
+        return False
+    return _validate_single_key(api_key)
 
 def delete_key(key_hash: str) -> bool:
     """根據雜湊值從金鑰池中刪除一個金鑰。"""

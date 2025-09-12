@@ -12,6 +12,7 @@ SRC_DIR = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(SRC_DIR))
 
 from core import key_manager
+from tools.gemini_manager import GeminiManager
 
 # --- 常數與設定 ---
 log = logging.getLogger(__name__)
@@ -21,6 +22,9 @@ router = APIRouter()
 class KeyRequest(BaseModel):
     api_key: str = Field(..., title="Google API Key")
     name: Optional[str] = Field(None, title="Key Alias")
+
+class TestKeyRequest(BaseModel):
+    api_key: str
 
 # --- API 端點 ---
 
@@ -68,3 +72,38 @@ async def validate_all_stored_keys():
     except Exception as e:
         log.error(f"重新驗證金鑰時發生錯誤: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="重新驗證金鑰時發生伺服器內部錯誤。")
+
+@router.get("/models", summary="獲取所有可用的 AI 模型")
+async def get_available_models():
+    """
+    動態查詢並回傳所有當前可用的 Gemini 模型列表。
+    這需要至少有一個有效的 API 金鑰。
+    """
+    try:
+        # 獲取有效的金鑰來初始化 Gemini Manager
+        valid_keys = key_manager.get_all_valid_keys_for_manager()
+        if not valid_keys:
+            raise HTTPException(status_code=400, detail="沒有可用的有效 API 金鑰來查詢模型。")
+
+        gemini = GeminiManager(api_keys=valid_keys)
+        models = gemini.list_available_models()
+        return models
+    except ValueError as e:
+        # 可能是金鑰池為空
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        log.error(f"查詢可用模型時發生錯誤: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"查詢可用模型時發生意外錯誤: {str(e)}")
+
+@router.post("/test", summary="測試一個 API 金鑰的有效性")
+async def test_api_key(payload: TestKeyRequest):
+    """
+    測試提供的 API 金鑰是否有效，但不會將其儲存到金鑰池。
+    """
+    try:
+        is_valid = key_manager.test_key(payload.api_key)
+        return {"is_valid": is_valid}
+    except Exception as e:
+        log.error(f"測試金鑰時發生錯誤: {e}", exc_info=True)
+        # 即使是測試，也回傳一個明確的失敗狀態，而不是 500 錯誤
+        return {"is_valid": False, "error": str(e)}

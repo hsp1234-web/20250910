@@ -47,6 +47,16 @@
                 <p>正在載入金鑰列表...</p>
             </div>
         </div>
+
+        <div class="panel">
+            <div class="panel-header">
+                <h2>可用模型</h2>
+                <button id="fetch-models-btn">查詢可用模型</button>
+            </div>
+            <div id="model-list-container">
+                <p>點擊按鈕以查詢目前所有可用的模型。</p>
+            </div>
+        </div>
     </div>
 
     <script>
@@ -129,6 +139,37 @@
             }
         });
 
+        newKeyInput.addEventListener('blur', async () => {
+            const key = newKeyInput.value.trim();
+            addKeyStatus.textContent = ''; // Clear previous status
+            if (!key) {
+                newKeyInput.style.borderColor = '#ccc'; // Reset border
+                return;
+            }
+
+            renderStatus(addKeyStatus, '正在驗證金鑰...', false);
+            newKeyInput.style.borderColor = '#ffc107'; // A "validating" color
+
+            try {
+                const response = await fetch('/api/keys/test', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ api_key: key })
+                });
+                const result = await response.json();
+                if (result.is_valid) {
+                    renderStatus(addKeyStatus, '金鑰有效！', false);
+                    newKeyInput.style.borderColor = '#28a745'; // Green for valid
+                } else {
+                    renderStatus(addKeyStatus, '金鑰無效或發生錯誤。', true);
+                    newKeyInput.style.borderColor = '#dc3545'; // Red for invalid
+                }
+            } catch (error) {
+                renderStatus(addKeyStatus, '驗證請求失敗。', true);
+                newKeyInput.style.borderColor = '#dc3545';
+            }
+        });
+
         keyListContainer.addEventListener('click', async (e) => {
             if (e.target.classList.contains('delete-btn')) {
                 const keyHash = e.target.dataset.hash;
@@ -160,6 +201,41 @@
             } finally {
                 validateAllBtn.disabled = false;
                 validateAllBtn.textContent = '重新驗證所有金鑰';
+            }
+        });
+
+        const fetchModelsBtn = document.getElementById('fetch-models-btn');
+        const modelListContainer = document.getElementById('model-list-container');
+
+        fetchModelsBtn.addEventListener('click', async () => {
+            fetchModelsBtn.disabled = true;
+            fetchModelsBtn.textContent = '查詢中...';
+            modelListContainer.innerHTML = '<p>正在向 Google API 查詢可用的模型，請稍候...</p>';
+
+            try {
+                const response = await fetch('/api/keys/models');
+                const result = await response.json();
+                if (!response.ok) {
+                    throw new Error(result.detail || '查詢失敗');
+                }
+
+                if (result.length > 0) {
+                    let modelHtml = '<ul>';
+                    result.forEach(model => {
+                        // 顯示 models/ 開頭的完整模型名稱
+                        modelHtml += `<li>${model}</li>`;
+                    });
+                    modelHtml += '</ul>';
+                    modelListContainer.innerHTML = modelHtml;
+                } else {
+                    modelListContainer.innerHTML = '<p>未找到任何可用的模型。</p>';
+                }
+
+            } catch (error) {
+                modelListContainer.innerHTML = `<p style="color: red;">查詢模型時發生錯誤: ${error.message}</p>`;
+            } finally {
+                fetchModelsBtn.disabled = false;
+                fetchModelsBtn.textContent = '重新查詢可用模型';
             }
         });
 

@@ -2,8 +2,8 @@
 
 .content {
     max-width: 900px;
-    margin: 20px auto;
-    padding: 0 20px;
+    margin: 0 auto 20px; /* 移除頂部 margin 來修復與導覽列的間距問題 */
+    padding: 20px; /* 將左右 padding 移到此處以維持內容間距 */
 }
 
 .panel {

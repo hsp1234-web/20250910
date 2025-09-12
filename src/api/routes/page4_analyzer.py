@@ -249,11 +249,6 @@ async def get_stage1_result(task_id: int):
 
 # --- 保留但可選用的端點 ---
 
-@router.get("/models")
-async def get_available_models():
-    """回傳可用於分析的 AI 模型列表。"""
-    return ["gemini-1.5-pro-latest", "gemini-1.5-flash-latest"]
-
 @router.get("/processed_files")
 async def get_processed_files():
     """獲取所有已處理、可供分析的檔案列表。"""

@@ -127,6 +127,12 @@ class DBClient:
     def get_all_tasks(self) -> list[dict]:
         return self._send_request("get_all_tasks")
 
+    def get_all_analysis_tasks(self) -> list[dict]:
+        """
+        獲取所有 AI 分析任務的列表。
+        """
+        return self._send_request("get_all_analysis_tasks")
+
     def get_system_logs(self, levels: list[str] = None, sources: list[str] = None) -> list[dict]:
         """
         從資料庫獲取系統日誌，可選擇性地按等級和來源篩選。
