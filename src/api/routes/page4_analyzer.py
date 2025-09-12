@@ -18,6 +18,7 @@ sys.path.insert(0, str(SRC_DIR))
 
 # --- 核心模組匯入 ---
 from db.client import get_client
+from db.database import get_db_connection
 from core import key_manager, prompt_manager
 from tools.gemini_manager import GeminiManager
 
@@ -174,7 +175,7 @@ def run_stage2_task(task_id: int, model_name: str, server_port: int):
 
 # --- 新的 API 端點 ---
 
-@router.post("/analyzer/start_stage1_analysis")
+@router.post("/start_stage1_analysis")
 async def start_stage1_analysis(request: Request, payload: Stage1Request, background_tasks: BackgroundTasks):
     """啟動第一階段：JSON 提取"""
     if not payload.file_ids:
@@ -207,7 +208,7 @@ async def start_stage1_analysis(request: Request, payload: Stage1Request, backgr
 
     return {"message": f"已成功為 {len(tasks_created)} 個檔案啟動第一階段分析任務。"}
 
-@router.post("/analyzer/start_stage2_analysis")
+@router.post("/start_stage2_analysis")
 async def start_stage2_analysis(request: Request, payload: Stage2Request, background_tasks: BackgroundTasks):
     """啟動第二階段：報告生成"""
     if not payload.task_ids:
@@ -226,13 +227,13 @@ async def start_stage2_analysis(request: Request, payload: Stage2Request, backgr
 
     return {"message": f"已為 {len(payload.task_ids)} 個符合條件的任務啟動第二階段分析。"}
 
-@router.get("/analyzer/analysis_status")
+@router.get("/analysis_status")
 async def get_analysis_status():
     """獲取所有分析任務的最新狀態"""
     tasks = DB_CLIENT.get_all_analysis_tasks()
     return tasks
 
-@router.get("/analyzer/stage1_result/{task_id}")
+@router.get("/stage1_result/{task_id}")
 async def get_stage1_result(task_id: int):
     """獲取指定任務第一階段產出的 JSON 內容"""
     task = DB_CLIENT.get_analysis_task(task_id=task_id)

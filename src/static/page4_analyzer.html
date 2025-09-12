@@ -34,8 +34,8 @@
 
             <div class="form-group" style="margin-top: 20px;">
                 <label for="stage1-model-select">選擇第一階段分析模型:</label>
-                <select id="stage1-model-select">
-                    <option value="">正在載入模型...</option>
+                <select id="stage1-model-select" disabled>
+                    <option value="">請先在「金鑰管理」頁面新增有效的 API 金鑰</option>
                 </select>
             </div>
 
@@ -60,8 +60,8 @@
 
             <div class="form-group" style="margin-top: 20px;">
                 <label for="stage2-model-select">選擇第二階段分析模型:</label>
-                <select id="stage2-model-select">
-                    <option value="">正在載入模型...</option>
+                <select id="stage2-model-select" disabled>
+                    <option value="">請先在「金鑰管理」頁面新增有效的 API 金鑰</option>
                 </select>
             </div>
 
@@ -248,10 +248,32 @@
                 }
             };
 
+            const checkKeysAndLoadModels = async () => {
+                try {
+                    const response = await fetch('/api/keys');
+                    const keys = await response.json();
+                    const validKeys = keys.filter(k => k.is_valid);
+                    if (validKeys.length > 0) {
+                        stage1ModelSelect.disabled = false;
+                        stage2ModelSelect.disabled = false;
+                        await fetchAndRenderModels();
+                    } else {
+                        stage1ModelSelect.disabled = true;
+                        stage2ModelSelect.disabled = true;
+                        logStatus('偵測到無有效 API 金鑰，模型選單已禁用。', 'orange');
+                    }
+                } catch (error) {
+                    logStatus(`檢查 API 金鑰時發生錯誤: ${error.message}`, 'red');
+                    stage1ModelSelect.disabled = true;
+                    stage2ModelSelect.disabled = true;
+                }
+            };
+
             // --- Event Listeners ---
             startStage1Btn.addEventListener('click', async () => {
                 const selectedIds = Array.from(document.querySelectorAll('.file-checkbox:checked')).map(cb => parseInt(cb.value, 10));
                 if (selectedIds.length === 0) return alert('請至少選擇一個檔案。');
+                if (stage1ModelSelect.disabled) return alert('請先新增有效的 API 金鑰才能開始分析。');
                 const modelName = stage1ModelSelect.value;
                 if (!modelName) return alert('請選擇第一階段模型。');
 
@@ -261,12 +283,12 @@
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({ file_ids: selectedIds, model_name: modelName })
                 });
-                // 後端已啟動，WebSocket 會觸發更新
             });
 
             startStage2Btn.addEventListener('click', async () => {
                 const selectedIds = Array.from(document.querySelectorAll('.dashboard-checkbox:checked')).map(cb => parseInt(cb.value, 10));
                 if (selectedIds.length === 0) return alert('請在儀表板中勾選第一階段已完成的任務。');
+                if (stage2ModelSelect.disabled) return alert('請先新增有效的 API 金鑰才能開始分析。');
                 const modelName = stage2ModelSelect.value;
                 if (!modelName) return alert('請選擇第二階段模型。');
 
@@ -337,16 +359,25 @@
                 };
             };
 
+            // --- Nav Bar Centering ---
+            const centerActiveNavButton = () => {
+                const activeNavButton = document.querySelector('.top-nav a.active');
+                if (activeNavButton) {
+                    activeNavButton.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+                }
+            };
+
             // --- Initial Load ---
             (async () => {
                 logStatus('頁面載入完成，正在初始化...');
                 await Promise.all([
-                    fetchAndRenderModels(),
+                    checkKeysAndLoadModels(),
                     renderFileList(),
                     fetchAnalysisStatus()
                 ]);
                 setupWebSocket();
                 logStatus('初始化完成。', 'green');
+                setTimeout(centerActiveNavButton, 100);
             })();
         });
     </script>
