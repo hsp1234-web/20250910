@@ -28,7 +28,7 @@ class TestKeyRequest(BaseModel):
 
 # --- API 端點 ---
 
-@router.get("/keys", summary="獲取所有金鑰的狀態")
+@router.get("", summary="獲取所有金鑰的狀態")
 async def get_keys_status():
     """
     獲取所有已儲存金鑰的列表，包含其雜湊值和有效性狀態。
@@ -36,7 +36,7 @@ async def get_keys_status():
     """
     return key_manager.get_all_keys()
 
-@router.post("/keys", summary="新增並驗證一個 API 金鑰")
+@router.post("", summary="新增並驗證一個 API 金鑰")
 async def add_new_key(payload: KeyRequest):
     """
     將一個新的 API 金鑰新增到金鑰池，並立即對其進行驗證。
@@ -50,7 +50,7 @@ async def add_new_key(payload: KeyRequest):
         log.error(f"新增金鑰時發生錯誤: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="新增金鑰時發生伺服器內部錯誤。")
 
-@router.delete("/keys/{key_hash}", summary="刪除指定的 API 金鑰")
+@router.delete("/{key_hash}", summary="刪除指定的 API 金鑰")
 async def remove_key(key_hash: str):
     """
     根據金鑰的雜湊值，從金鑰池中將其刪除。
