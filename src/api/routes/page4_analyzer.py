@@ -6,7 +6,7 @@ import requests
 from pathlib import Path
 from typing import List, Dict
 
-from fastapi import APIRouter, HTTPException, Request, BackgroundTasks, Depends
+from fastapi import APIRouter, HTTPException, Request, Depends
 from pydantic import BaseModel
 
 # --- 路徑修正與模組匯入 ---
@@ -15,6 +15,7 @@ sys.path.insert(0, str(SRC_DIR))
 
 from db.database import get_db_connection
 from core import key_manager, prompt_manager
+from core.queue import get_analysis_queue
 from tools.gemini_manager import GeminiManager
 
 # --- 常數與設定 ---
@@ -189,12 +190,12 @@ async def get_processed_files():
             conn.close()
 
 @router.post("/start_analysis")
-async def start_analysis(request: Request, payload: AnalysisRequest, background_tasks: BackgroundTasks):
-    """接收多個檔案 ID，為其建立背景分析任務。"""
+async def start_analysis(request: Request, payload: AnalysisRequest):
+    """接收多個檔案 ID，將其排入佇列進行背景分析。"""
     if not payload.file_ids:
         raise HTTPException(status_code=400, detail="檔案 ID 列表不可為空。")
 
-    log.info(f"API: 收到 AI 分析請求，共 {len(payload.file_ids)} 個檔案。")
+    log.info(f"API: 收到 AI 分析請求，共 {len(payload.file_ids)} 個檔案，已將其排入佇列。")
 
     # 檢查是否有有效的金鑰
     if not key_manager.get_all_valid_keys_for_manager():
@@ -204,9 +205,11 @@ async def start_analysis(request: Request, payload: AnalysisRequest, background_
     if not server_port:
         raise HTTPException(status_code=500, detail="無法確定伺服器埠號，無法啟動背景任務。")
 
-    background_tasks.add_task(run_ai_analysis_task, payload.file_ids, server_port)
+    # 獲取佇列並將任務放入其中
+    q = get_analysis_queue()
+    q.enqueue(run_ai_analysis_task, payload.file_ids, server_port, job_timeout='4h')
 
-    return {"message": f"已成功為 {len(payload.file_ids)} 個檔案建立背景分析任務。"}
+    return {"message": f"已成功將 {len(payload.file_ids)} 個檔案的分析任務排入佇列。"}
 
 @router.get("/reports")
 async def get_reports():

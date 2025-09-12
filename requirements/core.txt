@@ -7,3 +7,5 @@ pytz
 filetype==1.2.0
 python-dateutil
 google-generativeai
+redis
+rq

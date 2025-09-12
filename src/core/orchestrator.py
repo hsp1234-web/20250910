@@ -9,6 +9,7 @@ import subprocess
 import sys
 import threading
 import time
+import shutil
 from pathlib import Path
 from db.client import DBClient, get_client
 
@@ -39,6 +40,10 @@ def find_free_port():
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(('', 0))
         return s.getsockname()[1]
+
+def is_tool(name):
+    """檢查指定的程式是否存在於 PATH 中。"""
+    return shutil.which(name) is not None
 
 def stream_reader(stream, prefix, ready_event=None, ready_signal=None, port_list=None, port_regex=None):
     """
@@ -110,6 +115,33 @@ def main():
         db_client = get_client()
         log.info("✅ DB 客戶端初始化完成。")
 
+        # 2a. 啟動 Redis 伺服器 (如果可用)
+        if is_tool("redis-server"):
+            log.info("🔧 正在啟動 Redis 伺服器...")
+            # 使用 --daemonize no 讓 Redis 在前景運行，以便我們捕獲其輸出
+            redis_proc = subprocess.Popen(["redis-server"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8')
+            processes.append(redis_proc)
+            log.info(f"Redis 伺服器程序已啟動，PID: {redis_proc.pid}")
+            redis_stdout_thread = threading.Thread(target=stream_reader, args=(redis_proc.stdout, 'redis'))
+            redis_stdout_thread.daemon = True
+            threads.append(redis_stdout_thread)
+            redis_stdout_thread.start()
+            # 簡單等待一下，確保 Redis 完成初始化
+            time.sleep(1)
+        else:
+            log.warning("未在系統 PATH 中找到 'redis-server'。假設 Redis 正在由外部管理。")
+
+        # 2b. 啟動 RQ Worker
+        log.info("🔧 正在啟動 RQ Worker...")
+        worker_cmd = [sys.executable, "worker.py"]
+        worker_proc = subprocess.Popen(worker_cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8')
+        processes.append(worker_proc)
+        log.info(f"RQ Worker 程序已啟動，PID: {worker_proc.pid}")
+        worker_stdout_thread = threading.Thread(target=stream_reader, args=(worker_proc.stdout, 'worker'))
+        worker_stdout_thread.daemon = True
+        threads.append(worker_stdout_thread)
+        worker_stdout_thread.start()
+
         # 3. 啟動 API 伺服器
         log.info("🔧 正在啟動 API 伺服器...")
         api_port = args.port if args.port else find_free_port()
@@ -139,7 +171,7 @@ def main():
             t.daemon = True
             t.start()
 
-        log.info("🚫 [架構性決策] Worker 程序已被永久停用，以支援 WebSocket 驅動的新架構。")
+        log.info("✅ 所有背景服務 (Redis, RQ Worker) 已啟動。")
         log.info("--- [協調器進入監控模式] ---")
 
         last_heartbeat_time = time.time()
