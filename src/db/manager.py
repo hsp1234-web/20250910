@@ -62,6 +62,13 @@ ACTION_MAP = {
     "get_app_state": database.get_app_state,
     "set_app_state": database.set_app_state,
     "get_all_app_states": database.get_all_app_states,
+
+    # --- AI 分析任務 (Analysis Tasks) Actions ---
+    "create_or_get_analysis_task": database.create_or_get_analysis_task,
+    "update_analysis_task": database.update_analysis_task,
+    "get_all_analysis_tasks": database.get_all_analysis_tasks,
+    "get_analysis_task": database.get_analysis_task,
+
     # For testing:
     "clear_all_tasks": database.clear_all_tasks,
 }
