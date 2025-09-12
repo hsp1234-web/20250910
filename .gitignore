@@ -51,6 +51,7 @@ fake_audio.txt
 # Secrets
 secrets.json
 config.json
+src/db/secrets/keys.json
 
 # Python Packaging
 *.egg-info/
