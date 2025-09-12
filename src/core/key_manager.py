@@ -4,9 +4,18 @@ import hashlib
 import os
 import sys
 import subprocess
+import logging
+import threading
 from pathlib import Path
 from typing import List, Dict, Optional, Any
 from datetime import datetime
+
+# --- Colab 環境安全匯入 ---
+try:
+    from google.colab import userdata
+    IS_COLAB = True
+except ImportError:
+    IS_COLAB = False
 
 # --- 路徑修正 ---
 SRC_DIR = Path(__file__).resolve().parent.parent
@@ -17,6 +26,7 @@ SECRETS_DIR = SRC_DIR / "db" / "secrets"
 KEYS_FILE = SECRETS_DIR / "keys.json"
 IS_MOCK_MODE = os.environ.get("API_MODE", "real") == "mock"
 ROOT_DIR = SRC_DIR.parent
+log = logging.getLogger(__name__)
 
 def _ensure_secrets_dir():
     """確保儲存金鑰的目錄存在。"""
@@ -136,11 +146,77 @@ def get_valid_key() -> Optional[str]:
     # 簡單輪詢策略
     return valid_keys[0]["key_value"]
 
+def get_secret_with_retry(secret_name: str, max_attempts=3, timeout=10) -> (Optional[str], Optional[str]):
+    """
+    從 Colab userdata 安全地獲取金鑰，包含重試和超時機制。
+    借鑒自使用者提供的 V48.8 程式碼。
+    """
+    for attempt in range(max_attempts):
+        result = {"value": None, "error": None}
+        def target():
+            try:
+                result["value"] = userdata.get(secret_name)
+            except Exception as e:
+                result["error"] = e
+        thread = threading.Thread(target=target)
+        thread.start()
+        thread.join(timeout)
+        if thread.is_alive():
+            error_msg = "讀取超時"
+        elif result["error"]:
+            error_msg = str(result["error"])
+        else:
+            return result["value"], None
+        log.warning(f"讀取 Colab 金鑰 '{secret_name}' 失敗 (第 {attempt+1}/{max_attempts} 次): {error_msg}。")
+        if attempt < max_attempts - 1:
+            time.sleep((attempt + 1) * 2)
+    return None, f"在 {max_attempts} 次嘗試後依然失敗"
+
+def _load_keys_from_colab() -> List[Dict[str, str]]:
+    """
+    嘗試從 Colab Userdata 載入金鑰。
+    如果成功，回傳 GeminiManager 所需的格式。
+    如果失敗或不在 Colab 環境，回傳空列表。
+    """
+    if not IS_COLAB:
+        return []
+
+    log.info("偵測到 Colab 環境，嘗試從 Userdata 載入金鑰...")
+    base_name = 'GOOGLE_API_KEY'
+    # 嘗試讀取 GOOGLE_API_KEY, GOOGLE_API_KEY_1, ..., GOOGLE_API_KEY_15
+    all_possible_names = [base_name] + [f"{base_name}_{i}" for i in range(1, 16)]
+
+    valid_keys = []
+    for name in all_possible_names:
+        value, error = get_secret_with_retry(name)
+        if value:
+            log.info(f"成功從 Colab Userdata 讀取金鑰 '{name}'。")
+            valid_keys.append({"name": name, "value": value})
+        elif "is not defined" in (error or ""):
+            # 這表示金鑰不存在，是正常情況，停止繼續尋找
+            log.info(f"未在 Colab Userdata 中找到金鑰 '{name}'，停止搜尋。")
+            break
+
+    if valid_keys:
+        log.info(f"已從 Colab Userdata 成功載入 {len(valid_keys)} 組金鑰。將優先使用這些金鑰。")
+    else:
+        log.info("未在 Colab Userdata 中找到任何金鑰。")
+
+    return valid_keys
+
 def get_all_valid_keys_for_manager() -> List[Dict[str, str]]:
     """
     獲取所有有效的金鑰，格式為 GeminiManager 所需的列表。
     格式: [{'name': 'key_name', 'value': 'key_value'}, ...]
+    優先從 Colab Userdata 載入，如果失敗則從本地 JSON 檔案載入。
     """
+    # 優先嘗試從 Colab 載入
+    colab_keys = _load_keys_from_colab()
+    if colab_keys:
+        return colab_keys
+
+    # 如果 Colab 中沒有金鑰，則退回使用本地檔案系統
+    log.info("退回使用本地 JSON 檔案系統載入金鑰。")
     keys = _load_keys()
     valid_keys = [k for k in keys if k.get("is_valid")]
 
@@ -148,4 +224,10 @@ def get_all_valid_keys_for_manager() -> List[Dict[str, str]]:
         {"name": key.get("name", f"Key-{i+1}"), "value": key["key_value"]}
         for i, key in enumerate(valid_keys)
     ]
+
+    if manager_keys:
+        log.info(f"已從本地 JSON 檔案載入 {len(manager_keys)} 組有效金鑰。")
+    else:
+        log.warning("在任何位置（Colab Userdata 或本地 JSON）都找不到有效的 API 金鑰。")
+
     return manager_keys

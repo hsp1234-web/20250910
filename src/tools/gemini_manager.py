@@ -45,10 +45,11 @@ class GeminiManager:
 
     def _api_call_wrapper(self, task_name: str, model_name: str, prompt_content: List[Any], output_format: str = 'json'):
         if not genai:
-            return None, "google.generativeai not installed", "N/A"
+            return None, None, "google.generativeai not installed", "N/A"
 
         api_key = self._get_key()
         last_error = None
+        usage_metadata = None
 
         generation_config = GenerationConfig(response_mime_type="application/json") if output_format == 'json' else None
 
@@ -63,6 +64,13 @@ class GeminiManager:
                     generation_config=generation_config,
                     request_options={'timeout': self.timeout}
                 )
+
+                # 提取元數據
+                try:
+                    usage_metadata = response.usage_metadata
+                except Exception:
+                    usage_metadata = None # 如果沒有元數據，則忽略
+
                 raw_text = response.text
                 if not raw_text:
                     raise ValueError("API 回傳空內容")
@@ -70,7 +78,7 @@ class GeminiManager:
                 if output_format == 'json':
                     if raw_text.strip().startswith("```json"):
                         raw_text = raw_text.strip()[7:-3].strip()
-                    return json.loads(raw_text), None, api_key.name
+                    return json.loads(raw_text), usage_metadata, None, api_key.name
                 else:  # output_format == 'text'
                     # 清理常見的 Markdown 程式碼區塊
                     if raw_text.strip().startswith("```html"):
@@ -78,7 +86,7 @@ class GeminiManager:
                     elif raw_text.strip().startswith("```"):
                         # 通用移除 ```
                         raw_text = raw_text.strip()[3:-3].strip()
-                    return raw_text, None, api_key.name
+                    return raw_text, usage_metadata, None, api_key.name
 
             except Exception as e:
                 last_error = e
@@ -90,33 +98,40 @@ class GeminiManager:
                 break
 
         logging.error(f"[{tag}] 經過 {self.max_retries} 次嘗試後，API 請求最終失敗: {last_error}")
-        return None, last_error, api_key.name
+        return None, usage_metadata, last_error, api_key.name
 
-    def prompt_for_json(self, prompt: str, model_name: str = "gemini-1.5-flash-latest") -> Optional[Dict]:
+    def prompt_for_json(self, prompt: str, model_name: str = "gemini-1.5-flash-latest") -> (Optional[Dict], Any, str):
         """
         使用自訂提示詞執行請求，並期望回傳一個 JSON 物件。
         適用於第一階段的結構化資料提取。
+        回傳 (結果, 使用元數據, 錯誤, 使用的金鑰名稱)
         """
-        result, _, _ = self._api_call_wrapper(
+        result, usage_metadata, err, key_name = self._api_call_wrapper(
             task_name="PromptForJson",
             model_name=model_name,
             prompt_content=[prompt],
             output_format='json'
         )
-        return result
+        if err:
+            raise err
+        return result, usage_metadata, key_name
 
-    def prompt_for_text(self, prompt: str, model_name: str = "gemini-1.5-pro-latest") -> Optional[str]:
+
+    def prompt_for_text(self, prompt: str, model_name: str = "gemini-1.5-pro-latest") -> (Optional[str], Any, str):
         """
         使用自訂提示詞執行請求，並期望回傳純文字 (例如 HTML)。
         適用於第二階段的報告生成。
+        回傳 (結果, 使用元數據, 錯誤, 使用的金鑰名稱)
         """
-        result, _, _ = self._api_call_wrapper(
+        result, usage_metadata, err, key_name = self._api_call_wrapper(
             task_name="PromptForText",
             model_name=model_name,
             prompt_content=[prompt],
             output_format='text'
         )
-        return result
+        if err:
+            raise err
+        return result, usage_metadata, key_name
 
     def analyze_text(self, text_content: str, model_name: str = "gemini-1.5-flash-latest") -> Optional[Dict]:
         """【舊版，可選刪除】分析文字並回傳摘要和關鍵字。"""
