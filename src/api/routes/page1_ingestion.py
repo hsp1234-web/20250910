@@ -44,14 +44,19 @@ async def extract_urls_endpoint(payload: UrlExtractionRequest, request: Request)
 
         # [步驟四完成] - 重新啟用儲存功能
         if parsed_data:
-            # 現在 save_urls_to_db 已更新，可以處理新的結構
-            save_urls_to_db(parsed_data, source_text)
-            log.info(f"API: 成功解析並儲存 {count} 筆資料，正在廣播通知...")
+            # 使用 'with' 陳述式來安全地管理資料庫連線
+            from db.database import get_db_connection
+            with get_db_connection() as conn:
+                if not conn:
+                    raise HTTPException(status_code=503, detail="無法建立資料庫連線。")
+                save_urls_to_db(parsed_data, source_text, conn)
+
+            log.info(f"API: 成功解析並儲存 {count} 筆資料。")
             # 廣播 WebSocket 訊息 (如果需要)
-            await request.app.state.manager.broadcast_json({
-                "type": "URLS_EXTRACTED",
-                "payload": {"count": count}
-            })
+            # await request.app.state.manager.broadcast_json({
+            #     "type": "URLS_EXTRACTED",
+            #     "payload": {"count": count}
+            # })
         else:
             log.info("API: 在提供的文字中未找到任何可解析的資料。")
 

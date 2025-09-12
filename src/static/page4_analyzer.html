@@ -133,7 +133,8 @@
                             'processed': '<span class="status-processed">可供分析</span>',
                             'analyzing': '<span class="status-analyzing">正在分析...</span>',
                             'analyzed': '<span class="status-analyzed">分析完成</span>',
-                            'error': `<span class="status-error" title="${file.status_message || ''}">分析失敗</span>`
+                            'error': `<span class="status-error" title="${file.status_message || ''}">分析失敗</span>`,
+                            'pending_retry': `<span class="status-retry" title="${file.status_message || ''}">等待重試</span>`
                         };
                         const statusDisplay = statusMap[file.status] || file.status;
 
@@ -146,7 +147,7 @@
                                     <button class="view-report-btn" data-file-id="${file.id}">查看報告</button>
                                     <button class="reanalyze-btn" data-file-id="${file.id}">重新分析</button>
                                 </td>`;
-                        } else if (file.status === 'error') {
+                        } else if (file.status === 'error' || file.status === 'pending_retry') {
                             actionsHtml = `
                                 <td>
                                     <button class="retry-btn" data-file-id="${file.id}">重試</button>

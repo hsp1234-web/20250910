@@ -5,6 +5,7 @@ import json
 import os
 import re
 from pathlib import Path
+from unittest.mock import MagicMock
 from docx import Document
 from docx.shared import Inches
 from fpdf import FPDF
@@ -20,36 +21,10 @@ if str(SRC_DIR) not in sys.path:
 # --- 準備匯入被測試的模組 ---
 from db.database import get_db_connection, initialize_database
 from api.routes.page3_processor import run_processing_task
+from api.routes.page4_analyzer import run_ai_analysis_task
 
 # --- Pytest Fixtures (測試輔助工具) ---
-
-@pytest.fixture(scope="function")
-def db_conn(tmp_path, monkeypatch):
-    """
-    提供一個乾淨的、初始化的、基於檔案的暫存 SQLite 資料庫。
-    這個 fixture 會：
-    1. 建立一個暫存資料庫檔案。
-    2. 設定 TEST_DB_PATH 環境變數，讓 get_db_connection() 能找到它。
-    3. 在此資料庫上執行初始化。
-    4. 將連線物件提供給測試。
-    5. 在測試結束後自動清理。
-    """
-    temp_db_path = tmp_path / "test_tasks.db"
-    monkeypatch.setenv("TEST_DB_PATH", str(temp_db_path))
-
-    # 現在 get_db_connection() 將會連線到我們的暫存資料庫
-    # 我們也將這個連線傳遞給 initialize_database
-    conn = get_db_connection()
-    assert conn is not None, "無法建立到暫存資料庫的連線"
-
-    initialize_database(conn)
-
-    yield conn
-
-    conn.close()
-    # 檢查檔案是否存在，以防連線失敗
-    if temp_db_path.exists():
-        os.remove(temp_db_path)
+# The db_conn fixture is now in conftest.py
 
 @pytest.fixture(scope="module")
 def dummy_image_path(tmpdir_factory):
@@ -155,6 +130,79 @@ def test_real_file_processing_task(db_conn, tmp_path, dummy_image_path, file_cre
     print(f"  - 狀態更新為: {result['status']}")
     print(f"  - 提取的圖片: {result['extracted_image_paths']}")
     print(f"  - 提取的文字長度: {len(result['extracted_text'])}")
+
+
+def test_ai_analysis_retry_queue_logic(db_conn, monkeypatch):
+    """
+    整合測試：驗證 AI 分析的重試佇列邏輯。
+    - 第一次分析失敗時，狀態應變為 'pending_retry'。
+    - 手動觸發第二次分析時，應能成功並將狀態更新為 'analyzed'。
+    """
+    # --- 1. 準備 ---
+
+    # 在資料庫中插入一筆可供分析的紀錄
+    cursor = db_conn.cursor()
+    cursor.execute(
+        "INSERT INTO extracted_urls (url, status, local_path, source_text, retry_count) VALUES (?, ?, ?, ?, ?)",
+        ("http://test.com/retry_test", "processed", "/fake/path", "這是要分析的文字。", 0)
+    )
+    db_conn.commit()
+    file_id = cursor.lastrowid
+
+    # Mock `prompt_manager` 以避免檔案依賴
+    mock_prompt_manager = MagicMock()
+    mock_prompt_manager.get_all_prompts.return_value = {
+        "stage_1_extraction_prompt": "prompt1 {document_text}",
+        "stage_2_generation_prompt": "prompt2 {data_package}"
+    }
+    monkeypatch.setattr("api.routes.page4_analyzer.prompt_manager", mock_prompt_manager)
+
+    # Mock `key_manager`
+    mock_key_manager = MagicMock()
+    mock_key_manager.get_all_valid_keys_for_manager.return_value = [{'name': 'mock_key', 'value': '123'}]
+    monkeypatch.setattr("api.routes.page4_analyzer.key_manager", mock_key_manager)
+
+    # Mock `GeminiManager`
+    mock_gemini_instance = MagicMock()
+    # 第一次呼叫 prompt_for_json 時拋出錯誤，第二次正常運作
+    mock_gemini_instance.prompt_for_json.side_effect = [
+        RuntimeError("模擬 AI 第一次失敗"), # 第一次呼叫失敗
+        {"key": "value"} # 第二次呼叫成功
+    ]
+    mock_gemini_instance.prompt_for_text.return_value = "<html></html>"
+
+    # 將 mock instance 作為類別的回傳值
+    monkeypatch.setattr("api.routes.page4_analyzer.GeminiManager", MagicMock(return_value=mock_gemini_instance))
+
+    # --- 2. 執行第一次分析 (預期會失敗並進入重試佇列) ---
+    print("\n--- 執行第一次分析 (預期失敗) ---")
+    run_ai_analysis_task([file_id], server_port=0)
+
+    # --- 3. 驗證第一次分析的結果 ---
+    cursor.execute("SELECT status, retry_count, last_error_details FROM extracted_urls WHERE id = ?", (file_id,))
+    result1 = cursor.fetchone()
+
+    print(f"第一次分析後狀態: {dict(result1)}")
+    assert result1['status'] == 'pending_retry', "第一次失敗後，狀態應為 'pending_retry'"
+    assert result1['retry_count'] == 1, "第一次失敗後，重試次數應為 1"
+    assert "模擬 AI 第一次失敗" in result1['last_error_details'], "應記錄第一次失敗的錯誤詳情"
+
+    # --- 4. 執行第二次分析 (模擬手動重試，預期成功) ---
+    print("\n--- 執行第二次分析 (預期成功) ---")
+    run_ai_analysis_task([file_id], server_port=0)
+
+    # --- 5. 驗證第二次分析的結果 ---
+    cursor.execute("SELECT status, retry_count FROM extracted_urls WHERE id = ?", (file_id,))
+    result2 = cursor.fetchone()
+    cursor.execute("SELECT id FROM reports WHERE source_url_id = ?", (file_id,))
+    report_result = cursor.fetchone()
+
+    print(f"第二次分析後狀態: {dict(result2)}")
+    assert result2['status'] == 'analyzed', "第二次重試成功後，狀態應為 'analyzed'"
+    # 重試次數不應再增加
+    assert result2['retry_count'] == 1, "成功後，重試次數不應再增加"
+    assert report_result is not None, "成功後，應在 reports 表中建立一筆紀錄"
+    print("✅ AI 分析重試佇列整合測試成功！")
 
 
 # TODO: 該測試需要更新以匹配 drive_downloader.py 中 download_file 的最新函式簽名。
