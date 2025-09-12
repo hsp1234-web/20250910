@@ -42,7 +42,8 @@ log = logging.getLogger('DBManagerServer')
 
 # --- 伺服器設定 ---
 # JULES: 將 PORT 設為 0，讓作業系統動態選擇可用埠號
-HOST, PORT = "127.0.0.1", 0
+# JULES'S FIX (2025-09-12): 改為固定埠號以簡化服務發現
+HOST, PORT = "127.0.0.1", 50001
 
 # --- 指令分派 ---
 # 建立一個函式名稱與指令 action 的對應字典
@@ -62,6 +63,13 @@ ACTION_MAP = {
     "get_app_state": database.get_app_state,
     "set_app_state": database.set_app_state,
     "get_all_app_states": database.get_all_app_states,
+
+    # --- AI 分析任務 (Analysis Tasks) Actions ---
+    "create_or_get_analysis_task": database.create_or_get_analysis_task,
+    "update_analysis_task": database.update_analysis_task,
+    "get_all_analysis_tasks": database.get_all_analysis_tasks,
+    "get_analysis_task": database.get_analysis_task,
+
     # For testing:
     "clear_all_tasks": database.clear_all_tasks,
 }

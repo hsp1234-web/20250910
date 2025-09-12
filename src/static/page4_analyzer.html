@@ -6,7 +6,7 @@
     <title>頁面四：AI 分析</title>
     <link rel="stylesheet" href="/static/css/nav.css">
     <link rel="stylesheet" href="/static/css/common.css">
-    <link rel="stylesheet" href="/static/css/page4.css"> <!-- 使用 page4 的 css -->
+    <link rel="stylesheet" href="/static/css/page4.css">
 </head>
 <body>
     <nav class="top-nav">
@@ -23,17 +23,18 @@
     </nav>
 
     <div class="content">
+        <!-- Panel 1: 檔案選擇與第一階段分析 -->
         <div class="panel">
-            <h1>頁面四：AI 分析與歷史報告</h1>
-            <p>請勾選您想分析的項目，然後點擊按鈕開始分析。分析流程將採用在「提示詞管理」頁面設定的兩階段提示詞。</p>
-             <div class="management-links">
+            <h1>AI 分析流程</h1>
+            <p>請從下方列表中勾選您想分析的檔案，選擇模型後啟動第一階段分析。</p>
+            <div class="management-links">
                 <a href="/page6" class="button-link">管理 API 金鑰</a>
                 <a href="/page7" class="button-link">管理提示詞</a>
             </div>
 
             <div class="form-group" style="margin-top: 20px;">
-                <label for="model-select">選擇第一階段分析模型:</label>
-                <select id="model-select">
+                <label for="stage1-model-select">選擇第一階段分析模型:</label>
+                <select id="stage1-model-select">
                     <option value="">正在載入模型...</option>
                 </select>
             </div>
@@ -48,60 +49,183 @@
             </div>
 
             <div style="margin-top: 20px;">
-                <button id="start-analysis-btn">開始分析選中項目</button>
+                <button id="start-stage1-btn">🚀 開始第一階段分析</button>
             </div>
         </div>
 
+        <!-- Panel 2: 分析進度儀表板 -->
+        <div class="panel">
+            <h2>分析進度儀表板</h2>
+            <p>此處會顯示所有分析任務的即時狀態。第一階段完成後，您可勾選檔案以進行第二階段分析。</p>
+
+            <div class="form-group" style="margin-top: 20px;">
+                <label for="stage2-model-select">選擇第二階段分析模型:</label>
+                <select id="stage2-model-select">
+                    <option value="">正在載入模型...</option>
+                </select>
+            </div>
+
+            <div id="analysis-dashboard-container" style="margin-top: 10px;">
+                <p>正在等待分析任務...</p>
+            </div>
+
+            <div style="margin-top: 20px;">
+                <button id="start-stage2-btn">🔥 開始第二階段分析</button>
+            </div>
+        </div>
+
+        <!-- Panel 3: 狀態日誌 -->
         <div class="panel">
             <div class="panel-header">
                 <h2>狀態日誌</h2>
                 <button id="copy-log-button" class="copy-button" title="複製日誌">📄</button>
             </div>
-            <div id="status-area">
-                <!-- 分析狀態將會顯示在這裡 -->
-            </div>
+            <div id="status-area"></div>
         </div>
+    </div>
 
-        <div class="panel">
-            <h2>已生成報告</h2>
-            <div id="completed-list-container">
-                <p>此處會顯示已成功生成的分析報告。</p>
-            </div>
+    <!-- Modal for JSON/Error details -->
+    <div id="details-modal" class="modal">
+        <div class="modal-content">
+            <span class="close-button">&times;</span>
+            <h3 id="modal-title">詳細資訊</h3>
+            <pre id="modal-body"></pre>
         </div>
     </div>
 
     <script>
         document.addEventListener('DOMContentLoaded', () => {
-            let allReportsData = []; // 用於儲存所有報告的資料，方便查找
+            // --- DOM Element Cache ---
             const fileListContainer = document.getElementById('file-list-container');
+            const dashboardContainer = document.getElementById('analysis-dashboard-container');
             const selectAllButton = document.getElementById('select-all-button');
             const deselectAllButton = document.getElementById('deselect-all-button');
-            const startAnalysisBtn = document.getElementById('start-analysis-btn');
+            const startStage1Btn = document.getElementById('start-stage1-btn');
+            const startStage2Btn = document.getElementById('start-stage2-btn');
             const statusArea = document.getElementById('status-area');
-            const completedListContainer = document.getElementById('completed-list-container');
             const copyLogButton = document.getElementById('copy-log-button');
-            const modelSelect = document.getElementById('model-select');
+            const stage1ModelSelect = document.getElementById('stage1-model-select');
+            const stage2ModelSelect = document.getElementById('stage2-model-select');
+            const modal = document.getElementById('details-modal');
+            const modalTitle = document.getElementById('modal-title');
+            const modalBody = document.getElementById('modal-body');
+            const closeModal = document.querySelector('.close-button');
 
+            // --- State ---
+            let analysisTasks = [];
+
+            // --- Utility Functions ---
             const formatTaipeiTime = (isoString) => {
                 if (!isoString) return '無效時間';
                 try {
-                    const date = new Date(isoString);
-                    const formatter = new Intl.DateTimeFormat('en-CA', {
-                        timeZone: 'Asia/Taipei',
-                        year: 'numeric', month: '2-digit', day: '2-digit',
-                        hour: '2-digit', minute: '2-digit', second: '2-digit',
-                        hour12: false
-                    });
-                    return formatter.format(date).replace(/-/g, '/').replace(',', '');
-                } catch (e) {
-                    console.error("時間格式化失敗:", e, "輸入值:", isoString);
-                    return '時間格式錯誤';
-                }
+                    return new Date(isoString).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei', hour12: false }).replace(/\//g, '-');
+                } catch (e) { return '時間格式錯誤'; }
             };
 
             const logStatus = (message, color = 'black') => {
-                const timestamp = formatTaipeiTime(new Date().toISOString());
-                statusArea.insertAdjacentHTML('afterbegin', `<p style="color: ${color};">${timestamp}: ${message}</p>`);
+                const timestamp = new Date().toLocaleTimeString('zh-TW', { hour12: false });
+                statusArea.insertAdjacentHTML('afterbegin', `<p style="color: ${color};">[${timestamp}] ${message}</p>`);
+            };
+
+            // --- Modal Logic ---
+            const showModal = (title, content) => {
+                modalTitle.textContent = title;
+                modalBody.textContent = content;
+                modal.style.display = 'block';
+            };
+            closeModal.onclick = () => modal.style.display = 'none';
+            window.onclick = (event) => {
+                if (event.target == modal) modal.style.display = 'none';
+            };
+
+            // --- Core Render Functions ---
+            const renderFileList = async () => {
+                try {
+                    const response = await fetch('/api/analyzer/processed_files');
+                    if (!response.ok) throw new Error('無法獲取已處理檔案');
+                    const files = await response.json();
+                    if (files.length === 0) {
+                        fileListContainer.innerHTML = '<p>沒有可供分析的檔案。</p>';
+                        return;
+                    }
+                    let html = `<table class="results-table"><thead><tr><th><input type="checkbox" id="select-all-header-checkbox"></th><th>檔案名稱</th></tr></thead><tbody>`;
+                    files.forEach(file => {
+                        html += `<tr><td><input type="checkbox" class="file-checkbox" value="${file.id}"></td><td>${file.filename}</td></tr>`;
+                    });
+                    html += '</tbody></table>';
+                    fileListContainer.innerHTML = html;
+                } catch (error) {
+                    fileListContainer.innerHTML = `<p style="color:red;">${error.message}</p>`;
+                }
+            };
+
+            const renderAnalysisDashboard = () => {
+                if (analysisTasks.length === 0) {
+                    dashboardContainer.innerHTML = '<p>目前沒有分析任務。</p>';
+                    return;
+                }
+
+                const getStatusHTML = (status, errorLog) => {
+                    switch (status) {
+                        case 'pending': return `<span class="status-pending">⏳ 等待中</span>`;
+                        case 'processing': return `<span class="status-analyzing">🔄 處理中...</span>`;
+                        case 'completed': return `<span class="status-analyzed">✅ 完成</span>`;
+                        case 'failed': return `<span class="status-error" title="${errorLog || ''}">❌ 失敗</span>`;
+                        default: return `<span>${status || '未知'}</span>`;
+                    }
+                };
+
+                const getActionsHTML = (task) => {
+                    let actions = [];
+                    if (task.stage1_status === 'completed') {
+                        actions.push(`<button class="action-btn" data-action="view-json" data-task-id="${task.id}">檢視JSON</button>`);
+                    }
+                    if (task.stage2_status === 'completed' && task.stage2_report_path) {
+                        const reportFilename = task.stage2_report_path.split(/[\\/]/).pop();
+                        const reportUrl = `/reports/${reportFilename}`;
+                        actions.push(`<a href="${reportUrl}" target="_blank" class="button-link-inline">檢視報告</a>`);
+                    }
+                    if (task.stage1_status === 'failed') {
+                        actions.push(`<button class="action-btn" data-action="retry-stage1" data-task-id="${task.id}" data-file-id="${task.file_id}">重試S1</button>`);
+                        actions.push(`<button class="action-btn" data-action="view-error" data-task-id="${task.id}" data-stage="1">查看錯誤</button>`);
+                    }
+                     if (task.stage2_status === 'failed') {
+                        actions.push(`<button class="action-btn" data-action="retry-stage2" data-task-id="${task.id}">重試S2</button>`);
+                        actions.push(`<button class="action-btn" data-action="view-error" data-task-id="${task.id}" data-stage="2">查看錯誤</button>`);
+                    }
+                    return actions.join(' ');
+                };
+
+                let html = `<table class="results-table">
+                    <thead><tr>
+                        <th><input type="checkbox" id="dashboard-select-all"></th>
+                        <th>檔案名稱</th><th>第一階段狀態</th><th>第二階段狀態</th><th>操作</th>
+                    </tr></thead><tbody>`;
+
+                analysisTasks.forEach(task => {
+                    const checkboxDisabled = task.stage1_status !== 'completed' || task.stage2_status === 'processing' || task.stage2_status === 'completed';
+                    html += `<tr>
+                        <td><input type="checkbox" class="dashboard-checkbox" value="${task.id}" ${checkboxDisabled ? 'disabled' : ''}></td>
+                        <td>${task.filename}</td>
+                        <td>${getStatusHTML(task.stage1_status, task.stage1_error_log)}</td>
+                        <td>${getStatusHTML(task.stage2_status, task.stage2_error_log)}</td>
+                        <td>${getActionsHTML(task)}</td>
+                    </tr>`;
+                });
+                html += '</tbody></table>';
+                dashboardContainer.innerHTML = html;
+            };
+
+            // --- API Call Functions ---
+            const fetchAnalysisStatus = async () => {
+                try {
+                    const response = await fetch('/api/analyzer/analysis_status');
+                    if (!response.ok) throw new Error('無法獲取分析狀態');
+                    analysisTasks = await response.json();
+                    renderAnalysisDashboard();
+                } catch (error) {
+                    logStatus(`獲取狀態失敗: ${error.message}`, 'red');
+                }
             };
 
             const fetchAndRenderModels = async () => {
@@ -109,326 +233,121 @@
                     const response = await fetch('/api/analyzer/models');
                     if (!response.ok) throw new Error('無法獲取模型列表');
                     const models = await response.json();
-                    modelSelect.innerHTML = ''; // 清空「載入中...」
+                    stage1ModelSelect.innerHTML = '';
+                    stage2ModelSelect.innerHTML = '';
                     models.forEach(model => {
-                        const option = document.createElement('option');
-                        option.value = model;
-                        option.textContent = model;
-                        modelSelect.appendChild(option);
+                        const option1 = document.createElement('option');
+                        option1.value = option1.textContent = model;
+                        stage1ModelSelect.appendChild(option1);
+                        const option2 = document.createElement('option');
+                        option2.value = option2.textContent = model;
+                        stage2ModelSelect.appendChild(option2);
                     });
                 } catch (error) {
-                    modelSelect.innerHTML = `<option value="">${error.message}</option>`;
-                    modelSelect.disabled = true;
+                    logStatus(`模型載入失敗: ${error.message}`, 'red');
                 }
             };
 
-            const fetchAndRenderFiles = async () => {
-                try {
-                    logStatus('正在獲取檔案列表...');
-                    const response = await fetch('/api/analyzer/processed_files');
-                    if (!response.ok) throw new Error(`伺服器錯誤 (狀態 ${response.status})`);
-                    const files = await response.json();
+            // --- Event Listeners ---
+            startStage1Btn.addEventListener('click', async () => {
+                const selectedIds = Array.from(document.querySelectorAll('.file-checkbox:checked')).map(cb => parseInt(cb.value, 10));
+                if (selectedIds.length === 0) return alert('請至少選擇一個檔案。');
+                const modelName = stage1ModelSelect.value;
+                if (!modelName) return alert('請選擇第一階段模型。');
 
-                    if (files.length === 0) {
-                        fileListContainer.innerHTML = '<p>目前沒有可供分析或已分析的檔案。</p>';
-                        startAnalysisBtn.disabled = true;
-                        selectAllButton.disabled = true;
-                        deselectAllButton.disabled = true;
-                        logStatus('列表為空。');
-                        return;
-                    }
+                logStatus(`啟動第一階段分析，共 ${selectedIds.length} 個檔案...`, 'blue');
+                await fetch('/api/analyzer/start_stage1_analysis', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ file_ids: selectedIds, model_name: modelName })
+                });
+                // 後端已啟動，WebSocket 會觸發更新
+            });
 
-                    let html = `
-                        <table class="results-table">
-                            <thead>
-                                <tr>
-                                    <th><input type="checkbox" id="select-all-header-checkbox"></th>
-                                    <th>檔案名稱 (點擊查看原始連結)</th>
-                                    <th>狀態</th>
-                                    <th>動作</th>
-                                </tr>
-                            </thead>
-                            <tbody>`;
+            startStage2Btn.addEventListener('click', async () => {
+                const selectedIds = Array.from(document.querySelectorAll('.dashboard-checkbox:checked')).map(cb => parseInt(cb.value, 10));
+                if (selectedIds.length === 0) return alert('請在儀表板中勾選第一階段已完成的任務。');
+                const modelName = stage2ModelSelect.value;
+                if (!modelName) return alert('請選擇第二階段模型。');
 
-                    let hasProcessableFiles = false;
-                    files.forEach(file => {
-                        let checkboxHtml = '<td></td>';
-                        let actionsHtml = '<td>-</td>';
+                logStatus(`啟動第二階段分析，共 ${selectedIds.length} 個任務...`, 'blue');
+                await fetch('/api/analyzer/start_stage2_analysis', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ task_ids: selectedIds, model_name: modelName })
+                });
+            });
 
-                        const statusMap = {
-                            'processed': '<span class="status-processed">可供分析</span>',
-                            'analyzing': '<span class="status-analyzing">正在分析...</span>',
-                            'analyzed': '<span class="status-analyzed">分析完成</span>',
-                            'error': `<span class="status-error" title="${file.status_message || ''}">分析失敗</span>`,
-                            'pending_retry': `<span class="status-retry" title="${file.status_message || ''}">等待重試</span>`
-                        };
-                        const statusDisplay = statusMap[file.status] || file.status;
+            dashboardContainer.addEventListener('click', async (e) => {
+                const target = e.target;
+                if (!target.classList.contains('action-btn')) return;
 
-                        if (file.status === 'processed') {
-                            checkboxHtml = `<td><input type="checkbox" class="file-checkbox" value="${file.id}"></td>`;
-                            hasProcessableFiles = true;
-                        } else if (file.status === 'analyzed') {
-                            actionsHtml = `
-                                <td>
-                                    <button class="view-report-btn" data-file-id="${file.id}">查看報告</button>
-                                    <button class="reanalyze-btn" data-file-id="${file.id}">重新分析</button>
-                                </td>`;
-                        } else if (file.status === 'error' || file.status === 'pending_retry') {
-                            actionsHtml = `
-                                <td>
-                                    <button class="retry-btn" data-file-id="${file.id}">重試</button>
-                                    <button class="view-error-btn" title="${file.status_message || '無詳細資訊'}">查看錯誤</button>
-                                </td>`;
-                        }
+                const action = target.dataset.action;
+                const taskId = parseInt(target.dataset.taskId, 10);
+                const task = analysisTasks.find(t => t.id === taskId);
 
-                        html += `
-                            <tr>
-                                ${checkboxHtml}
-                                <td><a href="${file.url}" title="原始連結：${file.url}" target="_blank">${file.filename}</a></td>
-                                <td>${statusDisplay}</td>
-                                ${actionsHtml}
-                            </tr>`;
-                    });
-                    html += '</tbody></table>';
-                    fileListContainer.innerHTML = html;
-
-                    const headerCheckbox = document.getElementById('select-all-header-checkbox');
-                    if (headerCheckbox) {
-                        headerCheckbox.addEventListener('change', (e) => {
-                            document.querySelectorAll('.file-checkbox').forEach(cb => cb.checked = e.target.checked);
-                        });
-                        headerCheckbox.disabled = !hasProcessableFiles;
-                    }
-
-                    startAnalysisBtn.disabled = !hasProcessableFiles;
-                    selectAllButton.disabled = !hasProcessableFiles;
-                    deselectAllButton.disabled = !hasProcessableFiles;
-
-                    logStatus(`成功載入 ${files.length} 個檔案。`);
-
-                } catch (error) {
-                    const errorMsg = `載入檔案列表失敗：${error.message}`;
-                    fileListContainer.innerHTML = `<p style="color: red;">${errorMsg}</p>`;
-                    logStatus(errorMsg, 'red');
-                }
-            };
-
-            const startAnalysis = async (fileIds, modelName) => {
-                if (!fileIds || fileIds.length === 0) {
-                    alert('沒有提供要分析的項目 ID。');
-                    return;
-                }
-                 if (!modelName) {
-                    alert('請選擇一個分析模型。');
-                    return;
-                }
-                logStatus(`正在為 ${fileIds.length} 個項目發送分析請求 (模型: ${modelName})...`);
-                try {
-                    const response = await fetch('/api/analyzer/start_analysis', {
+                if (action === 'view-json') {
+                    const response = await fetch(`/api/analyzer/stage1_result/${taskId}`);
+                    const data = await response.json();
+                    showModal(`任務 #${taskId} 的 JSON 結果`, JSON.stringify(data, null, 2));
+                } else if (action === 'view-error') {
+                    const stage = target.dataset.stage;
+                    const errorLog = stage === '1' ? task.stage1_error_log : task.stage2_error_log;
+                    showModal(`任務 #${taskId} 的錯誤日誌`, errorLog || '沒有詳細的錯誤資訊。');
+                } else if (action === 'retry-stage1') {
+                    const fileId = parseInt(target.dataset.fileId, 10);
+                    const modelName = stage1ModelSelect.value;
+                    await fetch('/api/analyzer/start_stage1_analysis', {
                         method: 'POST',
                         headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({ file_ids: fileIds, model_name: modelName })
+                        body: JSON.stringify({ file_ids: [fileId], model_name: modelName })
                     });
-                    const result = await response.json();
-                    if (!response.ok) throw new Error(result.detail || '啟動分析時發生未知錯誤。');
-                    logStatus(result.message, 'green');
-                    await fetchAndRenderFiles();
-                } catch (error) {
-                    logStatus(`請求失敗：${error.message}`, 'red');
+                } else if (action === 'retry-stage2') {
+                     const modelName = stage2ModelSelect.value;
+                     await fetch('/api/analyzer/start_stage2_analysis', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({ task_ids: [taskId], model_name: modelName })
+                    });
                 }
-            };
+            });
 
             selectAllButton.addEventListener('click', () => document.querySelectorAll('.file-checkbox').forEach(cb => cb.checked = true));
             deselectAllButton.addEventListener('click', () => document.querySelectorAll('.file-checkbox').forEach(cb => cb.checked = false));
-
-            startAnalysisBtn.addEventListener('click', () => {
-                const selectedIds = Array.from(document.querySelectorAll('.file-checkbox:checked')).map(cb => parseInt(cb.value, 10));
-                if (selectedIds.length === 0) {
-                    alert('請至少選擇一個要分析的項目。');
-                    return;
-                }
-                const selectedModel = modelSelect.value;
-                startAnalysis(selectedIds, selectedModel);
-            });
-
-            fileListContainer.addEventListener('click', (e) => {
-                const target = e.target;
-                const fileId = target.dataset.fileId ? parseInt(target.dataset.fileId, 10) : null;
-
-                if ((target.classList.contains('reanalyze-btn') || target.classList.contains('retry-btn')) && fileId) {
-                    const selectedModel = modelSelect.value;
-                     if (!selectedModel) {
-                        alert('請先在上方選擇一個分析模型再重試。');
-                        modelSelect.focus();
-                        return;
-                    }
-                    startAnalysis([fileId], selectedModel);
-                } else if (target.classList.contains('view-error-btn')) {
-                    alert(target.title || '沒有提供錯誤詳情。');
-                } else if (target.classList.contains('view-report-btn') && fileId) {
-                    const report = allReportsData.find(r => r.source_file_id === fileId);
-                    if (report && report.report_url) {
-                        window.open(report.report_url, '_blank');
-                    } else {
-                        alert(`檔案 ID ${fileId} 對應的報告尚未生成或找不到，請稍後再試。`);
-                        fetchAndRenderReports();
-                    }
+            dashboardContainer.addEventListener('change', e => {
+                if (e.target.id === 'dashboard-select-all') {
+                    document.querySelectorAll('.dashboard-checkbox:not(:disabled)').forEach(cb => cb.checked = e.target.checked);
                 }
             });
 
-            const fetchAndRenderReports = async () => {
-                try {
-                    const response = await fetch('/api/analyzer/reports');
-                    if (!response.ok) throw new Error(`伺服器錯誤 (狀態 ${response.status})`);
-                    const reports = await response.json();
-                    allReportsData = reports;
-
-                    if (reports.length === 0) {
-                        completedListContainer.innerHTML = '<p>目前沒有已生成的報告。</p>';
-                        return;
-                    }
-
-                    let html = `
-                        <table class="results-table">
-                            <thead>
-                                <tr>
-                                    <th>報告日期</th>
-                                    <th>來源檔案</th>
-                                    <th>使用模型</th>
-                                    <th>動作</th>
-                                </tr>
-                            </thead>
-                            <tbody>`;
-
-                    reports.forEach(report => {
-                        const reportDate = formatTaipeiTime(report.created_at);
-                        const sourceFilename = report.source_url.split('/').pop().substring(0, 30) + '...';
-                        const modelUsed = report.prompt_key || '未知';
-
-                        html += `
-                            <tr data-report-id="${report.id}">
-                                <td>${reportDate}</td>
-                                <td><a href="${report.source_url}" title="${report.source_url}" target="_blank">${sourceFilename}</a></td>
-                                <td><span class="model-tag">${modelUsed}</span></td>
-                                <td>
-                                    <a href="${report.report_url}" target="_blank" class="button-link-inline">查看HTML</a>
-                                    <button class="view-details-btn" data-report-id="${report.id}">JSON詳情</button>
-                                </td>
-                            </tr>
-                        `;
-                    });
-                    html += '</tbody></table>';
-                    completedListContainer.innerHTML = html;
-                } catch (error) {
-                    completedListContainer.innerHTML = `<p style="color: red;">載入報告列表失敗：${error.message}</p>`;
-                }
-            };
-
-            completedListContainer.addEventListener('click', async (e) => {
-                if (!e.target.classList.contains('view-details-btn')) return;
-
-                const button = e.target;
-                const reportId = button.dataset.reportId;
-                const parentRow = button.closest('tr');
-                const detailsRowId = `details-for-${reportId}`;
-                const existingDetailsRow = document.getElementById(detailsRowId);
-
-                if (existingDetailsRow) {
-                    existingDetailsRow.remove();
-                    return;
-                }
-
-                logStatus(`正在獲取報告 #${reportId} 的 JSON 詳情...`);
-                try {
-                    const response = await fetch(`/api/analyzer/report_details/${reportId}`);
-                    if (!response.ok) throw new Error('獲取詳情失敗');
-                    const data = await response.json();
-
-                    const detailsRow = document.createElement('tr');
-                    detailsRow.id = detailsRowId;
-                    const detailsCell = document.createElement('td');
-                    detailsCell.colSpan = 4; // 跨越所有欄
-
-                    let detailsHtml = '<div class="json-details-container"><h3>JSON 詳情</h3>';
-                    if (Object.keys(data).length > 0) {
-                        detailsHtml += '<table class="json-table">';
-                        for (const [key, value] of Object.entries(data)) {
-                            detailsHtml += `<tr><th>${key}</th><td>${JSON.stringify(value, null, 2)}</td></tr>`;
-                        }
-                        detailsHtml += '</table>';
-                    } else {
-                        detailsHtml += '<p>沒有可顯示的結構化資料。</p>';
-                    }
-                    detailsHtml += '</div>';
-
-                    detailsCell.innerHTML = detailsHtml;
-                    detailsRow.appendChild(detailsCell);
-                    parentRow.after(detailsRow);
-
-                } catch(error) {
-                    logStatus(`獲取詳情失敗: ${error.message}`, 'red');
-                }
-            });
-
+            // --- WebSocket Setup ---
             const setupWebSocket = () => {
                 const ws = new WebSocket(`${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/api/ws`);
-                ws.onopen = () => logStatus('WebSocket 連線成功。等待即時更新...', 'blue');
+                ws.onopen = () => logStatus('WebSocket 連線成功。', 'blue');
                 ws.onclose = () => {
                     logStatus('WebSocket 連線已中斷。5 秒後嘗試重新連線...', 'orange');
                     setTimeout(setupWebSocket, 5000);
                 };
-                ws.onerror = (error) => console.error("WebSocket Error:", error);
                 ws.onmessage = (event) => {
                     const data = JSON.parse(event.data);
-                    logStatus(`收到 WebSocket 訊息: ${data.type}`, 'blue');
-                    if (data.type === 'ANALYSIS_PROGRESS') {
-                         logStatus(`[進度] ${data.message}`, 'purple');
-                    } else if (data.type === 'ANALYSIS_COMPLETE') {
-                        logStatus(`[完成] ${data.message}`, 'green');
-                        setTimeout(() => {
-                            fetchAndRenderFiles();
-                            fetchAndRenderReports();
-                        }, 500);
+                    if (data.type === 'STATUS_UPDATE') {
+                        logStatus('收到狀態更新通知，正在刷新儀表板...', 'purple');
+                        fetchAnalysisStatus();
                     }
                 };
             };
 
-            copyLogButton.addEventListener('click', () => {
-                const logContent = statusArea.innerText;
-                navigator.clipboard.writeText(logContent).then(() => {
-                    const originalIcon = copyLogButton.innerText;
-                    copyLogButton.innerText = '✅';
-                    copyLogButton.disabled = true;
-                    setTimeout(() => {
-                        copyLogButton.innerText = originalIcon;
-                        copyLogButton.disabled = false;
-                    }, 3000);
-                }).catch(err => {
-                    console.error('無法複製日誌: ', err);
-                    alert('複製失敗，請手動複製。');
-                });
-            });
-
+            // --- Initial Load ---
             (async () => {
+                logStatus('頁面載入完成，正在初始化...');
                 await Promise.all([
-                    fetchAndRenderFiles(),
-                    fetchAndRenderReports(),
-                    fetchAndRenderModels()
+                    fetchAndRenderModels(),
+                    renderFileList(),
+                    fetchAnalysisStatus()
                 ]);
                 setupWebSocket();
+                logStatus('初始化完成。', 'green');
             })();
-
-            const centerActiveNavButton = () => {
-                const activeNavButton = document.querySelector('.top-nav a.active');
-                if (activeNavButton) {
-                    activeNavButton.scrollIntoView({
-                        behavior: 'smooth',
-                        inline: 'center',
-                        block: 'nearest'
-                    });
-                }
-            };
-            setTimeout(centerActiveNavButton, 100);
         });
     </script>
 </body>

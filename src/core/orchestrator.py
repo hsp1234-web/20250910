@@ -10,15 +10,16 @@ import sys
 import threading
 import time
 from pathlib import Path
+
+# --- 路徑修正 (必須在所有專案內部模組導入之前) ---
+# 將 src 目錄新增到 Python 的搜尋路徑中
+# 這樣可以確保無論從哪裡執行，都能正確找到 db, api 等模組
+SRC_DIR = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(SRC_DIR))
+ROOT_DIR = SRC_DIR.parent
+
+# --- 現在可以安全地導入專案內部模組了 ---
 from db.client import DBClient, get_client
-
-# --- 路徑設定 ---
-# 將專案的根目錄 (本檔案的上兩層) 新增到 Python 的搜尋路徑中
-# 這樣可以確保無論從哪裡執行，都能正確找到 src 下的模組
-ROOT_DIR = Path(__file__).resolve().parent.parent.parent
-sys.path.insert(0, str(ROOT_DIR))
-SRC_DIR = ROOT_DIR / "src"
-
 
 logging.basicConfig(
     level=logging.INFO,
@@ -78,7 +79,7 @@ def main():
         # 1. 啟動資料庫管理者
         log.info("🔧 正在啟動資料庫管理者...")
         db_manager_port_list = []
-        db_manager_cmd = [sys.executable, "src/db/manager.py"]
+        db_manager_cmd = [sys.executable, "-m", "db.manager"]
         db_manager_proc = subprocess.Popen(db_manager_cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8')
         processes.append(db_manager_proc)
         log.info(f"資料庫管理者程序已啟動，PID: {db_manager_proc.pid}")
@@ -113,7 +114,7 @@ def main():
         # 3. 啟動 API 伺服器
         log.info("🔧 正在啟動 API 伺服器...")
         api_port = args.port if args.port else find_free_port()
-        api_server_cmd = [sys.executable, "src/api/api_server.py", "--port", str(api_port)]
+        api_server_cmd = [sys.executable, "-m", "api.api_server", "--port", str(api_port)]
         if args.mock:
             api_server_cmd.append("--mock")
 

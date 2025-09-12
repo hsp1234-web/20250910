@@ -161,6 +161,36 @@ def initialize_database(conn: sqlite3.Connection = None):
             ''')
             # --- 結束 ---
 
+            # --- 為兩階段 AI 分析流程建立新資料表 ---
+            cursor.execute('''
+            CREATE TABLE IF NOT EXISTS analysis_tasks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                file_id INTEGER NOT NULL,
+                filename TEXT NOT NULL,
+                stage1_status VARCHAR(20) DEFAULT 'pending',
+                stage1_model TEXT,
+                stage1_json_path TEXT,
+                stage1_error_log TEXT,
+                stage2_status VARCHAR(20) DEFAULT 'pending',
+                stage2_model_used TEXT,
+                stage2_report_path TEXT,
+                stage2_error_log TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (file_id) REFERENCES extracted_urls (id)
+            )
+            ''')
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_analysis_file_id ON analysis_tasks (file_id)")
+            cursor.execute("""
+                CREATE TRIGGER IF NOT EXISTS update_analysis_tasks_updated_at
+                AFTER UPDATE ON analysis_tasks
+                FOR EACH ROW
+                BEGIN
+                    UPDATE analysis_tasks SET updated_at = CURRENT_TIMESTAMP WHERE id = OLD.id;
+                END;
+            """)
+            # --- 結束 ---
+
             # --- 為 extracted_urls 進行簡易遷移，新增狀態相關欄位 ---
             url_migrations = {
                 "author": "TEXT", # 新增作者欄位
@@ -459,6 +489,124 @@ def get_all_tasks() -> list[dict]:
     finally:
         if conn:
             conn.close()
+
+
+# --- 新增：AI 分析任務 (Analysis Tasks) 專用函式 ---
+
+def create_or_get_analysis_task(file_id: int, filename: str) -> dict | None:
+    """
+    為指定的 file_id 建立或取得一個分析任務。
+    如果任務已存在，則直接回傳該任務。如果不存在，則建立一個新的。
+    :param file_id: 來源檔案的 ID (來自 extracted_urls)。
+    :param filename: 檔案名稱。
+    :return: 包含任務資訊的字典，或失敗時回傳 None。
+    """
+    conn = get_db_connection()
+    if not conn: return None
+
+    try:
+        with conn:
+            cursor = conn.cursor()
+            # 檢查是否已存在
+            cursor.execute("SELECT * FROM analysis_tasks WHERE file_id = ?", (file_id,))
+            existing_task = cursor.fetchone()
+
+            if existing_task:
+                log.info(f"分析任務 for file_id {file_id} 已存在，直接回傳。")
+                return dict(existing_task)
+
+            # 不存在，則建立新的
+            sql = "INSERT INTO analysis_tasks (file_id, filename) VALUES (?, ?)"
+            cursor.execute(sql, (file_id, filename))
+            new_task_id = cursor.lastrowid
+            log.info(f"✅ 已為 file_id {file_id} 建立新的分析任務，ID: {new_task_id}。")
+
+            # 取得並回傳剛建立的任務
+            cursor.execute("SELECT * FROM analysis_tasks WHERE id = ?", (new_task_id,))
+            new_task = cursor.fetchone()
+            return dict(new_task) if new_task else None
+
+    except sqlite3.Error as e:
+        log.error(f"❌ 建立或取得分析任務 for file_id {file_id} 時發生錯誤: {e}", exc_info=True)
+        return None
+    finally:
+        if conn:
+            conn.close()
+
+def update_analysis_task(task_id: int, updates: dict) -> bool:
+    """
+    通用更新函式，用來更新 analysis_tasks 表中的特定欄位。
+    :param task_id: 要更新的任務 ID。
+    :param updates: 一個字典，key 是欄位名，value 是要更新的值。
+    :return: 成功則回傳 True，否則 False。
+    """
+    if not updates:
+        log.warning("呼叫 update_analysis_task 時沒有提供任何更新內容。")
+        return False
+
+    conn = get_db_connection()
+    if not conn: return False
+
+    set_clause = ", ".join([f"{key} = ?" for key in updates.keys()])
+    params = list(updates.values())
+    params.append(task_id)
+
+    sql = f"UPDATE analysis_tasks SET {set_clause} WHERE id = ?"
+
+    try:
+        with conn:
+            conn.execute(sql, params)
+        log.info(f"✅ 分析任務 {task_id} 已更新: {updates}")
+        return True
+    except sqlite3.Error as e:
+        log.error(f"❌ 更新分析任務 {task_id} 時出錯: {e}", exc_info=True)
+        return False
+    finally:
+        if conn:
+            conn.close()
+
+def get_all_analysis_tasks() -> list[dict]:
+    """
+    獲取所有 AI 分析任務的列表。
+    :return: 一個包含所有分析任務字典的列表。
+    """
+    sql = "SELECT * FROM analysis_tasks ORDER BY created_at DESC"
+    conn = get_db_connection()
+    if not conn: return []
+    try:
+        cursor = conn.cursor()
+        cursor.execute(sql)
+        tasks = cursor.fetchall()
+        return [dict(task) for task in tasks]
+    except sqlite3.Error as e:
+        log.error(f"❌ 獲取所有分析任務時發生錯誤: {e}", exc_info=True)
+        return []
+    finally:
+        if conn:
+            conn.close()
+
+def get_analysis_task(task_id: int) -> dict | None:
+    """
+    根據主鍵 ID 獲取單一分析任務。
+    :param task_id: 任務的主鍵 ID。
+    :return: 包含任務資訊的字典，或如果找不到則回傳 None。
+    """
+    sql = "SELECT * FROM analysis_tasks WHERE id = ?"
+    conn = get_db_connection()
+    if not conn: return None
+    try:
+        cursor = conn.cursor()
+        cursor.execute(sql, (task_id,))
+        task = cursor.fetchone()
+        return dict(task) if task else None
+    except sqlite3.Error as e:
+        log.error(f"❌ 查詢分析任務 {task_id} 時發生錯誤: {e}", exc_info=True)
+        return None
+    finally:
+        if conn:
+            conn.close()
+
+# --- 結束：AI 分析任務專用函式 ---
 
 
 def add_system_log(source: str, level: str, message: str) -> bool:
