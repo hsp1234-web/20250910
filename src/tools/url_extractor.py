@@ -15,7 +15,7 @@ import sys
 import sqlite3
 from pathlib import Path
 import logging
-
+from typing import Optional
 # --- 路徑修正 ---
 # 將專案的 src 目錄新增到 Python 的搜尋路徑中，以便找到 db 模組
 SRC_DIR = Path(__file__).resolve().parent.parent
@@ -127,25 +127,29 @@ def extract_urls(text: str) -> list[str]:
     # 只回傳網址列表以維持舊的介面
     return [item['url'] for item in parsed_data]
 
-def save_urls_to_db(parsed_data: list[dict], source_text: str):
+def save_urls_to_db(parsed_data: list[dict], source_text: str, conn: Optional[sqlite3.Connection] = None):
     """
     [新版] 將解析後的結構化資料儲存到資料庫的 `extracted_urls` 資料表中。
 
     :param parsed_data: 一個包含字典的列表，每個字典應有 'url' 和 'author' 鍵。
     :param source_text: 這些網址的來源文字。
+    :param conn: 一個可選的 sqlite3 Connection 物件。如果未提供，函式會自行管理連線。
     """
     if not parsed_data:
         log.info("沒有要儲存的資料，跳過資料庫操作。")
         return
 
-    conn = get_db_connection()
-    if not conn:
+    # 標記是否為內部管理的連線
+    is_managed_locally = not conn
+    db_conn = conn if conn else get_db_connection()
+
+    if not db_conn:
         log.error("無法建立資料庫連線，資料儲存失敗。")
         return
 
     try:
-        with conn:
-            cursor = conn.cursor()
+        with db_conn:
+            cursor = db_conn.cursor()
             created_at_iso = get_current_taipei_time_iso()
 
             # 準備要插入的多筆資料，現在包含作者、訊息日期和時間
@@ -163,8 +167,8 @@ def save_urls_to_db(parsed_data: list[dict], source_text: str):
     except sqlite3.Error as e:
         log.error(f"儲存解析資料到資料庫時發生錯誤: {e}", exc_info=True)
     finally:
-        if conn:
-            conn.close()
+        if is_managed_locally and db_conn:
+            db_conn.close()
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="從文字中提取網址並儲存到資料庫。")

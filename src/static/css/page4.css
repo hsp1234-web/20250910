@@ -145,6 +145,7 @@ button:hover {
 .status-analyzing { background-color: #6f42c1; } /* Purple */
 .status-analyzed { background-color: #28a745; }  /* Success Green */
 .status-error { background-color: #dc3545; }   /* Danger Red */
+.status-retry { background-color: #fd7e14; }   /* Orange */
 
 /* Action Button Styles */
 .results-table button {
@@ -166,3 +167,66 @@ button:hover {
 .reanalyze-btn { background-color: #ffc107; color: #212529;} /* Warning Yellow */
 .retry-btn { background-color: #17a2b8; } /* Info Blue */
 .view-error-btn { background-color: #6c757d; } /* Secondary Gray */
+
+/* Styles for new reports table */
+.model-tag {
+    background-color: #6c757d;
+    color: white;
+    padding: 3px 8px;
+    border-radius: 12px;
+    font-size: 0.85em;
+    font-weight: bold;
+}
+
+.button-link-inline {
+    display: inline-block;
+    padding: 5px 10px;
+    font-size: 0.9em;
+    color: #fff;
+    background-color: #007bff;
+    border-radius: 4px;
+    text-decoration: none;
+    margin: 0 2px;
+    transition: opacity 0.2s;
+}
+.button-link-inline:hover {
+    opacity: 0.8;
+}
+
+.view-details-btn {
+    background-color: #28a745;
+}
+
+/* Styles for expanded JSON details view */
+.json-details-container {
+    padding: 15px;
+    background-color: #f8f9fa;
+    border-top: 2px solid #dee2e6;
+}
+
+.json-details-container h3 {
+    margin-top: 0;
+    color: #495057;
+}
+
+.json-table {
+    width: 100%;
+    border-collapse: collapse;
+    background-color: #fff;
+}
+.json-table th, .json-table td {
+    border: 1px solid #dee2e6;
+    padding: 8px;
+    text-align: left;
+    vertical-align: top;
+    font-family: monospace;
+}
+.json-table th {
+    width: 25%;
+    background-color: #e9ecef;
+    font-weight: bold;
+}
+.json-table td {
+    white-space: pre-wrap; /* Allows long text to wrap */
+    word-break: break-all;
+}

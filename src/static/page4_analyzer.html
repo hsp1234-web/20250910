@@ -31,6 +31,13 @@
                 <a href="/page7" class="button-link">管理提示詞</a>
             </div>
 
+            <div class="form-group" style="margin-top: 20px;">
+                <label for="model-select">選擇第一階段分析模型:</label>
+                <select id="model-select">
+                    <option value="">正在載入模型...</option>
+                </select>
+            </div>
+
             <div style="margin-bottom: 10px; margin-top: 20px;">
                 <button id="select-all-button">全選</button>
                 <button id="deselect-all-button">取消全選</button>
@@ -73,6 +80,7 @@
             const statusArea = document.getElementById('status-area');
             const completedListContainer = document.getElementById('completed-list-container');
             const copyLogButton = document.getElementById('copy-log-button');
+            const modelSelect = document.getElementById('model-select');
 
             const formatTaipeiTime = (isoString) => {
                 if (!isoString) return '無效時間';
@@ -94,6 +102,24 @@
             const logStatus = (message, color = 'black') => {
                 const timestamp = formatTaipeiTime(new Date().toISOString());
                 statusArea.insertAdjacentHTML('afterbegin', `<p style="color: ${color};">${timestamp}: ${message}</p>`);
+            };
+
+            const fetchAndRenderModels = async () => {
+                try {
+                    const response = await fetch('/api/analyzer/models');
+                    if (!response.ok) throw new Error('無法獲取模型列表');
+                    const models = await response.json();
+                    modelSelect.innerHTML = ''; // 清空「載入中...」
+                    models.forEach(model => {
+                        const option = document.createElement('option');
+                        option.value = model;
+                        option.textContent = model;
+                        modelSelect.appendChild(option);
+                    });
+                } catch (error) {
+                    modelSelect.innerHTML = `<option value="">${error.message}</option>`;
+                    modelSelect.disabled = true;
+                }
             };
 
             const fetchAndRenderFiles = async () => {
@@ -133,7 +159,8 @@
                             'processed': '<span class="status-processed">可供分析</span>',
                             'analyzing': '<span class="status-analyzing">正在分析...</span>',
                             'analyzed': '<span class="status-analyzed">分析完成</span>',
-                            'error': `<span class="status-error" title="${file.status_message || ''}">分析失敗</span>`
+                            'error': `<span class="status-error" title="${file.status_message || ''}">分析失敗</span>`,
+                            'pending_retry': `<span class="status-retry" title="${file.status_message || ''}">等待重試</span>`
                         };
                         const statusDisplay = statusMap[file.status] || file.status;
 
@@ -146,7 +173,7 @@
                                     <button class="view-report-btn" data-file-id="${file.id}">查看報告</button>
                                     <button class="reanalyze-btn" data-file-id="${file.id}">重新分析</button>
                                 </td>`;
-                        } else if (file.status === 'error') {
+                        } else if (file.status === 'error' || file.status === 'pending_retry') {
                             actionsHtml = `
                                 <td>
                                     <button class="retry-btn" data-file-id="${file.id}">重試</button>
@@ -186,17 +213,21 @@
                 }
             };
 
-            const startAnalysis = async (fileIds) => {
+            const startAnalysis = async (fileIds, modelName) => {
                 if (!fileIds || fileIds.length === 0) {
                     alert('沒有提供要分析的項目 ID。');
                     return;
                 }
-                logStatus(`正在為 ${fileIds.length} 個項目發送分析請求...`);
+                 if (!modelName) {
+                    alert('請選擇一個分析模型。');
+                    return;
+                }
+                logStatus(`正在為 ${fileIds.length} 個項目發送分析請求 (模型: ${modelName})...`);
                 try {
                     const response = await fetch('/api/analyzer/start_analysis', {
                         method: 'POST',
                         headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({ file_ids: fileIds })
+                        body: JSON.stringify({ file_ids: fileIds, model_name: modelName })
                     });
                     const result = await response.json();
                     if (!response.ok) throw new Error(result.detail || '啟動分析時發生未知錯誤。');
@@ -216,7 +247,8 @@
                     alert('請至少選擇一個要分析的項目。');
                     return;
                 }
-                startAnalysis(selectedIds);
+                const selectedModel = modelSelect.value;
+                startAnalysis(selectedIds, selectedModel);
             });
 
             fileListContainer.addEventListener('click', (e) => {
@@ -224,7 +256,13 @@
                 const fileId = target.dataset.fileId ? parseInt(target.dataset.fileId, 10) : null;
 
                 if ((target.classList.contains('reanalyze-btn') || target.classList.contains('retry-btn')) && fileId) {
-                    startAnalysis([fileId]);
+                    const selectedModel = modelSelect.value;
+                     if (!selectedModel) {
+                        alert('請先在上方選擇一個分析模型再重試。');
+                        modelSelect.focus();
+                        return;
+                    }
+                    startAnalysis([fileId], selectedModel);
                 } else if (target.classList.contains('view-error-btn')) {
                     alert(target.title || '沒有提供錯誤詳情。');
                 } else if (target.classList.contains('view-report-btn') && fileId) {
@@ -233,7 +271,6 @@
                         window.open(report.report_url, '_blank');
                     } else {
                         alert(`檔案 ID ${fileId} 對應的報告尚未生成或找不到，請稍後再試。`);
-                        // 作為備用，可以觸發一次報告刷新
                         fetchAndRenderReports();
                     }
                 }
@@ -244,24 +281,94 @@
                     const response = await fetch('/api/analyzer/reports');
                     if (!response.ok) throw new Error(`伺服器錯誤 (狀態 ${response.status})`);
                     const reports = await response.json();
-                    allReportsData = reports; // 更新全域報告資料
+                    allReportsData = reports;
 
                     if (reports.length === 0) {
                         completedListContainer.innerHTML = '<p>目前沒有已生成的報告。</p>';
                         return;
                     }
 
-                    let html = '<ul>';
+                    let html = `
+                        <table class="results-table">
+                            <thead>
+                                <tr>
+                                    <th>報告日期</th>
+                                    <th>來源檔案</th>
+                                    <th>使用模型</th>
+                                    <th>動作</th>
+                                </tr>
+                            </thead>
+                            <tbody>`;
+
                     reports.forEach(report => {
                         const reportDate = formatTaipeiTime(report.created_at);
-                        html += `<li>- ${reportDate}: <a href="${report.report_url}" target="_blank">查看報告 (來源: ${report.source_url})</a></li>`;
+                        const sourceFilename = report.source_url.split('/').pop().substring(0, 30) + '...';
+                        const modelUsed = report.prompt_key || '未知';
+
+                        html += `
+                            <tr data-report-id="${report.id}">
+                                <td>${reportDate}</td>
+                                <td><a href="${report.source_url}" title="${report.source_url}" target="_blank">${sourceFilename}</a></td>
+                                <td><span class="model-tag">${modelUsed}</span></td>
+                                <td>
+                                    <a href="${report.report_url}" target="_blank" class="button-link-inline">查看HTML</a>
+                                    <button class="view-details-btn" data-report-id="${report.id}">JSON詳情</button>
+                                </td>
+                            </tr>
+                        `;
                     });
-                    html += '</ul>';
+                    html += '</tbody></table>';
                     completedListContainer.innerHTML = html;
                 } catch (error) {
                     completedListContainer.innerHTML = `<p style="color: red;">載入報告列表失敗：${error.message}</p>`;
                 }
             };
+
+            completedListContainer.addEventListener('click', async (e) => {
+                if (!e.target.classList.contains('view-details-btn')) return;
+
+                const button = e.target;
+                const reportId = button.dataset.reportId;
+                const parentRow = button.closest('tr');
+                const detailsRowId = `details-for-${reportId}`;
+                const existingDetailsRow = document.getElementById(detailsRowId);
+
+                if (existingDetailsRow) {
+                    existingDetailsRow.remove();
+                    return;
+                }
+
+                logStatus(`正在獲取報告 #${reportId} 的 JSON 詳情...`);
+                try {
+                    const response = await fetch(`/api/analyzer/report_details/${reportId}`);
+                    if (!response.ok) throw new Error('獲取詳情失敗');
+                    const data = await response.json();
+
+                    const detailsRow = document.createElement('tr');
+                    detailsRow.id = detailsRowId;
+                    const detailsCell = document.createElement('td');
+                    detailsCell.colSpan = 4; // 跨越所有欄
+
+                    let detailsHtml = '<div class="json-details-container"><h3>JSON 詳情</h3>';
+                    if (Object.keys(data).length > 0) {
+                        detailsHtml += '<table class="json-table">';
+                        for (const [key, value] of Object.entries(data)) {
+                            detailsHtml += `<tr><th>${key}</th><td>${JSON.stringify(value, null, 2)}</td></tr>`;
+                        }
+                        detailsHtml += '</table>';
+                    } else {
+                        detailsHtml += '<p>沒有可顯示的結構化資料。</p>';
+                    }
+                    detailsHtml += '</div>';
+
+                    detailsCell.innerHTML = detailsHtml;
+                    detailsRow.appendChild(detailsCell);
+                    parentRow.after(detailsRow);
+
+                } catch(error) {
+                    logStatus(`獲取詳情失敗: ${error.message}`, 'red');
+                }
+            });
 
             const setupWebSocket = () => {
                 const ws = new WebSocket(`${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/api/ws`);
@@ -278,7 +385,6 @@
                          logStatus(`[進度] ${data.message}`, 'purple');
                     } else if (data.type === 'ANALYSIS_COMPLETE') {
                         logStatus(`[完成] ${data.message}`, 'green');
-                        // 稍作延遲以等待資料庫完全更新
                         setTimeout(() => {
                             fetchAndRenderFiles();
                             fetchAndRenderReports();
@@ -306,7 +412,8 @@
             (async () => {
                 await Promise.all([
                     fetchAndRenderFiles(),
-                    fetchAndRenderReports()
+                    fetchAndRenderReports(),
+                    fetchAndRenderModels()
                 ]);
                 setupWebSocket();
             })();

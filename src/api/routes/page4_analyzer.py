@@ -24,6 +24,7 @@ router = APIRouter()
 # --- Pydantic 模型 ---
 class AnalysisRequest(BaseModel):
     file_ids: List[int]
+    model_name: str # 新增 model_name 欄位
 
 # --- WebSocket 通知輔助函式 ---
 def _send_websocket_notification(server_port: int, message: Dict):
@@ -36,11 +37,11 @@ def _send_websocket_notification(server_port: int, message: Dict):
         log.error(f"無法發送 WebSocket 通知: {e}")
 
 # --- 背景任務函式 ---
-def run_ai_analysis_task(file_ids: List[int], server_port: int):
+def run_ai_analysis_task(file_ids: List[int], server_port: int, model_name: str):
     """
     對多個檔案執行新的兩階段 AI 分析流程。
     """
-    log.info(f"背景任務：開始分析 {len(file_ids)} 個檔案...")
+    log.info(f"背景任務：開始分析 {len(file_ids)} 個檔案，使用模型: {model_name}...")
 
     # 1. 初始化工具 (一次性)
     all_prompts = prompt_manager.get_all_prompts()
@@ -73,7 +74,7 @@ def run_ai_analysis_task(file_ids: List[int], server_port: int):
         conn = None
         try:
             # --- 進度通知 ---
-            progress_message = f"({i+1}/{total_files}) 正在處理檔案 ID: {file_id}..."
+            progress_message = f"({i+1}/{total_files}) 正在處理檔案 ID: {file_id} (模型: {model_name})..."
             log.info(progress_message)
             _send_websocket_notification(server_port, {"type": "ANALYSIS_PROGRESS", "message": progress_message})
 
@@ -94,7 +95,8 @@ def run_ai_analysis_task(file_ids: List[int], server_port: int):
             # --- 第一階段：結構化資料提取 ---
             _send_websocket_notification(server_port, {"type": "ANALYSIS_PROGRESS", "message": f"({i+1}/{total_files}) 檔案 {file_name}: 執行第一階段 AI 資料提取..."})
             stage_1_prompt = stage_1_prompt_template.format(document_text=text_content)
-            structured_data = gemini.prompt_for_json(prompt=stage_1_prompt)
+            # 使用傳入的 model_name
+            structured_data = gemini.prompt_for_json(prompt=stage_1_prompt, model_name=model_name)
             if not structured_data:
                 raise RuntimeError("第一階段 AI 資料提取失敗，回傳內容為空。")
 
@@ -114,6 +116,7 @@ def run_ai_analysis_task(file_ids: List[int], server_port: int):
                 "original_text": text_content[:500] + '...' # 僅傳遞部分原文以節省 token
             }
             stage_2_prompt = stage_2_prompt_template.format(data_package=json.dumps(data_package, ensure_ascii=False, indent=2))
+            # 第二階段模型可以保持固定，或未來也做成可選
             report_html = gemini.prompt_for_text(prompt=stage_2_prompt)
             if not report_html:
                 raise RuntimeError("第二階段 AI 報告生成失敗，回傳內容為空。")
@@ -129,7 +132,7 @@ def run_ai_analysis_task(file_ids: List[int], server_port: int):
             # --- 更新資料庫 ---
             cursor.execute(
                 "INSERT INTO reports (source_url_id, prompt_key, report_path, structured_data) VALUES (?, ?, ?, ?)",
-                (file_id, "two_stage_v1", str(report_path), json.dumps(structured_data, ensure_ascii=False))
+                (file_id, model_name, str(report_path), json.dumps(structured_data, ensure_ascii=False))
             )
             cursor.execute("UPDATE extracted_urls SET status = 'analyzed', status_message = '分析完成' WHERE id = ?", (file_id,))
             conn.commit()
@@ -137,11 +140,42 @@ def run_ai_analysis_task(file_ids: List[int], server_port: int):
 
         except Exception as e:
             log.error(f"背景任務：AI 分析檔案 ID {file_id} 時發生嚴重錯誤: {e}", exc_info=True)
-            error_message = f"分析失敗: {e}"
+            error_message = f"分析失敗: {type(e).__name__}: {str(e)}"
             if conn:
-                cursor = conn.cursor()
-                cursor.execute("UPDATE extracted_urls SET status = 'error', status_message = ? WHERE id = ?", (error_message, file_id))
-                conn.commit()
+                try:
+                    cursor = conn.cursor()
+                    # 獲取目前的重試次數
+                    cursor.execute("SELECT retry_count FROM extracted_urls WHERE id = ?", (file_id,))
+                    row = cursor.fetchone()
+                    current_retry_count = row['retry_count'] if row else 0
+
+                    if current_retry_count < 3:
+                        # 更新為等待重試狀態
+                        log.info(f"檔案 ID {file_id} 分析失敗，將其設定為等待重試狀態 (嘗試次數: {current_retry_count + 1})")
+                        sql = """
+                            UPDATE extracted_urls
+                            SET status = 'pending_retry',
+                                status_message = ?,
+                                retry_count = retry_count + 1,
+                                last_error_details = ?
+                            WHERE id = ?
+                        """
+                        cursor.execute(sql, (error_message, str(e), file_id))
+                    else:
+                        # 重試次數已達上限，標記為永久失敗
+                        log.warning(f"檔案 ID {file_id} 已達最大重試次數，將其標記為永久錯誤。")
+                        sql = """
+                            UPDATE extracted_urls
+                            SET status = 'error',
+                                status_message = ?
+                            WHERE id = ?
+                        """
+                        cursor.execute(sql, (f"已達最大重試次數。最終錯誤: {error_message}", file_id))
+
+                    conn.commit()
+                except Exception as db_err:
+                    log.error(f"在處理 AI 分析錯誤時，更新資料庫失敗: {db_err}")
+
             _send_websocket_notification(server_port, {"type": "ANALYSIS_PROGRESS", "message": f"錯誤：處理檔案 ID {file_id} 時失敗 - {error_message}"})
         finally:
             if conn:
@@ -153,9 +187,19 @@ def run_ai_analysis_task(file_ids: List[int], server_port: int):
     _send_websocket_notification(server_port, {"type": "ANALYSIS_COMPLETE", "message": final_message})
 
 
+@router.get("/models")
+async def get_available_models():
+    """回傳可用於分析的 AI 模型列表。"""
+    # 在未來，這可以從設定檔或更複雜的來源讀取
+    return [
+        "gemini-2.0-flash",
+        "gemini-1.5-pro-latest",
+        "gemini-1.5-flash-latest",
+    ]
+
 @router.get("/processed_files")
 async def get_processed_files():
-    """獲取所有可供分析或已分析的檔案列表（狀態為 'processed', 'analyzed', 'error'）。"""
+    """獲取所有可供分析或已分析的檔案列表（狀態為 'processed', 'analyzed', 'error', 'pending_retry'）。"""
     conn = None
     try:
         conn = get_db_connection()
@@ -164,7 +208,7 @@ async def get_processed_files():
         sql = """
             SELECT id, url, local_path, status, status_message
             FROM extracted_urls
-            WHERE status IN ('processed', 'analyzed', 'error')
+            WHERE status IN ('processed', 'analyzed', 'error', 'pending_retry')
             ORDER BY created_at DESC
         """
         cursor.execute(sql)
@@ -188,13 +232,43 @@ async def get_processed_files():
         if conn:
             conn.close()
 
+@router.get("/report_details/{report_id}")
+async def get_report_details(report_id: int):
+    """根據報告 ID 獲取其詳細的結構化 JSON 資料。"""
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT structured_data FROM reports WHERE id = ?", (report_id,))
+        row = cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="找不到指定 ID 的報告。")
+
+        # structured_data 欄位儲存的是 JSON 字串，需要解析
+        if not row['structured_data']:
+            return {} # 如果沒有資料，回傳空物件
+
+        return json.loads(row['structured_data'])
+
+    except json.JSONDecodeError:
+        log.error(f"API: 解析報告 ID {report_id} 的 JSON 資料時失敗。")
+        raise HTTPException(status_code=500, detail="無法解析儲存的 JSON 資料。")
+    except Exception as e:
+        log.error(f"API: 獲取報告詳情時發生錯誤: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="獲取報告詳情時發生伺服器內部錯誤。")
+    finally:
+        if conn:
+            conn.close()
+
 @router.post("/start_analysis")
 async def start_analysis(request: Request, payload: AnalysisRequest, background_tasks: BackgroundTasks):
-    """接收多個檔案 ID，為其建立背景分析任務。"""
+    """接收多個檔案 ID 和一個模型名稱，為其建立背景分析任務。"""
     if not payload.file_ids:
         raise HTTPException(status_code=400, detail="檔案 ID 列表不可為空。")
+    if not payload.model_name:
+        raise HTTPException(status_code=400, detail="必須提供模型名稱。")
 
-    log.info(f"API: 收到 AI 分析請求，共 {len(payload.file_ids)} 個檔案。")
+    log.info(f"API: 收到 AI 分析請求，共 {len(payload.file_ids)} 個檔案，使用模型: {payload.model_name}。")
 
     # 檢查是否有有效的金鑰
     if not key_manager.get_all_valid_keys_for_manager():
@@ -204,7 +278,8 @@ async def start_analysis(request: Request, payload: AnalysisRequest, background_
     if not server_port:
         raise HTTPException(status_code=500, detail="無法確定伺服器埠號，無法啟動背景任務。")
 
-    background_tasks.add_task(run_ai_analysis_task, payload.file_ids, server_port)
+    # 將 model_name 傳遞給背景任務
+    background_tasks.add_task(run_ai_analysis_task, payload.file_ids, server_port, payload.model_name)
 
     return {"message": f"已成功為 {len(payload.file_ids)} 個檔案建立背景分析任務。"}
 
@@ -216,7 +291,7 @@ async def get_reports():
         conn = get_db_connection()
         cursor = conn.cursor()
         sql = """
-            SELECT r.id, r.report_path, r.created_at, u.url, u.id as source_file_id
+            SELECT r.id, r.report_path, r.created_at, r.prompt_key, u.url, u.id as source_file_id
             FROM reports r
             JOIN extracted_urls u ON r.source_url_id = u.id
             ORDER BY r.created_at DESC
@@ -231,7 +306,8 @@ async def get_reports():
                 "report_url": f"/reports/{report_path.name}", # 產生可公開訪問的 URL
                 "created_at": row['created_at'],
                 "source_url": row['url'],
-                "source_file_id": row['source_file_id'] # 將原始檔案ID也一併回傳
+                "source_file_id": row['source_file_id'],
+                "prompt_key": row['prompt_key'] # 新增，用於前端顯示
             })
         return results
     except Exception as e:

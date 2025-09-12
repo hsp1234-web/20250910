@@ -117,9 +117,9 @@ button:disabled {
     background-color: #f8d7da;
 }
 
-.key-status.status-unknown {
-    color: #856404;
-    background-color: #fff3cd;
+.key-status.status-untested {
+    color: #383d41;
+    background-color: #e2e3e5;
 }
 
 .key-item .key-validated {

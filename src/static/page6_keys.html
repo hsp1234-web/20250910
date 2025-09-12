@@ -33,7 +33,7 @@
             <div class="form-group">
                 <input type="password" id="new-key-input" placeholder="在此貼上新的 API 金鑰">
                 <input type="text" id="new-key-name-input" placeholder="為金鑰設定一個別名 (可選)">
-                <button id="add-key-btn">新增並驗證</button>
+                <button id="add-key-btn">新增金鑰</button>
             </div>
             <div id="add-key-status"></div>
         </div>
@@ -71,8 +71,8 @@
             }
             let html = '<ul class="key-list">';
             keys.forEach(key => {
-                const statusClass = key.is_valid ? 'status-valid' : (key.is_valid === false ? 'status-invalid' : 'status-unknown');
-                const statusText = key.is_valid ? '有效' : (key.is_valid === false ? '無效' : '未知');
+                const statusClass = key.is_valid === true ? 'status-valid' : (key.is_valid === false ? 'status-invalid' : 'status-untested');
+                const statusText = key.is_valid === true ? '有效' : (key.is_valid === false ? '無效' : '未驗證');
                 const lastValidated = key.last_validated ? new Date(key.last_validated).toLocaleString('zh-TW') : '從未';
 
                 html += `
@@ -108,7 +108,7 @@
                 return;
             }
             addKeyBtn.disabled = true;
-            addKeyBtn.textContent = '驗證中...';
+            addKeyBtn.textContent = '新增中...';
             try {
                 const response = await fetch('/api/keys', {
                     method: 'POST',
@@ -125,7 +125,7 @@
                 renderStatus(addKeyStatus, `錯誤: ${error.message}`, true);
             } finally {
                 addKeyBtn.disabled = false;
-                addKeyBtn.textContent = '新增並驗證';
+                addKeyBtn.textContent = '新增金鑰';
             }
         });
 

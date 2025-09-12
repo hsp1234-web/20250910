@@ -89,14 +89,16 @@ def add_key(key_value: str, key_name: Optional[str] = None) -> Dict[str, Any]:
     if any(k["key_hash"] == key_hash for k in keys):
         raise ValueError("此 API 金鑰已存在。")
 
-    is_valid = _validate_single_key(key_value)
+    # 新增金鑰時不再自動驗證，狀態預設為 None (未驗證)
+    # 驗證操作應由使用者在前端透過 validate_all_keys 觸發
+    is_valid = None
 
     new_key = {
         "name": key_name or f"Key-{len(keys) + 1}",
         "key_value": key_value, # 注意：儲存原始金鑰
         "key_hash": key_hash,
         "is_valid": is_valid,
-        "last_validated": datetime.now().isoformat()
+        "last_validated": None # 初始時沒有驗證過
     }
     keys.append(new_key)
     _save_keys(keys)
