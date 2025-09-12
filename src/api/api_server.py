@@ -159,8 +159,8 @@ app.include_router(page2_downloader.router, prefix="/api/downloader", tags=["API
 app.include_router(page3_processor.router, prefix="/api/processor", tags=["API: 檔案處理"])
 app.include_router(page4_analyzer.router, prefix="/api/analyzer", tags=["API: AI 分析"])
 app.include_router(page5_backup.router, prefix="/api/backup", tags=["API: 備份管理"])
-app.include_router(page6_keys.router, prefix="/api", tags=["API: 金鑰管理"])
-app.include_router(page7_prompts.router, prefix="/api", tags=["API: 提示詞管理"])
+app.include_router(page6_keys.router, prefix="/api/keys", tags=["API: 金鑰管理"])
+app.include_router(page7_prompts.router, prefix="/api/prompts", tags=["API: 提示詞管理"])
 
 # --- 路徑設定 ---
 # 新的上傳檔案儲存目錄

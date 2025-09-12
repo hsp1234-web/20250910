@@ -12,3 +12,4 @@ Jinja2
 gdown
 filetype
 freezegun
+python-dateutil

@@ -110,7 +110,14 @@
             }
         };
 
+        let validationController;
+
         addKeyBtn.addEventListener('click', async () => {
+            // 取消任何正在進行的驗證請求，因為此操作優先級更高
+            if (validationController) {
+                validationController.abort();
+            }
+
             const key = newKeyInput.value.trim();
             const name = newKeyNameInput.value.trim();
             if (!key) {
@@ -130,6 +137,7 @@
                 renderStatus(addKeyStatus, result.message, false);
                 newKeyInput.value = '';
                 newKeyNameInput.value = '';
+                newKeyInput.style.borderColor = '#ccc'; // 成功後重設邊框顏色
                 fetchKeys();
             } catch (error) {
                 renderStatus(addKeyStatus, `錯誤: ${error.message}`, true);
@@ -141,32 +149,45 @@
 
         newKeyInput.addEventListener('blur', async () => {
             const key = newKeyInput.value.trim();
-            addKeyStatus.textContent = ''; // Clear previous status
+            addKeyStatus.textContent = ''; // 清除之前的狀態
             if (!key) {
-                newKeyInput.style.borderColor = '#ccc'; // Reset border
+                newKeyInput.style.borderColor = '#ccc'; // 重設邊框
                 return;
             }
 
+            // 如果有正在進行的驗證，先取消它
+            if (validationController) {
+                validationController.abort();
+            }
+            validationController = new AbortController();
+            const signal = validationController.signal;
+
             renderStatus(addKeyStatus, '正在驗證金鑰...', false);
-            newKeyInput.style.borderColor = '#ffc107'; // A "validating" color
+            newKeyInput.style.borderColor = '#ffc107'; // "驗證中" 的顏色
 
             try {
                 const response = await fetch('/api/keys/test', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ api_key: key })
+                    body: JSON.stringify({ api_key: key }),
+                    signal: signal // 將 signal 傳遞給 fetch
                 });
                 const result = await response.json();
                 if (result.is_valid) {
                     renderStatus(addKeyStatus, '金鑰有效！', false);
-                    newKeyInput.style.borderColor = '#28a745'; // Green for valid
+                    newKeyInput.style.borderColor = '#28a745'; // 綠色代表有效
                 } else {
                     renderStatus(addKeyStatus, '金鑰無效或發生錯誤。', true);
-                    newKeyInput.style.borderColor = '#dc3545'; // Red for invalid
+                    newKeyInput.style.borderColor = '#dc3545'; // 紅色代表無效
                 }
             } catch (error) {
-                renderStatus(addKeyStatus, '驗證請求失敗。', true);
-                newKeyInput.style.borderColor = '#dc3545';
+                if (error.name === 'AbortError') {
+                    console.log('驗證請求被新的操作中斷。');
+                    // 如果是我們主動中斷的，則不顯示錯誤
+                } else {
+                    renderStatus(addKeyStatus, '驗證請求失敗。', true);
+                    newKeyInput.style.borderColor = '#dc3545';
+                }
             }
         });
 

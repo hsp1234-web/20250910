@@ -80,7 +80,13 @@ def main():
         log.info("🔧 正在啟動資料庫管理者...")
         db_manager_port_list = []
         db_manager_cmd = [sys.executable, "-m", "db.manager"]
-        db_manager_proc = subprocess.Popen(db_manager_cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8')
+
+        # 建立一個包含正確 PYTHONPATH 的環境
+        proc_env = os.environ.copy()
+        python_path = proc_env.get("PYTHONPATH", "")
+        proc_env["PYTHONPATH"] = str(SRC_DIR) + os.pathsep + python_path
+
+        db_manager_proc = subprocess.Popen(db_manager_cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8', env=proc_env)
         processes.append(db_manager_proc)
         log.info(f"資料庫管理者程序已啟動，PID: {db_manager_proc.pid}")
 
@@ -121,6 +127,10 @@ def main():
         api_env = os.environ.copy()
         if args.mock:
             api_env["API_MODE"] = "mock"
+
+        # 確保 API 伺服器子程序也能找到 src 目錄
+        python_path = api_env.get("PYTHONPATH", "")
+        api_env["PYTHONPATH"] = str(SRC_DIR) + os.pathsep + python_path
 
         # 使用固定埠號，因為 Playwright 測試需要一個可預測的 URL
         proxy_url = f"http://127.0.0.1:{api_port}"

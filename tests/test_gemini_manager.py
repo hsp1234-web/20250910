@@ -156,5 +156,49 @@ class TestGeminiManager(unittest.TestCase):
             call(api_key='value_3')
         ])
 
+    @patch('tools.gemini_manager.genai')
+    def test_list_available_models(self, mock_genai):
+        """測試 list_available_models 是否能正確篩選並回傳模型。"""
+        # 設定
+        # 模擬 google.generativeai.list_models() 的回傳值
+        mock_model_1 = MagicMock()
+        mock_model_1.name = "models/gemini-pro"
+        mock_model_1.supported_generation_methods = ["generateContent", "otherMethod"]
+
+        mock_model_2 = MagicMock()
+        mock_model_2.name = "models/gemini-pro-vision"
+        mock_model_2.supported_generation_methods = ["generateContent"]
+
+        mock_model_3 = MagicMock()
+        mock_model_3.name = "models/text-embedding-004"
+        mock_model_3.supported_generation_methods = ["embedContent"] # 不支援 generateContent
+
+        mock_model_4 = MagicMock()
+        mock_model_4.name = "models/aqa"
+        mock_model_4.supported_generation_methods = ["generateAnswer"] # 不支援 generateContent
+
+        mock_genai.list_models.return_value = [
+            mock_model_1, mock_model_2, mock_model_3, mock_model_4
+        ]
+
+        manager = GeminiManager(api_keys=self.api_keys_data)
+
+        # 執行
+        available_models = manager.list_available_models()
+
+        # 斷言
+        # 1. genai.configure 應該被第一個金鑰呼叫
+        mock_genai.configure.assert_called_once_with(api_key='value_1')
+
+        # 2. list_models 應該被呼叫
+        mock_genai.list_models.assert_called_once()
+
+        # 3. 回傳的列表應該只包含支援 'generateContent' 的模型名稱
+        self.assertEqual(len(available_models), 2)
+        self.assertIn("models/gemini-pro", available_models)
+        self.assertIn("models/gemini-pro-vision", available_models)
+        self.assertNotIn("models/text-embedding-004", available_models)
+
+
 if __name__ == '__main__':
     unittest.main()
