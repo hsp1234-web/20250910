@@ -145,6 +145,7 @@ button:hover {
 .status-analyzing { background-color: #6f42c1; } /* Purple */
 .status-analyzed { background-color: #28a745; }  /* Success Green */
 .status-error { background-color: #dc3545; }   /* Danger Red */
+.status-retry { background-color: #fd7e14; }   /* Orange */
 
 /* Action Button Styles */
 .results-table button {

@@ -127,20 +127,16 @@ def extract_urls(text: str) -> list[str]:
     # 只回傳網址列表以維持舊的介面
     return [item['url'] for item in parsed_data]
 
-def save_urls_to_db(parsed_data: list[dict], source_text: str):
+def save_urls_to_db(parsed_data: list[dict], source_text: str, conn: sqlite3.Connection):
     """
     [新版] 將解析後的結構化資料儲存到資料庫的 `extracted_urls` 資料表中。
 
     :param parsed_data: 一個包含字典的列表，每個字典應有 'url' 和 'author' 鍵。
     :param source_text: 這些網址的來源文字。
+    :param conn: 一個有效的 sqlite3 Connection 物件。
     """
     if not parsed_data:
         log.info("沒有要儲存的資料，跳過資料庫操作。")
-        return
-
-    conn = get_db_connection()
-    if not conn:
-        log.error("無法建立資料庫連線，資料儲存失敗。")
         return
 
     try:
@@ -162,9 +158,6 @@ def save_urls_to_db(parsed_data: list[dict], source_text: str):
         log.info(f"成功將 {len(parsed_data)} 筆解析資料儲存到資料庫。")
     except sqlite3.Error as e:
         log.error(f"儲存解析資料到資料庫時發生錯誤: {e}", exc_info=True)
-    finally:
-        if conn:
-            conn.close()
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="從文字中提取網址並儲存到資料庫。")

@@ -171,7 +171,9 @@ def initialize_database(conn: sqlite3.Connection = None):
                 "local_path": "TEXT",
                 "file_hash": "TEXT",
                 "extracted_image_paths": "TEXT",
-                "extracted_text": "TEXT"
+                "extracted_text": "TEXT",
+                "retry_count": "INTEGER DEFAULT 0", # 為重試機制新增
+                "last_error_details": "TEXT" # 為重試機制新增
             }
             for col, col_type in url_migrations.items():
                 try:

@@ -137,11 +137,42 @@ def run_ai_analysis_task(file_ids: List[int], server_port: int):
 
         except Exception as e:
             log.error(f"背景任務：AI 分析檔案 ID {file_id} 時發生嚴重錯誤: {e}", exc_info=True)
-            error_message = f"分析失敗: {e}"
+            error_message = f"分析失敗: {type(e).__name__}: {str(e)}"
             if conn:
-                cursor = conn.cursor()
-                cursor.execute("UPDATE extracted_urls SET status = 'error', status_message = ? WHERE id = ?", (error_message, file_id))
-                conn.commit()
+                try:
+                    cursor = conn.cursor()
+                    # 獲取目前的重試次數
+                    cursor.execute("SELECT retry_count FROM extracted_urls WHERE id = ?", (file_id,))
+                    row = cursor.fetchone()
+                    current_retry_count = row['retry_count'] if row else 0
+
+                    if current_retry_count < 3:
+                        # 更新為等待重試狀態
+                        log.info(f"檔案 ID {file_id} 分析失敗，將其設定為等待重試狀態 (嘗試次數: {current_retry_count + 1})")
+                        sql = """
+                            UPDATE extracted_urls
+                            SET status = 'pending_retry',
+                                status_message = ?,
+                                retry_count = retry_count + 1,
+                                last_error_details = ?
+                            WHERE id = ?
+                        """
+                        cursor.execute(sql, (error_message, str(e), file_id))
+                    else:
+                        # 重試次數已達上限，標記為永久失敗
+                        log.warning(f"檔案 ID {file_id} 已達最大重試次數，將其標記為永久錯誤。")
+                        sql = """
+                            UPDATE extracted_urls
+                            SET status = 'error',
+                                status_message = ?
+                            WHERE id = ?
+                        """
+                        cursor.execute(sql, (f"已達最大重試次數。最終錯誤: {error_message}", file_id))
+
+                    conn.commit()
+                except Exception as db_err:
+                    log.error(f"在處理 AI 分析錯誤時，更新資料庫失敗: {db_err}")
+
             _send_websocket_notification(server_port, {"type": "ANALYSIS_PROGRESS", "message": f"錯誤：處理檔案 ID {file_id} 時失敗 - {error_message}"})
         finally:
             if conn:
@@ -155,7 +186,7 @@ def run_ai_analysis_task(file_ids: List[int], server_port: int):
 
 @router.get("/processed_files")
 async def get_processed_files():
-    """獲取所有可供分析或已分析的檔案列表（狀態為 'processed', 'analyzed', 'error'）。"""
+    """獲取所有可供分析或已分析的檔案列表（狀態為 'processed', 'analyzed', 'error', 'pending_retry'）。"""
     conn = None
     try:
         conn = get_db_connection()
@@ -164,7 +195,7 @@ async def get_processed_files():
         sql = """
             SELECT id, url, local_path, status, status_message
             FROM extracted_urls
-            WHERE status IN ('processed', 'analyzed', 'error')
+            WHERE status IN ('processed', 'analyzed', 'error', 'pending_retry')
             ORDER BY created_at DESC
         """
         cursor.execute(sql)
