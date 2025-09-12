@@ -18,6 +18,7 @@ sys.path.insert(0, str(SRC_DIR))
 
 # --- 核心模組匯入 ---
 from db.client import get_client
+from db.database import get_db_connection
 from core import key_manager, prompt_manager
 from tools.gemini_manager import GeminiManager
 
@@ -174,7 +175,7 @@ def run_stage2_task(task_id: int, model_name: str, server_port: int):
 
 # --- 新的 API 端點 ---
 
-@router.post("/analyzer/start_stage1_analysis")
+@router.post("/start_stage1_analysis")
 async def start_stage1_analysis(request: Request, payload: Stage1Request, background_tasks: BackgroundTasks):
     """啟動第一階段：JSON 提取"""
     if not payload.file_ids:
@@ -207,7 +208,7 @@ async def start_stage1_analysis(request: Request, payload: Stage1Request, backgr
 
     return {"message": f"已成功為 {len(tasks_created)} 個檔案啟動第一階段分析任務。"}
 
-@router.post("/analyzer/start_stage2_analysis")
+@router.post("/start_stage2_analysis")
 async def start_stage2_analysis(request: Request, payload: Stage2Request, background_tasks: BackgroundTasks):
     """啟動第二階段：報告生成"""
     if not payload.task_ids:
@@ -226,13 +227,13 @@ async def start_stage2_analysis(request: Request, payload: Stage2Request, backgr
 
     return {"message": f"已為 {len(payload.task_ids)} 個符合條件的任務啟動第二階段分析。"}
 
-@router.get("/analyzer/analysis_status")
+@router.get("/analysis_status")
 async def get_analysis_status():
     """獲取所有分析任務的最新狀態"""
     tasks = DB_CLIENT.get_all_analysis_tasks()
     return tasks
 
-@router.get("/analyzer/stage1_result/{task_id}")
+@router.get("/stage1_result/{task_id}")
 async def get_stage1_result(task_id: int):
     """獲取指定任務第一階段產出的 JSON 內容"""
     task = DB_CLIENT.get_analysis_task(task_id=task_id)
@@ -250,8 +251,30 @@ async def get_stage1_result(task_id: int):
 
 @router.get("/models")
 async def get_available_models():
-    """回傳可用於分析的 AI 模型列表。"""
-    return ["gemini-1.5-pro-latest", "gemini-1.5-flash-latest"]
+    """
+    回傳可用於分析的 AI 模型列表。
+    如果存在有效的 API 金鑰，則從 Google API 動態獲取。
+    """
+    try:
+        valid_keys = key_manager.get_all_valid_keys_for_manager()
+        if not valid_keys:
+            log.warning("沒有有效的 API 金鑰，無法獲取模型列表。")
+            return []
+
+        # 使用金鑰初始化管理器並獲取模型
+        gemini = GeminiManager(api_keys=valid_keys)
+        models = gemini.list_available_models()
+
+        # 如果 API 呼叫失敗但我們不想讓前端完全空白，可以回傳一個預設列表
+        if not models:
+            log.warning("從 Google API 獲取模型列表失敗，將回傳預設列表。")
+            return ["gemini-1.5-pro-latest", "gemini-1.5-flash-latest", "gemini-pro"]
+
+        return models
+    except Exception as e:
+        log.error(f"獲取模型列表時發生未預期錯誤: {e}", exc_info=True)
+        # 在發生嚴重錯誤時，也回傳預設列表以維持前端基本可用性
+        return ["gemini-1.5-pro-latest", "gemini-1.5-flash-latest", "gemini-pro"]
 
 @router.get("/processed_files")
 async def get_processed_files():

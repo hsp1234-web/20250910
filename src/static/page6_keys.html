@@ -117,10 +117,11 @@
                 });
                 const result = await response.json();
                 if (!response.ok) throw new Error(result.detail || '新增失敗');
-                renderStatus(addKeyStatus, result.message, false);
+                renderStatus(addKeyStatus, `${result.message} 將自動觸發一次全體校驗...`, false);
                 newKeyInput.value = '';
                 newKeyNameInput.value = '';
-                fetchKeys();
+                // 不再需要手動 fetchKeys()，因為驗證按鈕會觸發刷新
+                validateAllBtn.click();
             } catch (error) {
                 renderStatus(addKeyStatus, `錯誤: ${error.message}`, true);
             } finally {

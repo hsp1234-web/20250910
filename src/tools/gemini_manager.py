@@ -37,6 +37,38 @@ class GeminiManager:
         self._lock = threading.Lock()
         logging.info(f"Gemini 管理器已初始化，共載入 {len(self.key_pool)} 組 API 金鑰。")
 
+    def list_available_models(self) -> List[str]:
+        """
+        使用一個有效的 API 金鑰，從 Google API 獲取所有支援 'generateContent' 的模型列表。
+        """
+        if not genai:
+            logging.error("無法列出模型，因為 google.generativeai 模組未安裝。")
+            return []
+
+        with self._lock:
+            if not self.key_pool:
+                logging.error("無法列出模型，因為金鑰池為空。")
+                return []
+            # 使用第一個金鑰來進行此操作，因為列出模型不消耗配額
+            api_key = self.key_pool[0]
+
+        try:
+            genai.configure(api_key=api_key.key)
+
+            available_models = []
+            for m in genai.models.list():
+                if 'generateContent' in m.supported_generation_methods:
+                    # m.name 的格式是 "models/gemini-1.5-pro-latest"
+                    # 我們只需要 "gemini-1.5-pro-latest"
+                    model_id = m.name.split('/')[-1]
+                    available_models.append(model_id)
+
+            logging.info(f"從 Google API 成功獲取 {len(available_models)} 個可用模型。")
+            return available_models
+        except Exception as e:
+            logging.error(f"從 Google API 獲取模型列表時發生錯誤: {e}", exc_info=True)
+            return []
+
     def _api_call_wrapper(self, task_name: str, model_name: str, prompt_content: List[Any], output_format: str = 'json'):
         if not genai:
             return None, "google.generativeai not installed", "N/A"
