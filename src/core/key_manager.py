@@ -46,11 +46,10 @@ def _hash_key(key: str) -> str:
 def _validate_single_key(api_key: str) -> bool:
     """
     呼叫 gemini_processor.py 工具來驗證單一金鑰的有效性。
+    此驗證強制執行，不論是否處於模擬模式，以確保金鑰的真實性。
     """
-    if IS_MOCK_MODE:
-        # 在模擬模式下，任何非空金鑰都視為有效
-        return bool(api_key)
-
+    # 核心安全修正：移除 if IS_MOCK_MODE 條件。
+    # 金鑰驗證是關鍵路徑，不應被模擬，以防止無效金鑰污染系統。
     tool_script_path = ROOT_DIR / "src" / "tools" / "gemini_processor.py"
     cmd = [sys.executable, str(tool_script_path), "--command=validate_key"]
 
