@@ -1,82 +1,73 @@
 # -*- coding: utf-8 -*-
 # ╔══════════════════════════════════════════════════════════════════╗
 # ║                                                                      ║
-# ║    ✨🐺 善狼一鍵啟動器 (v23.1) 🐺                                 ✨🐺 ║
+# ║   ✨🐺 善狼一鍵啟動器 (v23.1) 🐺                                ✨🐺 ║
 # ║                                                                      ║
 # ╠══════════════════════════════════════════════════════════════════╣
 # ║                                                                      ║
 # ║ - V23.1 更新日誌 (2025-09-10):                                       ║
 # ║   - **啟動優化**: 重構依賴安裝流程，優先載入核心服務，將大型功能套件 ║
-# ║     改為背景安裝，大幅縮短伺服器可見時間。                         ║
+# ║     改為背景安裝，大幅縮短伺服器可見時間。                             ║
 # ║   - **安裝加速**: 新增 `uv` 安裝程序，確保在可用時使用其取代 pip     ║
-# ║     以加速依賴下載。                                               ║
+# ║     以加速依賴下載。                                                 ║
 # ║   - **配置更新**: 將預設分支更新為 `main` 以支援最新 MPA 架構。      ║
 # ║                                                                      ║
 # ╚══════════════════════════════════════════════════════════════════╝
 
-#@title ✨🐺 善狼一鍵啟動器 (v23.1) 🐺 { vertical-output: true, display-mode: "form" }
+#@title ✨🐺 善狼一鍵啟動器 (v23.1) - 極簡版 🐺 { vertical-output: true, display-mode: "form" }
 #@markdown ---
-#@markdown ### **Part 1: 專案與環境設定**
-#@markdown > **設定 Git 倉庫、分支或標籤，以及專案資料夾。**
+#@markdown ### **唯一設定：後端版本**
+#@markdown > **請在此輸入您想使用的後端版本分支或標籤。**
 #@markdown ---
-#@markdown **後端程式碼倉庫 (REPOSITORY_URL)**
-REPOSITORY_URL = "https://github.com/hsp1234-web/20250910.git" #@param {type:"string"}
 #@markdown **後端版本分支或標籤 (TARGET_BRANCH_OR_TAG)**
-TARGET_BRANCH_OR_TAG = "main" #@param {type:"string"}
-#@markdown **專案資料夾名稱 (PROJECT_FOLDER_NAME)**
-PROJECT_FOLDER_NAME = "wolf_project" #@param {type:"string"}
-#@markdown **強制刷新後端程式碼 (FORCE_REPO_REFRESH)**
-FORCE_REPO_REFRESH = True #@param {type:"boolean"}
+TARGET_BRANCH_OR_TAG = "9" #@param {type:"string"}
+#@markdown ---
+#@markdown > **設定完成後，點擊「執行」按鈕。**
+#@markdown > **所有其他設定（如 Git 倉庫）均已移至程式碼內部。**
+#@markdown ---
 
-#@markdown ---
-#@markdown ### **Part 1.5: 通道啟用設定**
-#@markdown > **選擇要啟動的公開存取通道。建議全部啟用以備不時之需。**
-#@markdown ---
-#@markdown **啟用 Colab 官方代理**
-ENABLE_COLAB_PROXY = True #@param {type:"boolean"}
-#@markdown **啟用 Localtunnel**
-ENABLE_LOCALTUNNEL = True #@param {type:"boolean"}
-#@markdown **啟用 Cloudflare**
-ENABLE_CLOUDFLARE = True #@param {type:"boolean"}
+# ==============================================================================
+# SECTION A: 進階設定 (可在此處修改)
+# 說明：以下為不常變動的進階設定。若需調整，請直接修改此區塊的變數值。
+# ==============================================================================
 
-#@markdown ---
-#@markdown ### **Part 2: 儀表板與監控設定**
-#@markdown > **設定儀表板的視覺與行為。**
-#@markdown ---
-#@markdown **儀表板更新頻率 (秒) (UI_REFRESH_SECONDS)**
-UI_REFRESH_SECONDS = 0.5 #@param {type:"number"}
-#@markdown **日誌顯示行數 (LOG_DISPLAY_LINES)**
-LOG_DISPLAY_LINES = 10 #@param {type:"integer"}
-#@markdown **時區設定 (TIMEZONE)**
-TIMEZONE = "Asia/Taipei" #@param {type:"string"}
+# Part 1: 核心專案設定
+REPOSITORY_URL = "https://github.com/hsp1234-web/20250910.git"
+PROJECT_FOLDER_NAME = "wolf_project"
+FORCE_REPO_REFRESH = True
 
-#@markdown ---
-#@markdown ### **Part 3: 日誌等級可見性**
-#@markdown > **勾選您想在儀表板上看到的日誌等級。**
-#@markdown ---
-SHOW_LOG_LEVEL_BATTLE = True #@param {type:"boolean"}
-SHOW_LOG_LEVEL_SUCCESS = True #@param {type:"boolean"}
-SHOW_LOG_LEVEL_INFO = True #@param {type:"boolean"}
-SHOW_LOG_LEVEL_WARN = True #@param {type:"boolean"}
-SHOW_LOG_LEVEL_ERROR = True #@param {type:"boolean"}
-SHOW_LOG_LEVEL_CRITICAL = True #@param {type:"boolean"}
-SHOW_LOG_LEVEL_DEBUG = True #@param {type:"boolean"}
+# Part 2: 通道啟用設定
+ENABLE_COLAB_PROXY = True
+ENABLE_LOCALTUNNEL = True
+ENABLE_CLOUDFLARE = True
 
-#@markdown ---
-#@markdown ### **Part 4: 報告與歸檔設定**
-#@markdown > **設定在任務結束時如何儲存報告。**
-#@markdown ---
-#@markdown **日誌歸檔資料夾 (LOG_ARCHIVE_ROOT_FOLDER)**
-LOG_ARCHIVE_ROOT_FOLDER = "paper" #@param {type:"string"}
-#@markdown **伺服器就緒等待超時 (秒) (SERVER_READY_TIMEOUT)**
-SERVER_READY_TIMEOUT = 60 #@param {type:"integer"}
-#@markdown **最大日誌複製數量 (LOG_COPY_MAX_LINES)**
-LOG_COPY_MAX_LINES = 5000 #@param {type:"integer"}
+# Part 3: 儀表板與監控設定
+UI_REFRESH_SECONDS = 0.5
+LOG_DISPLAY_LINES = 10
+TIMEZONE = "Asia/Taipei"
 
+# Part 4: 日誌等級可見性
+SHOW_LOG_LEVEL_BATTLE = True
+SHOW_LOG_LEVEL_SUCCESS = True
+SHOW_LOG_LEVEL_INFO = True
+SHOW_LOG_LEVEL_WARN = True
+SHOW_LOG_LEVEL_ERROR = True
+SHOW_LOG_LEVEL_CRITICAL = True
+SHOW_LOG_LEVEL_DEBUG = True
 
-#@markdown ---
-#@markdown > **設定完成後，點擊此儲存格左側的「執行」按鈕。**
-#@markdown ---
+# Part 5: API 金鑰載入設定 (整合 Colab Secrets)
+# 說明：系統會從 Colab Secrets 讀取金鑰。請使用以下一或兩種方式設定。
+# 方式一：依數量載入 (推薦)。根據 GOOGLE_API_KEY, GOOGLE_API_KEY_1... 的命名慣例載入。
+# 例如：設為 5 將會嘗試載入 GOOGLE_API_KEY 到 GOOGLE_API_KEY_5，共 6 組。
+KEY_LOAD_COUNT_LIMIT = 5
+# 方式二：依名稱自訂。如果您有不符合命名慣例的金鑰，請在此處填寫，並用逗號分隔。
+# 例如："MY_PERSONAL_KEY, PROJECT_X_KEY"
+CUSTOM_SECRETS_NAMES = ""
+
+# Part 6: 報告與歸檔設定
+LOG_ARCHIVE_ROOT_FOLDER = "paper"
+SERVER_READY_TIMEOUT = 60
+LOG_COPY_MAX_LINES = 5000
 
 # ==============================================================================
 # SECTION 0: 環境準備與核心依賴導入
@@ -99,12 +90,14 @@ from pathlib import Path
 import time
 from datetime import datetime
 import threading
-from collections import deque
+from collections import deque, namedtuple
 import re
 import json
 import html
+from typing import List, Tuple, Optional
+
 from IPython.display import clear_output, display, HTML
-from google.colab import output as colab_output, userdata
+from google.colab import output as colab_output, userdata, drive
 
 # ==============================================================================
 # SECTION 1: 管理器類別定義 (Managers)
@@ -152,7 +145,7 @@ class DisplayManager:
         self._thread = threading.Thread(target=self._run, daemon=True)
 
     def _build_output_buffer(self) -> list[str]:
-        output_buffer = ["✨🐺 善狼一鍵啟動器 (v21.1) 🐺", ""]
+        output_buffer = ["✨🐺 善狼一鍵啟動器 (v23.1) 🐺", ""]
         logs_to_display = self._log_manager.get_display_logs()
         for log in logs_to_display:
             ts = log['timestamp'].strftime('%H:%M:%S')
@@ -201,12 +194,15 @@ class DisplayManager:
 
 class ServerManager:
     """伺服器管理器：負責啟動、停止和監控 Uvicorn 子進程。"""
-    def __init__(self, log_manager, stats_dict):
-        self._log_manager = log_manager; self._stats = stats_dict
-        self.server_process = None; self.server_ready_event = threading.Event()
+    def __init__(self, log_manager, stats_dict, api_keys_json: str = "[]"):
+        self._log_manager = log_manager
+        self._stats = stats_dict
+        self.server_process = None
+        self.server_ready_event = threading.Event()
         self._stop_event = threading.Event()
         self._thread = threading.Thread(target=self._run, daemon=True)
         self.port = None
+        self._api_keys_json = api_keys_json
 
     def _ensure_uv_installed(self):
         """檢查 `uv` 是否已安裝，若否，則嘗試安裝。"""
@@ -237,116 +233,74 @@ class ServerManager:
             git_command = ["git", "clone", "--branch", TARGET_BRANCH_OR_TAG, "--depth", "1", REPOSITORY_URL, str(project_path)]
             result = subprocess.run(git_command, check=False, capture_output=True, text=True, encoding='utf-8')
             if result.returncode != 0:
-                error_message = f"""Git clone 失敗! 返回碼: {result.returncode}
---- STDOUT ---
-{result.stdout}
---- STDERR ---
-{result.stderr}
-"""
+                error_message = f"Git clone 失敗! 返回碼: {result.returncode}\n--- STDOUT ---\n{result.stdout}\n--- STDERR ---\n{result.stderr}"
                 self._log_manager.log("CRITICAL", error_message)
                 return
 
             self._log_manager.log("INFO", "✅ Git 倉庫下載完成。")
-            self._log_manager.log("INFO", f"--- Git Clone 完成 (耗時: {time.monotonic() - self._stats.get('start_time_monotonic', 0):.2f} 秒) ---")
             project_src_path = project_path / "src"
-            project_src_path_str = str(project_src_path.resolve())
-            if project_src_path_str not in sys.path:
-                sys.path.insert(0, project_src_path_str)
+            sys.path.insert(0, str(project_src_path.resolve()))
 
-            from db.database import initialize_database, add_system_log
+            from db.database import initialize_database
             initialize_database()
-            add_system_log("colab_setup", "INFO", "Git repository cloned successfully.")
 
-            # --- JULES: 重構為兩階段依賴安裝 ---
             use_uv = self._ensure_uv_installed()
 
             def install_requirements(req_files, log_prefix=""):
-                """幫助函式：智慧地檢查並只安裝缺失的依賴。"""
                 self._log_manager.log("INFO", f"[{log_prefix}] 開始檢查與安裝依賴...")
-                install_start_time = time.monotonic()
-
                 checker_script = project_path / "scripts" / "check_deps.py"
                 if not checker_script.is_file():
-                    self._log_manager.log("CRITICAL", f"[{log_prefix}] 依賴檢查腳本 'check_deps.py' 不存在！")
-                    raise FileNotFoundError("Dependency checker script not found.")
+                    raise FileNotFoundError(f"[{log_prefix}] 依賴檢查腳本 'check_deps.py' 不存在！")
 
-                # 將檔案路徑轉換為字串列表以供 subprocess 使用
                 req_file_paths = [str(p.resolve()) for p in req_files if p.is_file()]
-
                 if not req_file_paths:
                     self._log_manager.log("INFO", f"[{log_prefix}] 找不到任何有效的依賴檔案。")
                     return
 
-                # 執行依賴檢查腳本
                 check_command = [sys.executable, str(checker_script.resolve())] + req_file_paths
                 result = subprocess.run(check_command, capture_output=True, text=True, encoding='utf-8')
 
                 if result.returncode != 0:
-                    self._log_manager.log("ERROR", f"[{log_prefix}] 依賴檢查腳本執行失敗: {result.stderr}")
-                    # 作為備用方案，直接安裝所有套件
+                    self._log_manager.log("WARN", f"[{log_prefix}] 依賴檢查腳本執行失敗，將安裝所有套件。")
                     missing_packages_text = "".join([p.read_text(encoding='utf-8') for p in req_files])
                     missing_packages = missing_packages_text.strip().splitlines()
                 else:
                     missing_packages = result.stdout.strip().splitlines()
 
-
                 if not missing_packages:
-                    self._log_manager.log("SUCCESS", f"✅ [{log_prefix}] 所有依賴均已滿足，無需安裝。")
+                    self._log_manager.log("SUCCESS", f"✅ [{log_prefix}] 所有依賴均已滿足。")
                     return
 
                 self._log_manager.log("INFO", f"[{log_prefix}] 偵測到 {len(missing_packages)} 個缺失的套件，開始安裝...")
-
-                # 將缺失的套件寫入臨時檔案
-                temp_req_path = project_path / f"requirements_missing_{log_prefix.lower().replace(' ', '_')}.txt"
+                temp_req_path = project_path / f"requirements_missing.txt"
                 with open(temp_req_path, "w", encoding="utf-8") as f:
-                    for pkg in missing_packages:
-                        f.write(pkg + "\n")
+                    f.write("\n".join(missing_packages))
 
                 try:
-                    if use_uv:
-                        pip_command = [sys.executable, "-m", "uv", "pip", "install", "--system", "-q", "-r", str(temp_req_path)]
-                        self._log_manager.log("INFO", f"[{log_prefix}] 使用 'uv' 進行快速安裝...")
-                    else:
-                        pip_command = [sys.executable, "-m", "pip", "install", "-q", "--progress-bar", "off", "-r", str(temp_req_path)]
-                        self._log_manager.log("INFO", f"[{log_prefix}] 退回使用 'pip'。")
-
+                    installer = "uv" if use_uv else "pip"
+                    pip_command = [sys.executable, "-m", installer, "pip", "install", "--system", "-q", "-r", str(temp_req_path)] if use_uv else [sys.executable, "-m", "pip", "install", "-q", "-r", str(temp_req_path)]
                     subprocess.check_call(pip_command)
                     self._log_manager.log("SUCCESS", f"✅ [{log_prefix}] 依賴安裝完成。")
-                    self._log_manager.log("INFO", f"--- [{log_prefix}] 安裝耗時: {time.monotonic() - install_start_time:.2f} 秒 ---")
-                except subprocess.CalledProcessError as e:
-                    error_message = f"[{log_prefix}] 依賴安裝失敗！返回碼: {e.returncode}\n--- STDOUT ---\n{e.stdout}\n--- STDERR ---\n{e.stderr}"
-                    self._log_manager.log("CRITICAL", error_message)
-                    raise
                 finally:
-                    if temp_req_path.exists():
-                        temp_req_path.unlink()
+                    if temp_req_path.exists(): temp_req_path.unlink()
 
-            # --- 階段 1: 同步安裝核心依賴 ---
-            self._log_manager.log("INFO", "步驟 1/3: 正在快速安裝核心伺服器依賴...")
-            core_requirements = [
-                project_path / "requirements" / "core.txt"
-            ]
-            install_requirements(core_requirements, "核心伺服器")
+            self._log_manager.log("INFO", "步驟 1/3: 正在安裝核心伺服器依賴...")
+            install_requirements([project_path / "requirements" / "core.txt"], "核心伺服器")
 
-            # --- 階段 2: 啟動後端服務 (這會立即發生，以便使用者盡快取得 URL) ---
             self._log_manager.log("INFO", "步驟 2/3: 正在啟動後端協調器...")
             launch_command = [sys.executable, "src/core/orchestrator.py"]
             process_env = os.environ.copy()
-            src_path_str = str((project_path / "src").resolve())
-            process_env['PYTHONPATH'] = f"{src_path_str}{os.pathsep}{process_env.get('PYTHONPATH', '')}".strip(os.pathsep)
+            process_env['PYTHONPATH'] = f"{str(project_src_path.resolve())}{os.pathsep}{process_env.get('PYTHONPATH', '')}"
+            process_env['GOOGLE_API_KEYS_JSON'] = self._api_keys_json
 
             self.server_process = subprocess.Popen(launch_command, cwd=str(project_path), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8', preexec_fn=os.setsid, env=process_env)
 
-            # --- 階段 3: 在背景安裝大型依賴 ---
             def background_install():
                 self._log_manager.log("INFO", "步驟 3/3: [背景] 開始安裝大型與功能性依賴...")
-                large_requirements = [
-                    project_path / "requirements" / "features.txt",
-                    project_path / "requirements" / "transcriber.txt",
-                    project_path / "requirements" / "gemini.txt"
-                ]
+                all_reqs = (project_path / "requirements").glob("*.txt")
+                large_reqs = [p for p in all_reqs if p.name not in ["core.txt", "test.txt"]]
                 try:
-                    install_requirements(large_requirements, "功能與模型")
+                    install_requirements(large_reqs, "功能與模型")
                     self._log_manager.log("SUCCESS", "[背景] ✅ 所有大型任務依賴均已成功安裝！")
                 except Exception as e:
                     self._log_manager.log("CRITICAL", f"[背景] 大型依賴安裝失敗: {e}")
@@ -361,23 +315,24 @@ class ServerManager:
             for line in iter(self.server_process.stdout.readline, ''):
                 if self._stop_event.is_set(): break
                 line = line.strip()
-                self._log_manager.log("DEBUG", line)
+                self._log_manager.log("DEBUG", line, "Orchestrator")
                 if not self.port and (match := port_pattern.search(line)):
                     self.port = int(match.group(1))
                     self._log_manager.log("INFO", f"✅ 從日誌中成功解析出 API 埠號: {self.port}")
                 if not server_ready and uvicorn_ready_pattern.search(line):
                     server_ready = True
                     self._stats['status'] = "✅ 伺服器運行中"
-                    self._log_manager.log("SUCCESS", f"✅ 伺服器已就緒！收到 Uvicorn 握手信號！ (總耗時: {time.monotonic() - self._stats.get('start_time_monotonic', 0):.2f} 秒)")
+                    self._log_manager.log("SUCCESS", f"✅ 伺服器已就緒！ (總耗時: {time.monotonic() - self._stats.get('start_time_monotonic', 0):.2f} 秒)")
                 if self.port and server_ready:
                     self.server_ready_event.set()
 
-            return_code = self.server_process.wait()
             if not self.server_ready_event.is_set():
                 self._stats['status'] = "❌ 伺服器啟動失敗"
-                self._log_manager.log("CRITICAL", f"協調器進程在就緒前已終止，返回碼: {return_code}。請檢查上方日誌以了解詳細錯誤。")
-        except Exception as e: self._stats['status'] = "❌ 發生致命錯誤"; self._log_manager.log("CRITICAL", f"ServerManager 執行緒出錯: {e}")
-        finally: self._stats['status'] = "⏹️ 已停止"
+        except Exception as e:
+            self._stats['status'] = "❌ 發生致命錯誤"
+            self._log_manager.log("CRITICAL", f"ServerManager 執行緒出錯: {e}")
+        finally:
+            self._stats['status'] = "⏹️ 已停止"
 
     def start(self): self._thread.start()
     def stop(self):
@@ -386,14 +341,11 @@ class ServerManager:
             self._log_manager.log("INFO", "正在終止伺服器進程...")
             try:
                 os.killpg(os.getpgid(self.server_process.pid), subprocess.signal.SIGTERM)
-                self.server_process.wait(timeout=5)
-            except (ProcessLookupError, subprocess.TimeoutExpired):
-                try: os.killpg(os.getpgid(self.server_process.pid), subprocess.signal.SIGKILL)
-                except ProcessLookupError: pass
+            except ProcessLookupError: pass
         self._thread.join(timeout=2)
 
 class TunnelManager:
-    """通道管理器：並行啟動多個代理通道 (Cloudflare, Localtunnel) 以提供備援。"""
+    """通道管理器：並行啟動多個代理通道。"""
     def __init__(self, log_manager, stats_dict, port):
         self._log = log_manager.log; self._stats = stats_dict; self._port = port
         self._stop_event = threading.Event(); self._threads = []; self._processes = []
@@ -407,69 +359,55 @@ class TunnelManager:
         thread = threading.Thread(target=target, name=name, daemon=True)
         self._threads.append(thread); thread.start()
 
-    def _update_url_status(self, name, status, url=None, error=None, priority=99, password=None):
+    def _update_url_status(self, name, status, url=None, error=None, priority=99):
         with self._stats.get('_lock', threading.Lock()):
-            entry = {"status": status, "priority": priority}
-            if url: entry["url"] = url
-            if error: entry["error"] = error
-            if password: entry["password"] = password
-            self._stats.setdefault('urls', {})[name] = entry
-
-    def _ensure_cloudflared_installed(self):
-        if Path("./cloudflared").is_file(): return True
-        self._log("INFO", "未找到 Cloudflared，正在下載...", "Cloudflare")
-        arch = platform.machine()
-        url = f"https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-{'amd64' if arch == 'x86_64' else 'arm64'}"
-        try:
-            urllib.request.urlretrieve(url, "cloudflared"); os.chmod("cloudflared", 0o755)
-            self._log("SUCCESS", "✅ Cloudflared 下載成功。", "Cloudflare"); return True
-        except Exception as e: self._log("ERROR", f"Cloudflared 下載失敗: {e}", "Cloudflare"); return False
+            self._stats.setdefault('urls', {})[name] = {"status": status, "url": url, "error": error, "priority": priority}
 
     def _run_cloudflared(self):
         self._update_url_status("Cloudflare", "starting", priority=2)
-        if not self._ensure_cloudflared_installed(): self._update_url_status("Cloudflare", "error", error="安裝失敗"); return
+        if not Path("./cloudflared").is_file():
+            arch = platform.machine()
+            url = f"https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-{'amd64' if arch == 'x86_64' else 'arm64'}"
+            try:
+                urllib.request.urlretrieve(url, "cloudflared"); os.chmod("cloudflared", 0o755)
+            except Exception as e:
+                self._update_url_status("Cloudflare", "error", error=f"安裝失敗: {e}", priority=2); return
+
         proc = subprocess.Popen(["./cloudflared", "tunnel", "--url", f"http://127.0.0.1:{self._port}"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8')
         self._processes.append(proc)
         url_pattern = re.compile(r"https://[a-zA-Z0-9-]+\.trycloudflare\.com")
         for line in iter(proc.stdout.readline, ''):
             if self._stop_event.is_set(): break
-            self._log("DEBUG", line.strip(), "Cloudflare")
             if match := url_pattern.search(line):
                 self._update_url_status("Cloudflare", "ready", url=match.group(0), priority=2); return
-        if not self._stop_event.is_set(): self._update_url_status("Cloudflare", "error", error="無法從日誌中解析 URL")
-
-    def _ensure_localtunnel_installed(self):
-        if "localtunnel@" in subprocess.run(["npm", "list", "-g", "localtunnel"], capture_output=True, text=True).stdout: return True
-        self._log("INFO", "正在安裝 Localtunnel...", "Localtunnel")
-        try:
-            subprocess.run(["npm", "install", "-g", "localtunnel"], check=True, capture_output=True)
-            self._log("SUCCESS", "✅ Localtunnel 安裝成功。", "Localtunnel"); return True
-        except subprocess.CalledProcessError as e: self._log("ERROR", f"Localtunnel 安裝失敗: {e.stderr}", "Localtunnel"); return False
+        if not self._stop_event.is_set(): self._update_url_status("Cloudflare", "error", error="無法解析 URL", priority=2)
 
     def _run_localtunnel(self):
         self._update_url_status("Localtunnel", "starting", priority=3)
-        if not self._ensure_localtunnel_installed(): self._update_url_status("Localtunnel", "error", error="安裝失敗"); return
+        try:
+            subprocess.run(["npm", "install", "-g", "localtunnel"], check=True, capture_output=True)
+        except Exception as e:
+            self._update_url_status("Localtunnel", "error", error=f"安裝失敗: {e}", priority=3); return
+
         proc = subprocess.Popen(["npx", "localtunnel", "--port", str(self._port)], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8')
         self._processes.append(proc)
         url_pattern = re.compile(r"your url is: (https://[a-zA-Z0-9-]+\.loca\.lt)")
         for line in iter(proc.stdout.readline, ''):
             if self._stop_event.is_set(): break
-            self._log("DEBUG", line.strip(), "Localtunnel")
             if match := url_pattern.search(line):
                 self._update_url_status("Localtunnel", "ready", url=match.group(1), priority=3); return
-        if not self._stop_event.is_set(): self._update_url_status("Localtunnel", "error", error="無法從日誌中解析 URL")
+        if not self._stop_event.is_set(): self._update_url_status("Localtunnel", "error", error="無法解析 URL", priority=3)
 
     def _run_colab_proxy(self):
         self._update_url_status("Colab", "starting", priority=1)
-        for attempt in range(10):
-            if self._stop_event.is_set(): return
-            try:
-                url = colab_output.eval_js(f'google.colab.kernel.proxyPort({self._port})', timeout_sec=10)
-                if url and url.strip(): self._update_url_status("Colab", "ready", url=url, priority=1); return
-                self._log("WARN", f"Colab 代理嘗試 #{attempt+1} 返回空 URL。", "Colab")
-            except Exception as e: self._log("WARN", f"Colab 代理嘗試 #{attempt+1} 失敗: {e}", "Colab")
-            time.sleep(2)
-        self._update_url_status("Colab", "error", error="重試 10 次後失敗")
+        try:
+            url = colab_output.eval_js(f'google.colab.kernel.proxyPort({self._port})', timeout_sec=10)
+            if url and url.strip():
+                self._update_url_status("Colab", "ready", url=url, priority=1)
+            else:
+                self._update_url_status("Colab", "error", error="返回空 URL", priority=1)
+        except Exception as e:
+            self._update_url_status("Colab", "error", error=f"獲取失敗: {e}", priority=1)
 
     def stop(self):
         self._stop_event.set()
@@ -482,77 +420,103 @@ class TunnelManager:
 # ==============================================================================
 # SECTION 2: 核心功能函式
 # ==============================================================================
+
+ApiKey = namedtuple('ApiKey', ['value', 'name'])
+
+def get_secret_with_retry(key_name: str, log_manager: LogManager) -> Tuple[Optional[str], Optional[str]]:
+    """從 Colab Userdata 獲取金鑰。"""
+    try:
+        value = userdata.get(key_name)
+        return (value, None) if value else (None, f"金鑰 '{key_name}' 不存在或為空。")
+    except Exception as e:
+        return None, f"讀取金鑰 '{key_name}' 時發生錯誤: {e}"
+
+def pre_flight_checks(log_manager: LogManager) -> List[ApiKey]:
+    """執行飛行前檢查：掛載 Drive 並從 Colab Secrets 載入 API 金鑰。"""
+    log_manager.log("系統", "✈️ [PoC] 正在執行飛行前檢查...")
+
+    try:
+        drive.mount('/content/drive', force_remount=True)
+        log_manager.log("Drive", "✅ Google Drive 掛載成功。")
+    except Exception as e:
+        log_manager.log("Drive", f"⚠️ 無法掛載 Google Drive: {e}，將繼續執行。")
+
+    log_manager.log("金鑰管理", "正在根據使用者設定動態載入 API 金鑰...")
+
+    target_key_names = set()
+    try:
+        k_limit = int(KEY_LOAD_COUNT_LIMIT)
+        if 0 <= k_limit <= 15:
+            names_by_count = ['GOOGLE_API_KEY'] + [f"GOOGLE_API_KEY_{i}" for i in range(1, k_limit + 1)]
+            target_key_names.update(names_by_count)
+            log_manager.log("金鑰管理", f"✅ (方式一) 已指定 {len(names_by_count)} 個金鑰。")
+    except (NameError, ValueError, TypeError):
+        log_manager.log("金鑰管理", f"⚠️ (方式一) 變數 'KEY_LOAD_COUNT_LIMIT' 設定無效。")
+
+    try:
+        if CUSTOM_SECRETS_NAMES and isinstance(CUSTOM_SECRETS_NAMES, str):
+            names_by_custom = [name.strip() for name in CUSTOM_SECRETS_NAMES.split(',') if name.strip()]
+            if names_by_custom:
+                target_key_names.update(names_by_custom)
+                log_manager.log("金鑰管理", f"✅ (方式二) 已新增 {len(names_by_custom)} 個自訂金鑰。")
+    except NameError:
+         log_manager.log("金鑰管理", f"⚠️ (方式二) 變數 'CUSTOM_SECRETS_NAMES' 未定義。")
+
+    if not target_key_names:
+        log_manager.log("金鑰管理", "⚠️ 未設定任何 API 金鑰，系統將在無金鑰模式下啟動。")
+        return []
+
+    final_target_list = sorted(list(target_key_names))
+    log_manager.log("金鑰管理", f"🔎 預計讀取 {len(final_target_list)} 個金鑰: {final_target_list}")
+
+    valid_keys = []
+    for name in final_target_list:
+        value, error = get_secret_with_retry(name, log_manager)
+        if value:
+            valid_keys.append(ApiKey(value, name))
+        else:
+            log_manager.log("金鑰管理", f"  -> 讀取金鑰 '{name}' 失敗，已跳過。")
+
+    if not valid_keys:
+        log_manager.log("金鑰管理", "⚠️ 未能從 Colab Secrets 載入任何有效金鑰。")
+    else:
+        log_manager.log("金鑰管理", f"✅ 共載入 {len(valid_keys)} 組有效的 API 金鑰。")
+    return valid_keys
+
 def create_log_viewer_html(log_manager, display_manager):
-    """ 產生最終的 HTML 日誌報告，採納 v15 的 textarea 方案以增強穩定性。 """
     try:
         full_log_history = [f"[{log['timestamp'].isoformat()}] [{log['level']}] {log['message']}" for log in log_manager.get_full_history()]
         screen_output = "\n".join(display_manager._build_output_buffer())
-
         log_to_display = "\n".join(full_log_history[-LOG_COPY_MAX_LINES:])
-
-        escaped_log_for_textarea = html.escape(log_to_display)
-        escaped_screen_for_textarea = html.escape(screen_output)
-
-        screen_id = f"screen-area-{int(time.time() * 1000)}"
-        log_id = f"log-area-{int(time.time() * 1000)}"
-
+        escaped_log = html.escape(log_to_display)
+        escaped_screen = html.escape(screen_output)
+        screen_id, log_id = f"s-{time.time_ns()}", f"l-{time.time_ns()}"
         return f'''
-            <style>
-                .collapsible-log {{ margin-top: 15px; margin-bottom: 15px; border: 1px solid #e0e0e0; padding: 12px; border-radius: 8px; background-color: #fafafa; }}
-                .collapsible-log summary {{ cursor: pointer; font-weight: bold; color: #333; }}
-                .collapsible-log pre {{ background-color: #fff; padding: 12px; border: 1px solid #e0e0e0; border-radius: 5px; white-space: pre-wrap; word-wrap: break-word; font-family: monospace; font-size: 13px; color: #444; max-height: 400px; overflow-y: auto; }}
-                .copy-button {{ padding: 8px 16px; margin: 5px; cursor: pointer; border: 1px solid #ccc; border-radius: 5px; background-color: #f0f0f0; font-family: sans-serif; }}
-                .copy-button:hover {{ background-color: #e0e0e0; }}
-            </style>
-            <script>
-                function copyFromTextarea(elementId, button) {{
-                    const ta = document.getElementById(elementId);
-                    if (!ta) {{ console.error("Textarea not found:", elementId); return; }}
-                    navigator.clipboard.writeText(ta.value).then(() => {{
-                        const originalText = button.innerText;
-                        button.innerText = "✅ 已複製!";
-                        setTimeout(() => {{ button.innerText = originalText; }}, 2000);
-                    }}, (err) => {{
-                        button.innerText = "❌ 複製失敗";
-                        console.error('複製失敗: ', err);
-                    }});
-                }}
-            </script>
-
-            <textarea id="{screen_id}" style="position:absolute; left: -9999px; top: -9999px;" readonly>{escaped_screen_for_textarea}</textarea>
-            <textarea id="{log_id}" style="position:absolute; left: -9999px; top: -9999px;" readonly>{escaped_log_for_textarea}</textarea>
-
-            <div>
-                <button class="copy-button" onclick="copyFromTextarea('{screen_id}', this)">📋 複製上方最終畫面</button>
-            </div>
+            <style> .collapsible-log{{...}} .copy-button{{...}} </style>
+            <script> function copyFromTextarea(id, btn){{...}} </script>
+            <textarea id="{screen_id}" style="display:none;">{escaped_screen}</textarea>
+            <textarea id="{log_id}" style="display:none;">{escaped_log}</textarea>
+            <button class="copy-button" onclick="copyFromTextarea('{screen_id}', this)">📋 複製上方最終畫面</button>
             <details class="collapsible-log">
                 <summary>點此展開/收合最近 {len(full_log_history[-LOG_COPY_MAX_LINES:])} 條詳細日誌</summary>
-                <div style="margin-top: 12px;">
-                    <button class="copy-button" onclick="copyFromTextarea('{log_id}', this)">📄 複製下方完整日誌</button>
-                    <pre><code>{escaped_log_for_textarea}</code></pre>
-                    <button class="copy-button" onclick="copyFromTextarea('{log_id}', this)">📄 複製下方完整日誌</button>
-                </div>
+                <button class="copy-button" onclick="copyFromTextarea('{log_id}', this)">📄 複製下方完整日誌</button>
+                <pre><code>{escaped_log}</code></pre>
             </details>
         '''
     except Exception as e:
         return f"<p>❌ 產生最終日誌報告時發生錯誤: {html.escape(str(e))}</p>"
 
 def archive_reports(log_manager, start_time, end_time, status):
-    print("\n\n" + "="*60 + "\n--- 任務結束，開始執行自動歸檔 ---\n" + "="*60)
+    print("\n--- 任務結束，開始執行自動歸檔 ---")
     try:
         root_folder = Path(LOG_ARCHIVE_ROOT_FOLDER)
         root_folder.mkdir(exist_ok=True)
-        ts_folder_name = start_time.strftime('%Y-%m-%dT%H-%M-%S%z')
-        report_dir = root_folder / ts_folder_name
+        report_dir = root_folder / start_time.strftime('%Y-%m-%dT%H-%M-%S')
         report_dir.mkdir(exist_ok=True)
         log_history = log_manager.get_full_history()
-        detailed_log_content = f"# 詳細日誌\n\n```\n" + "\n".join([f"[{log['timestamp'].isoformat()}] [{log['level']}] {log['message']}" for log in log_history]) + "\n```"
-        (report_dir / "詳細日誌.md").write_text(detailed_log_content, encoding='utf-8')
-        duration = end_time - start_time
-        perf_report_content = f"# 效能報告\n\n- **任務狀態**: {status}\n- **開始時間**: `{start_time.isoformat()}`\n- **結束時間**: `{end_time.isoformat()}`\n- **總耗時**: `{str(duration)}`\n"
-        (report_dir / "效能報告.md").write_text(perf_report_content.strip(), encoding='utf-8')
-        (report_dir / "綜合報告.md").write_text(f"# 綜合報告\n\n{perf_report_content}\n{detailed_log_content}", encoding='utf-8')
-        print(f"✅ 報告已成功歸檔至: {report_dir}")
+        log_content = "# 詳細日誌\n\n```\n" + "\n".join([f"[{log['timestamp'].isoformat()}] {log['message']}" for log in log_history]) + "\n```"
+        (report_dir / "詳細日誌.md").write_text(log_content, encoding='utf-8')
+        print(f"✅ 報告已歸檔至: {report_dir}")
     except Exception as e: print(f"❌ 歸檔報告時發生錯誤: {e}")
 
 # ==============================================================================
@@ -561,12 +525,9 @@ def archive_reports(log_manager, start_time, end_time, status):
 print("檢查並安裝系統級依賴 FFmpeg...")
 try:
     if subprocess.run(["which", "ffmpeg"], capture_output=True).returncode != 0:
-        print("未偵測到 FFmpeg，開始安裝...")
         subprocess.run(["apt-get", "update", "-qq"], check=True)
         subprocess.run(["apt-get", "install", "-y", "-qq", "ffmpeg"], check=True)
-        print("✅ FFmpeg 安裝完成。")
-    else:
-        print("✅ FFmpeg 已安裝。")
+    print("✅ FFmpeg 已安裝。")
 except Exception as e:
     print(f"❌ 安裝 FFmpeg 時發生錯誤: {e}")
 
@@ -575,41 +536,42 @@ except Exception as e:
 # ==============================================================================
 def main():
     start_time_monotonic = time.monotonic()
-    shared_stats = {"start_time_monotonic": start_time_monotonic, "status": "初始化...", "urls": {}}
-    log_manager, display_manager, server_manager, tunnel_manager = None, None, None, None
+    shared_stats = {"start_time_monotonic": start_time_monotonic, "status": "初始化..."}
+    log_manager, display_manager, server_manager, tunnel_manager = [None] * 4
     start_time = datetime.now(pytz.timezone(TIMEZONE))
     try:
         log_levels = {name: globals()[name] for name in globals() if name.startswith("SHOW_LOG_LEVEL_")}
         log_manager = LogManager(max_lines=LOG_DISPLAY_LINES, timezone_str=TIMEZONE, log_levels_to_show=log_levels)
-        server_manager = ServerManager(log_manager=log_manager, stats_dict=shared_stats)
+
+        valid_keys = pre_flight_checks(log_manager)
+        keys_for_json = [{'name': k.name, 'value': k.value} for k in valid_keys]
+        keys_json_str = json.dumps(keys_for_json)
+
+        server_manager = ServerManager(log_manager=log_manager, stats_dict=shared_stats, api_keys_json=keys_json_str)
         display_manager = DisplayManager(log_manager=log_manager, stats_dict=shared_stats, refresh_rate=UI_REFRESH_SECONDS)
+
         display_manager.start()
         server_manager.start()
-        log_manager.log("INFO", f"設定伺服器啟動超時時間為 {SERVER_READY_TIMEOUT} 秒...")
+
         if server_manager.server_ready_event.wait(timeout=SERVER_READY_TIMEOUT):
-            if not server_manager.port:
-                log_manager.log("CRITICAL", "伺服器已就緒，但未能解析出 API 埠號。無法建立代理連結。")
-            else:
-                log_manager.log("SUCCESS", f"✅ 後端服務已在埠號 {server_manager.port} 上就緒，正在啟動所有代理通道...")
+            if server_manager.port:
+                log_manager.log("SUCCESS", f"✅ 後端服務已就緒，正在啟動代理通道...")
                 tunnel_manager = TunnelManager(log_manager=log_manager, stats_dict=shared_stats, port=server_manager.port)
                 tunnel_manager.start()
+            else:
+                log_manager.log("CRITICAL", "伺服器已就緒，但未能解析出埠號。")
         else:
-            shared_stats['status'] = f"❌ 伺服器啟動超時 ({SERVER_READY_TIMEOUT}秒)"
-            log_manager.log("CRITICAL", f"伺服器在 {SERVER_READY_TIMEOUT} 秒內未能就緒。 POC 驗證失敗。正在強制終止...")
-            # 這會觸發 finally 區塊來清理所有程序
-            raise SystemExit(f"POC FAILED: Server did not start within {SERVER_READY_TIMEOUT} seconds.")
+            raise SystemExit(f"伺服器啟動超時 ({SERVER_READY_TIMEOUT}秒)")
+
         while server_manager._thread.is_alive(): time.sleep(1)
+
     except (KeyboardInterrupt, SystemExit) as e:
-        if isinstance(e, SystemExit):
-            if log_manager: log_manager.log("CRITICAL", f"系統因致命錯誤退出: {e}")
-        else: # KeyboardInterrupt
-            if log_manager: log_manager.log("WARN", "🛑 偵測到使用者手動中斷...")
+        if log_manager: log_manager.log("WARN", f"🛑 系統正在關閉... 原因: {type(e).__name__}")
     except Exception as e:
         if log_manager: log_manager.log("CRITICAL", f"❌ 發生未預期的致命錯誤: {e}")
-        else: print(f"❌ 發生未預期的致命錯誤: {e}")
     finally:
-        if display_manager and display_manager._thread.is_alive(): display_manager.stop()
-        if 'tunnel_manager' in locals() and tunnel_manager: tunnel_manager.stop()
+        if display_manager: display_manager.stop()
+        if tunnel_manager: tunnel_manager.stop()
         if server_manager: server_manager.stop()
         end_time = datetime.now(pytz.timezone(TIMEZONE))
         if log_manager and display_manager:
