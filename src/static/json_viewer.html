@@ -67,6 +67,7 @@
     <div class="content">
         <h1>JSON 詳細資料</h1>
         <a href="/page4" class="back-button">返回 AI 分析頁面</a>
+        <button id="copy-button" class="copy-button">複製 JSON</button>
 
         <pre id="json-container"><p>正在載入資料...</p></pre>
     </div>
@@ -114,6 +115,25 @@
                 console.error('獲取 JSON 資料時發生錯誤:', error);
                 jsonContainer.textContent = `載入資料時發生錯誤。\n\n${error.message}`;
             }
+
+            // --- 新增複製按鈕的邏輯 ---
+            const copyButton = document.getElementById('copy-button');
+            copyButton.addEventListener('click', () => {
+                const jsonText = jsonContainer.textContent;
+                navigator.clipboard.writeText(jsonText).then(() => {
+                    // 提供視覺回饋
+                    const originalText = copyButton.textContent;
+                    copyButton.textContent = '已複製 ✅';
+                    copyButton.style.backgroundColor = '#28a745'; // 綠色
+                    setTimeout(() => {
+                        copyButton.textContent = originalText;
+                        copyButton.style.backgroundColor = ''; // 恢復原樣
+                    }, 2000);
+                }).catch(err => {
+                    console.error('複製失敗:', err);
+                    alert('複製失敗，請手動複製。');
+                });
+            });
         });
     </script>
 </body>

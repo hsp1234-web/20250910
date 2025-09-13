@@ -129,26 +129,30 @@ async def get_report_content(file_id: int):
 
 
 # --- 背景任務函式 ---
+import time
+
 def run_processing_task(url_id: int, port: int):
     """這是在背景執行的單一檔案處理任務。"""
     # --- 延遲導入 (Lazy Import) ---
     from tools.content_extractor import extract_content
+    from db.client import get_client
+
+    # 為解決檔案系統競爭條件，在開始時增加一個短暫的延遲
+    time.sleep(1)
 
     log.info(f"背景任務：開始處理檔案 URL ID: {url_id}")
-    conn = None
+    db_client = get_client()
     final_status = 'processing_failed' # 預設為失敗
     result_payload = {}
     file_path = None  # 初始化 file_path 以確保在 finally 區塊中可用
 
     try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT local_path FROM extracted_urls WHERE id = ?", (url_id,))
-        row = cursor.fetchone()
-        if not row or not row['local_path']:
-            raise ValueError(f"在資料庫中找不到 ID {url_id} 的有效本地檔案路徑。")
+        # 使用 DBClient 而非直接的 conn
+        url_record = db_client.get_url_by_id(url_id)
+        if not url_record or not url_record.get('local_path'):
+             raise ValueError(f"在資料庫中找不到 ID {url_id} 的有效本地檔案路徑。")
 
-        file_path = Path(row['local_path'])
+        file_path = Path(url_record['local_path'])
         if not file_path.is_file():
             raise FileNotFoundError(f"檔案系統中找不到檔案: {file_path}")
 
@@ -163,37 +167,43 @@ def run_processing_task(url_id: int, port: int):
         text_content = content_data.get("text", "") if content_data else ""
         image_paths_json = json.dumps(content_data.get("image_paths", [])) if content_data else "[]"
 
+        # 更新 extracted_urls 表
+        update_payload = {
+            "status": 'processed',
+            "status_message": '處理成功',
+            "file_hash": file_hash,
+            "extracted_image_paths": image_paths_json,
+            "extracted_text": text_content
+        }
+        db_client.update_url(url_id, update_payload)
+
+        # *** 核心邏輯修改：將提取的文字儲存到 analysis_tasks 表 ***
+        analysis_task = db_client.create_or_get_analysis_task(file_id=url_id, filename=file_path.name)
+        if analysis_task:
+            analysis_task_id = analysis_task['id']
+            update_result = db_client.update_analysis_task(
+                analysis_task_id,
+                {'file_content_for_analysis': text_content}
+            )
+            if update_result:
+                log.info(f"成功將提取的文字內容儲存至分析任務 ID: {analysis_task_id}")
+            else:
+                log.error(f"無法將提取的文字內容儲存至分析任務 ID: {analysis_task_id}")
+        else:
+            log.error(f"無法為 file_id {url_id} 建立或取得分析任務，無法儲存提取文字。")
+        # *** 結束核心修改 ***
+
         final_status = 'processed'
         result_payload = {"file_hash": file_hash, "image_paths": image_paths_json, "text_length": len(text_content)}
-        cursor.execute(
-            """
-            UPDATE extracted_urls
-            SET status = ?, status_message = '處理成功', file_hash = ?, extracted_image_paths = ?, extracted_text = ?
-            WHERE id = ?
-            """,
-            (final_status, file_hash, image_paths_json, text_content, url_id)
-        )
-        conn.commit()
         log.info(f"背景任務：URL ID {url_id} 處理成功。")
 
     except Exception as e:
         log.error(f"背景任務：處理 URL ID {url_id} 時發生嚴重錯誤: {e}", exc_info=True)
         final_status = 'processing_failed'
         result_payload = {"error": str(e)}
-        if conn and url_id:
-            try:
-                cursor = conn.cursor()
-                cursor.execute(
-                    "UPDATE extracted_urls SET status = ?, status_message = ? WHERE id = ?",
-                    (final_status, str(e), url_id)
-                )
-                conn.commit()
-            except Exception as db_err:
-                log.error(f"背景任務：在錯誤處理中更新資料庫狀態時再次失敗: {db_err}")
+        # 使用 DBClient 更新錯誤狀態
+        db_client.update_url(url_id, {"status": final_status, "status_message": str(e)})
     finally:
-        if conn:
-            conn.close()
-
         # 步驟 4: 無論成功或失敗，都呼叫內部 API 來觸發 WebSocket 通知
         try:
             notification_payload = {
