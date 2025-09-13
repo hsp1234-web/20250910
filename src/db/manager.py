@@ -70,6 +70,10 @@ ACTION_MAP = {
     "get_all_analysis_tasks": database.get_all_analysis_tasks,
     "get_analysis_task": database.get_analysis_task,
 
+    # --- extracted_urls Actions (2025-09-13) ---
+    "get_url_by_id": database.get_url_by_id,
+    "update_url": database.update_url,
+
     # For testing:
     "clear_all_tasks": database.clear_all_tasks,
 }

@@ -46,7 +46,9 @@ class Stage2Request(BaseModel):
 def _send_websocket_notification(server_port: int, message: Dict):
     """向主伺服器的內部端點發送通知。"""
     try:
-        url = f"http://127.0.0.1:{server_port}/api/internal/notify_analysis_update"
+        # 修正：使用在 api_server.py 中註冊的正確端點
+        url = f"http://127.0.0.1:{server_port}/api/internal/notify_task_update"
+        # 讓 payload 自身包含足夠的類型資訊
         response = requests.post(url, json=message, timeout=5)
         response.raise_for_status()
     except requests.RequestException as e:
@@ -62,7 +64,7 @@ def run_stage1_task(task_id: int, file_id: int, model_name: str, server_port: in
     try:
         # 1. 更新任務狀態為「處理中」
         DB_CLIENT.update_analysis_task(task_id=task_id, updates={"stage1_status": "processing", "stage1_model": model_name})
-        _send_websocket_notification(server_port, {"type": "STATUS_UPDATE"})
+        _send_websocket_notification(server_port, {"type": "analysis_update", "task_id": task_id, "status": "processing", "stage": 1})
 
         # 2. 初始化 Gemini Manager
         all_prompts = prompt_manager.get_all_prompts()
@@ -75,18 +77,13 @@ def run_stage1_task(task_id: int, file_id: int, model_name: str, server_port: in
             raise ValueError("在金鑰池中找不到任何有效的 API 金鑰。")
         gemini = GeminiManager(api_keys=valid_keys)
 
-        # 3. 從資料庫獲取檔案內容
-        # 注意：這裡我們需要一個新的 DB 函式來獲取 `extracted_urls` 的內容
-        # 暫時假設有 `get_extracted_url_details`
-        conn = get_db_connection() # 暫時直接連線，理想情況應透過 client
-        cursor = conn.cursor()
-        cursor.execute("SELECT source_text FROM extracted_urls WHERE id = ?", (file_id,))
-        file_data = cursor.fetchone()
-        conn.close()
-        if not file_data or not file_data['source_text']:
-            raise ValueError(f"在資料庫中找不到 ID 為 {file_id} 的檔案或其內容為空。")
+        # 3. 從資料庫獲取檔案內容 (*** 核心邏輯修改 ***)
+        # 新邏輯：直接從 analysis_tasks 表讀取已儲存的檔案內容
+        analysis_task_data = DB_CLIENT.get_analysis_task(task_id=task_id)
+        if not analysis_task_data or not analysis_task_data.get('file_content_for_analysis'):
+            raise ValueError(f"分析任務 {task_id} 中找不到可供分析的檔案內容 (file_content_for_analysis)。")
 
-        text_content = file_data['source_text']
+        text_content = analysis_task_data['file_content_for_analysis']
 
         # 4. 執行 AI 資料提取
         prompt = prompt_template.format(document_text=text_content)
@@ -110,7 +107,9 @@ def run_stage1_task(task_id: int, file_id: int, model_name: str, server_port: in
         DB_CLIENT.update_analysis_task(task_id=task_id, updates={"stage1_status": "failed", "stage1_error_log": error_message})
 
     finally:
-        _send_websocket_notification(server_port, {"type": "STATUS_UPDATE"})
+        # 讓 payload 包含更完整的資訊
+        final_task_state = DB_CLIENT.get_analysis_task(task_id)
+        _send_websocket_notification(server_port, {"type": "analysis_update", "task_type": "analysis_stage_1", "task_id": task_id, "status": final_task_state.get('stage1_status'), "result": final_task_state})
 
 
 # --- 新的背景任務函式 (第二階段) ---
@@ -123,7 +122,7 @@ def run_stage2_task(task_id: int, model_name: str, server_port: int):
     try:
         # 1. 更新任務狀態為「處理中」
         DB_CLIENT.update_analysis_task(task_id=task_id, updates={"stage2_status": "processing", "stage2_model_used": model_name})
-        _send_websocket_notification(server_port, {"type": "STATUS_UPDATE"})
+        _send_websocket_notification(server_port, {"type": "analysis_update", "task_id": task_id, "status": "processing", "stage": 2})
 
         # 2. 獲取第一階段產生的 JSON 路徑
         task_data = DB_CLIENT.get_analysis_task(task_id=task_id)
@@ -170,7 +169,8 @@ def run_stage2_task(task_id: int, model_name: str, server_port: int):
         DB_CLIENT.update_analysis_task(task_id=task_id, updates={"stage2_status": "failed", "stage2_error_log": error_message})
 
     finally:
-        _send_websocket_notification(server_port, {"type": "STATUS_UPDATE"})
+        final_task_state = DB_CLIENT.get_analysis_task(task_id)
+        _send_websocket_notification(server_port, {"type": "analysis_update", "task_type": "analysis_stage_2", "task_id": task_id, "status": final_task_state.get('stage2_status'), "result": final_task_state})
 
 
 # --- 新的 API 端點 ---
