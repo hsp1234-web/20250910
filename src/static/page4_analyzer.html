@@ -272,17 +272,38 @@
             // --- Event Listeners ---
             startStage1Btn.addEventListener('click', async () => {
                 const selectedIds = Array.from(document.querySelectorAll('.file-checkbox:checked')).map(cb => parseInt(cb.value, 10));
-                if (selectedIds.length === 0) return alert('請至少選擇一個檔案。');
-                if (stage1ModelSelect.disabled) return alert('請先新增有效的 API 金鑰才能開始分析。');
+                if (selectedIds.length === 0) {
+                    alert('請至少選擇一個檔案。');
+                    return;
+                }
+                if (stage1ModelSelect.disabled) {
+                    alert('請先新增有效的 API 金鑰才能開始分析。');
+                    return;
+                }
                 const modelName = stage1ModelSelect.value;
-                if (!modelName) return alert('請選擇第一階段模型。');
+                if (!modelName) {
+                    alert('請選擇第一階段模型。');
+                    return;
+                }
 
                 logStatus(`啟動第一階段分析，共 ${selectedIds.length} 個檔案...`, 'blue');
-                await fetch('/api/analyzer/start_stage1_analysis', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ file_ids: selectedIds, model_name: modelName })
-                });
+                try {
+                    const response = await fetch('/api/analyzer/start_stage1_analysis', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({ file_ids: selectedIds, model_name: modelName })
+                    });
+                    if (response.ok) {
+                        logStatus('分析請求已成功發送，正在更新儀表板狀態...', 'purple');
+                        // 立即刷新儀表板以顯示新任務
+                        await fetchAnalysisStatus();
+                    } else {
+                        const errorData = await response.json().catch(() => ({ error: '無法解析伺服器錯誤回應' }));
+                        logStatus(`啟動分析失敗: ${errorData.error || response.statusText}`, 'red');
+                    }
+                } catch (error) {
+                    logStatus(`啟動分析時發生網路錯誤: ${error.message}`, 'red');
+                }
             });
 
             startStage2Btn.addEventListener('click', async () => {
@@ -309,9 +330,8 @@
                 const task = analysisTasks.find(t => t.id === taskId);
 
                 if (action === 'view-json') {
-                    const response = await fetch(`/api/analyzer/stage1_result/${taskId}`);
-                    const data = await response.json();
-                    showModal(`任務 #${taskId} 的 JSON 結果`, JSON.stringify(data, null, 2));
+                    // 開啟新的檢視器分頁，而不是顯示彈出視窗
+                    window.open(`/static/json_viewer.html?task_id=${taskId}`, '_blank');
                 } else if (action === 'view-error') {
                     const stage = target.dataset.stage;
                     const errorLog = stage === '1' ? task.stage1_error_log : task.stage2_error_log;
