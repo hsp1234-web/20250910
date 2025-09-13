@@ -84,8 +84,13 @@ def _run_stage1_blocking_task(task_id: int, file_id: int, model_name: str, serve
         # 3. 執行 AI 資料提取
         prompt = prompt_template.format(document_text=text_content)
         structured_data, error, used_key = gemini.prompt_for_json(prompt=prompt, model_name=model_name)
+
+        # 修正後的錯誤處理：直接處理錯誤，而不是 raise
         if error:
-            raise error
+            error_message = f"Gemini API 錯誤 (金鑰: {used_key}): {type(error).__name__}: {str(error)}"
+            log.error(f"第一階段任務失敗：task_id={task_id}，{error_message}", exc_info=error)
+            DB_CLIENT.update_analysis_task(task_id=task_id, updates={"stage1_status": "failed", "stage1_error_log": error_message})
+            return # 終止函式
 
         # 4. 儲存 JSON 結果到檔案
         json_filename = f"stage1_{task_id}_{uuid.uuid4().hex[:8]}.json"
@@ -131,8 +136,13 @@ def _run_stage2_blocking_task(task_id: int, model_name: str, server_port: int):
         # 3. 執行 AI 報告生成
         prompt = prompt_template.format(data_package=json.dumps(structured_data, ensure_ascii=False, indent=2))
         report_html, error, used_key = gemini.prompt_for_text(prompt=prompt, model_name=model_name)
+
+        # 修正後的錯誤處理：直接處理錯誤，而不是 raise
         if error:
-            raise error
+            error_message = f"Gemini API 錯誤 (金鑰: {used_key}): {type(error).__name__}: {str(error)}"
+            log.error(f"第二階段任務失敗：task_id={task_id}，{error_message}", exc_info=error)
+            DB_CLIENT.update_analysis_task(task_id=task_id, updates={"stage2_status": "failed", "stage2_error_log": error_message})
+            return # 終止函式
 
         # 4. 儲存報告
         report_filename = f"report_{task_id}_{uuid.uuid4().hex[:8]}.html"

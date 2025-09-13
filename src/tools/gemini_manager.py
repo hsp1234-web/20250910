@@ -172,31 +172,31 @@ class GeminiManager:
         logging.error(f"[{task_name}] 在嘗試了 {len(keys_to_try)} 組金鑰後，API 請求最終失敗。最後一個錯誤: {last_error}")
         return None, last_error, "all_keys_failed"
 
-    def prompt_for_json(self, prompt: str, model_name: str = "gemini-2.0-flash") -> Optional[Dict]:
+    def prompt_for_json(self, prompt: str, model_name: str = "gemini-2.0-flash"):
         """
         使用自訂提示詞執行請求，並期望回傳一個 JSON 物件。
         適用於第一階段的結構化資料提取。
+        【修正】現在回傳完整的 (result, error, key_name) 元組。
         """
-        result, _, _ = self._api_call_wrapper(
+        return self._api_call_wrapper(
             task_name="PromptForJson",
             model_name=model_name,
             prompt_content=[prompt],
             output_format='json'
         )
-        return result
 
-    def prompt_for_text(self, prompt: str, model_name: str = "gemini-1.5-pro-latest") -> Optional[str]:
+    def prompt_for_text(self, prompt: str, model_name: str = "gemini-1.5-pro-latest"):
         """
         使用自訂提示詞執行請求，並期望回傳純文字 (例如 HTML)。
         適用於第二階段的報告生成。
+        【修正】現在回傳完整的 (result, error, key_name) 元組。
         """
-        result, _, _ = self._api_call_wrapper(
+        return self._api_call_wrapper(
             task_name="PromptForText",
             model_name=model_name,
             prompt_content=[prompt],
             output_format='text'
         )
-        return result
 
     def analyze_text(self, text_content: str, model_name: str = "gemini-1.5-flash-latest") -> Optional[Dict]:
         """【舊版，可選刪除】分析文字並回傳摘要和關鍵字。"""
