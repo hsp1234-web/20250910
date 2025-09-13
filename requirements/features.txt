@@ -7,3 +7,4 @@ gdown
 python-docx
 PyMuPDF
 python-pptx
+Pillow # 用於 src/tools/image_compressor.py

@@ -1,3 +1,18 @@
+## 1030號 - 2025-09-13T08:16:41.512580+08:00
+
+### fix: 全面修復 AI 分析頁面的模型載入功能
+
+- **動機**: 使用者回報，在「AI 分析」頁面（頁面四），即使新增了有效的 API 金鑰，「選擇分析模型」的下拉選單依然無法使用，導致核心功能中斷。
+- **核心變更**:
+    - **依賴修復 (`requirements/features.txt`)**:
+        - **問題**: 在嘗試啟動伺服器進行除錯時，發現應用程式會因缺少 `Pillow` 函式庫而崩潰。這是因為 `image_compressor.py` 模組需要它，但它未被列在任何依賴檔案中。
+        - **修復**: 將 `Pillow` 新增到 `requirements/features.txt` 中，確保應用程式能穩定啟動。
+    - **前端 API 路徑修復 (`src/static/page4_analyzer.html`)**:
+        - **問題**: 透過分析使用者提供的日誌，定位到問題的根本原因：在驗證金鑰成功後，前端腳本呼叫了一個不存在的 API 路徑 (`/api/analyzer/models`) 來獲取模型列表，導致 404 錯誤。
+        - **修復**: 將 `fetchAndRenderModels` JavaScript 函式中的 API 呼叫路徑從錯誤的 `/api/analyzer/models` 修正為正確的 `/api/keys/models`。
+- **成果**: 此次提交透過「修復後端依賴」和「校正前端 API 呼叫」兩項關鍵修改，徹底解決了 AI 分析頁面模型列表無法載入的問題。現在，只要系統中存在有效金鑰，模型下拉選單即可成功載入，核心分析功能已恢復正常。
+
+---
 ## 1027號 - 2025-09-13T04:50:50.398599+08:00
 
 ### fix(core): 強制執行真實 API 金鑰驗證，修復無效金鑰可被儲存的漏洞
@@ -74,7 +89,7 @@
         - **解決競爭條件**: 使用者反應即使輸入有效金鑰，也可能短暫看到錯誤訊息。此問題源於「即時驗證」和「新增金鑰」兩個非同步操作的競爭。
         - **程式碼修復**: 引入了 `AbortController` 機制。當使用者點擊「新增金鑰」按鈕時，會自動取消任何正在進行中的即時驗證請求，確保最終狀態的正確性，提升了使用者體驗。
     - **啟動腳本與環境加固**:
-        - **修正 `PYTHONPATH`**: 修復了 `src/core/orchestrator.py` 在啟動子程序時未傳遞 `PYTHONPATH` 的問題，確保 `db_manager` 和 `api_server` 能正確找到專案模組，解決了伺服器無法啟動的問題。
+        - **修正 `PYTHONPATH`**: 修復了 `src/core/orchestrator.py` 在啟動子程序時未傳遞 `PYTHONPATH` 的問題，確保 `db_manager` 和 `api_server` 能正確找到專案模組，解決了伺ervidor 無法啟動的問題。
         - **補齊依賴**: 在 `requirements/core.txt` 和 `requirements/test.txt` 中補齊了遺失的 `python-multipart` 和 `python-dateutil` 依賴，確保應用和測試能順利運行。
     - **新增單元測試 (Pytest)**:
         - **`key_manager` 測試**: 建立了 `tests/test_key_manager.py`，使用 `mock` 對金鑰的新增、刪除、防重複等核心功能進行了完整的單元測試。

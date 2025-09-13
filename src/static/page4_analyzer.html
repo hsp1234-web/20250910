@@ -230,7 +230,7 @@
 
             const fetchAndRenderModels = async () => {
                 try {
-                    const response = await fetch('/api/analyzer/models');
+                    const response = await fetch('/api/keys/models');
                     if (!response.ok) throw new Error('無法獲取模型列表');
                     const models = await response.json();
                     stage1ModelSelect.innerHTML = '';
