@@ -131,16 +131,18 @@ class GeminiManager:
                             self.key_pool.append(api_key)
 
                     logging.info(f"[{tag}] API 請求成功。")
-                    # 嘗試獲取 token 使用量
-                    token_usage = 0
-                    if hasattr(response, 'usage_metadata') and response.usage_metadata:
-                        try:
-                            # 直接存取 total_token_count 屬性
-                            token_usage = response.usage_metadata.total_token_count
-                        except AttributeError:
-                            # 如果 usage_metadata 或 total_token_count 不存在，則設為 0，確保向前相容
-                            log.warning("無法從 response.usage_metadata 中找到 total_token_count 屬性，回退為 0。")
-                            token_usage = 0
+                    # 嘗試獲取 token 使用量，採用更具防禦性的寫法
+                    token_usage = 0 # 預設為 0
+                    try:
+                        if hasattr(response, 'usage_metadata') and response.usage_metadata: # 確保 usage_metadata 存在且不為 None
+                            # 優先嘗試直接存取屬性
+                            if hasattr(response.usage_metadata, 'total_token_count'):
+                                token_usage = response.usage_metadata.total_token_count
+                            # 如果是舊版或不同格式，再嘗試 .get() 方法
+                            elif hasattr(response.usage_metadata, 'get'):
+                                token_usage = response.usage_metadata.get('total_token_count', 0)
+                    except Exception as e:
+                        logging.warning(f"無法從 usage_metadata 中獲取 token 消耗: {e}")
 
                     if output_format == 'json':
                         if raw_text.strip().startswith("```json"):

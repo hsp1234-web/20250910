@@ -147,8 +147,18 @@ button:hover {
 .status-error { background-color: #dc3545; }   /* Danger Red */
 .status-retry { background-color: #fd7e14; }   /* Orange */
 
-/* Action Button Styles */
-.results-table button {
+/* --- 提升儀表板 UI/UX --- */
+
+/* 設定表格欄位最小寬度，讓排版更整齊 */
+.results-table td:nth-child(2) { /* 檔案名稱 */
+    min-width: 300px;
+}
+.results-table td:nth-child(3) { /* 作者 */
+    min-width: 120px;
+}
+
+/* 統一定義操作按鈕的基礎樣式 */
+.action-btn {
     padding: 5px 10px;
     font-size: 0.9em;
     margin: 0 2px;
@@ -157,16 +167,30 @@ button:hover {
     border-radius: 4px;
     color: white;
     transition: opacity 0.2s;
+    text-decoration: none; /* 統一樣式，也適用於 <a> 標籤 */
+    display: inline-block; /* 確保 <a> 標籤能正確顯示 padding 和 margin */
 }
 
-.results-table button:hover {
+.action-btn:hover {
     opacity: 0.8;
 }
 
-.view-report-btn { background-color: #007bff; } /* Primary Blue */
-.reanalyze-btn { background-color: #ffc107; color: #212529;} /* Warning Yellow */
-.retry-btn { background-color: #17a2b8; } /* Info Blue */
-.view-error-btn { background-color: #6c757d; } /* Secondary Gray */
+/* 美化操作按鈕，根據您的建議配色 */
+.btn-view {
+    background-color: #007bff; /* 藍色 */
+}
+
+.btn-retry {
+    background-color: #6f42c1; /* 紫色 */
+}
+
+.btn-log {
+    background-color: #6c757d; /* 灰色 */
+}
+
+.btn-report {
+    background-color: #28a745; /* 綠色 */
+}
 
 /* Styles for new reports table */
 .model-tag {

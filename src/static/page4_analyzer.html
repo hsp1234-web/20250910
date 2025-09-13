@@ -106,6 +106,7 @@
             const copyLogButton = document.getElementById('copy-log-button');
             const stage1ModelSelect = document.getElementById('stage1-model-select');
             const stage2ModelSelect = document.getElementById('stage2-model-select');
+            // Modal is no longer used for JSON, but might be for other things. Keep it for now.
             const modal = document.getElementById('details-modal');
             const modalTitle = document.getElementById('modal-title');
             const modalBody = document.getElementById('modal-body');
@@ -125,17 +126,6 @@
             const logStatus = (message, color = 'black') => {
                 const timestamp = new Date().toLocaleTimeString('zh-TW', { hour12: false });
                 statusArea.insertAdjacentHTML('afterbegin', `<p style="color: ${color};">[${timestamp}] ${message}</p>`);
-            };
-
-            // --- Modal Logic ---
-            const showModal = (title, content) => {
-                modalTitle.textContent = title;
-                modalBody.textContent = content;
-                modal.style.display = 'block';
-            };
-            closeModal.onclick = () => modal.style.display = 'none';
-            window.onclick = (event) => {
-                if (event.target == modal) modal.style.display = 'none';
             };
 
             // --- Core Render Functions ---
@@ -174,10 +164,16 @@
                     return;
                 }
 
-                const getStatusHTML = (status, errorLog) => {
+                const getStatusHTML = (task, stage) => {
+                    const status = stage === 1 ? task.stage1_status : task.stage2_status;
+                    const errorLog = stage === 1 ? task.stage1_error_log : task.stage2_error_log;
+                    const model = stage === 1 ? task.stage1_model : task.stage2_model_used;
+
                     switch (status) {
                         case 'pending': return `<span class="status-pending">⏳ 等待中</span>`;
-                        case 'processing': return `<span class="status-analyzing">🔄 處理中...</span>`;
+                        case 'processing':
+                            const modelName = model ? ` (${model.replace('models/', '')})` : '';
+                            return `<span class="status-analyzing" title="${model || ''}">🔄 處理中${modelName}...</span>`;
                         case 'completed': return `<span class="status-analyzed">✅ 完成</span>`;
                         case 'failed': return `<span class="status-error" title="${errorLog || ''}">❌ 失敗</span>`;
                         default: return `<span>${status || '未知'}</span>`;
@@ -187,21 +183,20 @@
                 const getActionsHTML = (task) => {
                     let actions = [];
                     if (task.stage1_status === 'completed') {
-                        actions.push(`<button class="action-btn" data-action="view-json" data-task-id="${task.id}">檢視JSON</button>`);
+                        actions.push(`<button class="action-btn btn-view" data-action="view-json" data-task-id="${task.id}">檢視JSON</button>`);
                     }
                     if (task.stage2_status === 'completed' && task.stage2_report_path) {
                         const reportFilename = task.stage2_report_path.split(/[\\/]/).pop();
                         const reportUrl = `/reports/${reportFilename}`;
-                        actions.push(`<a href="${reportUrl}" target="_blank" class="button-link-inline">檢視報告</a>`);
+                        actions.push(`<a href="${reportUrl}" target="_blank" class="action-btn btn-report">檢視報告</a>`);
                     }
-                    // 統一處理失敗狀態的按鈕
                     if (task.stage1_status === 'failed') {
-                        actions.push(`<button class="action-btn" data-action="view-log" data-task-id="${task.id}" data-stage="1">查看日誌</button>`);
-                        actions.push(`<button class="action-btn" data-action="retry-stage1" data-task-id="${task.id}" data-file-id="${task.file_id}">重試</button>`);
+                        actions.push(`<button class="action-btn btn-log" data-action="view-log" data-task-id="${task.id}" data-stage="1">日誌</button>`);
+                        actions.push(`<button class="action-btn btn-retry" data-action="retry-stage1" data-task-id="${task.id}" data-file-id="${task.file_id}">重試(1)</button>`);
                     }
                      if (task.stage2_status === 'failed') {
-                        actions.push(`<button class="action-btn" data-action="view-log" data-task-id="${task.id}" data-stage="2">查看日誌</button>`);
-                        actions.push(`<button class="action-btn" data-action="retry-stage2" data-task-id="${task.id}">重試</button>`);
+                        actions.push(`<button class="action-btn btn-log" data-action="view-log" data-task-id="${task.id}" data-stage="2">日誌</button>`);
+                        actions.push(`<button class="action-btn btn-retry" data-action="retry-stage2" data-task-id="${task.id}">重試(2)</button>`);
                     }
                     return actions.join(' ');
                 };
@@ -218,18 +213,17 @@
                     const filenameLink = task.file_hash ? `<a href="${detailUrl}" title="查看檔案總覽">${task.filename}</a>` : task.filename;
                     const authorLink = task.author ? (task.file_hash ? `<a href="${detailUrl}" title="查看檔案總覽">${task.author}</a>` : task.author) : 'N/A';
 
-                    // 組合模型和 Token 資訊
-                    const modelInfo = [task.stage1_model, task.stage2_model_used].filter(Boolean).join('<br>');
+                    const modelInfo = [task.stage1_model, task.stage2_model_used].filter(Boolean).map(m => m.replace('models/', '')).join('<br>');
                     const tokenUsage = (task.stage1_token_usage || 0) + (task.stage2_token_usage || 0);
 
-                    html += `<tr>
+                    html += `<tr id="task-row-${task.id}">
                         <td><input type="checkbox" class="dashboard-checkbox" value="${task.id}" ${checkboxDisabled ? 'disabled' : ''}></td>
                         <td>${filenameLink}</td>
                         <td>${authorLink}</td>
                         <td>${modelInfo || 'N/A'}</td>
                         <td>${tokenUsage > 0 ? tokenUsage.toLocaleString() : 'N/A'}</td>
-                        <td>${getStatusHTML(task.stage1_status, task.stage1_error_log)}</td>
-                        <td>${getStatusHTML(task.stage2_status, task.stage2_error_log)}</td>
+                        <td>${getStatusHTML(task, 1)}</td>
+                        <td>${getStatusHTML(task, 2)}</td>
                         <td>${getActionsHTML(task)}</td>
                     </tr>`;
                 });
@@ -252,41 +246,20 @@
             const populateModelSelector = (selectorId, models) => {
                 const selector = document.getElementById(selectorId);
                 selector.innerHTML = ''; // 清空舊選項
-
-                // 1. 定義優先序
-                const priorityOrder = [
-                    "models/gemini-2.0-flash-lite",
-                    "models/gemini-2.0-flash",
-                    "models/gemini-2.5-flash-lite",
-                    "models/gemini-2.5-flash"
-                ];
-
-                // 2. 排序模型列表
+                const priorityOrder = ["models/gemini-2.0-flash-lite", "models/gemini-2.0-flash", "models/gemini-2.5-flash-lite", "models/gemini-2.5-flash"];
                 const sortedModels = [...models].sort((a, b) => {
                     let aPriority = priorityOrder.indexOf(a);
                     let bPriority = priorityOrder.indexOf(b);
-
-                    // 如果模型不在優先序中，給予一個較大的索引值
-                    if (aPriority === -1) aPriority = priorityOrder.length;
-                    if (bPriority === -1) bPriority = priorityOrder.length;
-
-                    if (aPriority !== bPriority) {
-                        return aPriority - bPriority;
-                    }
-
-                    // 對於優先級相同的模型，按字母順序排序
+                    if (aPriority === -1) aPriority = priorityOrder.length + 1;
+                    if (bPriority === -1) bPriority = priorityOrder.length + 1;
+                    if (aPriority !== bPriority) return aPriority - bPriority;
                     return a.localeCompare(b);
                 });
-
-                // 3. 填充下拉選單
                 sortedModels.forEach((modelName, index) => {
                     const option = document.createElement('option');
                     option.value = modelName;
-                    option.textContent = modelName;
-                    // 將排序後的第一個設為預設選中
-                    if (index === 0) {
-                        option.selected = true;
-                    }
+                    option.textContent = modelName.replace('models/', '');
+                    if (index === 0) option.selected = true;
                     selector.appendChild(option);
                 });
             };
@@ -327,19 +300,10 @@
             // --- Event Listeners ---
             startStage1Btn.addEventListener('click', async () => {
                 const selectedIds = Array.from(document.querySelectorAll('.file-checkbox:checked')).map(cb => parseInt(cb.value, 10));
-                if (selectedIds.length === 0) {
-                    alert('請至少選擇一個檔案。');
-                    return;
-                }
-                if (stage1ModelSelect.disabled) {
-                    alert('請先新增有效的 API 金鑰才能開始分析。');
-                    return;
-                }
+                if (selectedIds.length === 0) return alert('請至少選擇一個檔案。');
+                if (stage1ModelSelect.disabled) return alert('請先新增有效的 API 金鑰才能開始分析。');
                 const modelName = stage1ModelSelect.value;
-                if (!modelName) {
-                    alert('請選擇第一階段模型。');
-                    return;
-                }
+                if (!modelName) return alert('請選擇第一階段模型。');
 
                 logStatus(`啟動第一階段分析，共 ${selectedIds.length} 個檔案...`, 'blue');
                 try {
@@ -350,7 +314,6 @@
                     });
                     if (response.ok) {
                         logStatus('分析請求已成功發送，正在更新儀表板狀態...', 'purple');
-                        // 立即刷新儀表板以顯示新任務
                         await fetchAnalysisStatus();
                     } else {
                         const errorData = await response.json().catch(() => ({ error: '無法解析伺服器錯誤回應' }));
@@ -377,31 +340,58 @@
             });
 
             dashboardContainer.addEventListener('click', async (e) => {
-                const target = e.target;
-                if (!target.classList.contains('action-btn')) return;
+                const target = e.target.closest('.action-btn');
+                if (!target) return;
+
+                e.preventDefault();
 
                 const action = target.dataset.action;
                 const taskId = parseInt(target.dataset.taskId, 10);
                 const task = analysisTasks.find(t => t.id === taskId);
+                const currentRow = document.getElementById(`task-row-${taskId}`);
+                if (!currentRow) return;
+
+                const removeExistingDetailsRow = () => {
+                    const existingDetails = document.querySelector('.details-row');
+                    if(existingDetails) existingDetails.remove();
+                };
+
+                const createDetailsRow = (id, content) => {
+                    const detailsRow = document.createElement('tr');
+                    detailsRow.id = id;
+                    detailsRow.classList.add('details-row');
+                    detailsRow.innerHTML = `<td colspan="8" class="log-details"><pre>${content}</pre></td>`;
+                    currentRow.after(detailsRow);
+                    return detailsRow;
+                }
 
                 if (action === 'view-json') {
-                    // 開啟新的檢視器分頁，而不是顯示彈出視窗
-                    window.open(`/static/json_viewer.html?task_id=${taskId}`, '_blank');
-                } else if (action === 'view-log') {
-                    const currentRow = target.closest('tr');
-                    const existingLogDiv = document.getElementById(`log-div-${taskId}`);
+                    const detailsId = `json-details-${taskId}`;
+                    const existingRow = document.getElementById(detailsId);
+                    if (existingRow) return existingRow.remove();
 
-                    if (existingLogDiv) {
-                        existingLogDiv.remove();
-                    } else {
-                        const stage = target.dataset.stage;
-                        const errorLog = (stage === '1' ? task.stage1_error_log : task.stage2_error_log) || '沒有詳細的錯誤資訊。';
+                    removeExistingDetailsRow();
+                    const placeholderRow = createDetailsRow(detailsId, '🔄 正在載入 JSON 資料...');
 
-                        const logRow = document.createElement('tr');
-                        logRow.id = `log-div-${taskId}`;
-                        logRow.innerHTML = `<td colspan="8" class="log-details"><pre>${errorLog}</pre></td>`;
-                        currentRow.parentNode.insertBefore(logRow, currentRow.nextSibling);
+                    try {
+                        const response = await fetch(`/api/analyzer/stage1_result/${taskId}`);
+                        if (!response.ok) throw new Error(`伺服器回應錯誤 (狀態 ${response.status})`);
+                        const data = await response.json();
+                        placeholderRow.querySelector('pre').textContent = JSON.stringify(data, null, 2);
+                    } catch (error) {
+                        placeholderRow.querySelector('pre').textContent = `載入 JSON 失敗: ${error.message}`;
+                        placeholderRow.querySelector('td').style.color = 'red';
                     }
+                } else if (action === 'view-log') {
+                    const detailsId = `log-details-${taskId}`;
+                    const existingRow = document.getElementById(detailsId);
+                    if (existingRow) return existingRow.remove();
+
+                    removeExistingDetailsRow();
+                    const stage = target.dataset.stage;
+                    const errorLog = (stage === '1' ? task.stage1_error_log : task.stage2_error_log) || '沒有詳細的錯誤資訊。';
+                    createDetailsRow(detailsId, errorLog);
+
                 } else if (action === 'retry-stage1') {
                     const fileId = parseInt(target.dataset.fileId, 10);
                     const modelName = stage1ModelSelect.value;
@@ -412,7 +402,7 @@
                         headers: {'Content-Type': 'application/json'},
                         body: JSON.stringify({ file_ids: [fileId], model_name: modelName })
                     });
-                    await fetchAnalysisStatus(); // Refresh dashboard
+                    await fetchAnalysisStatus();
                 } else if (action === 'retry-stage2') {
                      const modelName = stage2ModelSelect.value;
                      if (!modelName) return alert('請選擇第二階段模型。');
@@ -422,19 +412,18 @@
                         headers: {'Content-Type': 'application/json'},
                         body: JSON.stringify({ task_ids: [taskId], model_name: modelName })
                     });
-                    await fetchAnalysisStatus(); // Refresh dashboard
+                    await fetchAnalysisStatus();
                 }
             });
 
-            selectAllButton.addEventListener('click', () => document.querySelectorAll('.file-checkbox').forEach(cb => cb.checked = true));
+            selectAllButton.addEventListener('click', () => document.querySelectorAll('.file-checkbox:not(:disabled)').forEach(cb => cb.checked = true));
             deselectAllButton.addEventListener('click', () => document.querySelectorAll('.file-checkbox').forEach(cb => cb.checked = false));
             dashboardContainer.addEventListener('change', e => {
                 if (e.target.id === 'dashboard-select-all') {
-                    document.querySelectorAll('.dashboard-checkbox:not(:disabled)').forEach(cb => cb.checked = e.target.checked);
+                    document.querySelectorAll('.dashboard-checkbox:not(:disabled)').forEach(cb => e.target.checked ? cb.checked = true : cb.checked = false);
                 }
             });
 
-            // --- Copy Log Button ---
             copyLogButton.addEventListener('click', () => {
                 const logContent = statusArea.innerText;
                 navigator.clipboard.writeText(logContent).then(() => {
@@ -444,14 +433,13 @@
                     setTimeout(() => {
                         copyLogButton.innerText = originalText;
                         copyLogButton.disabled = false;
-                    }, 3000);
+                    }, 2000);
                 }).catch(err => {
                     console.error('無法複製日誌: ', err);
                     logStatus('複製失敗，您的瀏覽器可能不支援或未授予權限。', 'red');
                 });
             });
 
-            // --- WebSocket Setup ---
             const setupWebSocket = () => {
                 const ws = new WebSocket(`${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/api/ws`);
                 ws.onopen = () => logStatus('WebSocket 連線成功。', 'blue');
@@ -468,7 +456,6 @@
                 };
             };
 
-            // --- Nav Bar Centering ---
             const centerActiveNavButton = () => {
                 const activeNavButton = document.querySelector('.top-nav a.active');
                 if (activeNavButton) {
@@ -476,7 +463,6 @@
                 }
             };
 
-            // --- Initial Load ---
             (async () => {
                 logStatus('頁面載入完成，正在初始化...');
                 await Promise.all([
