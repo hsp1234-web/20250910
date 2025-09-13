@@ -170,6 +170,34 @@ button:disabled {
     color: #fff;
 }
 
+.btn-retry-purple, .btn-view-details {
+    background-color: #6f42c1; /* A nice purple */
+    min-width: 100px; /* Ensure buttons have a consistent width */
+}
+.btn-retry-purple:hover, .btn-view-details:hover {
+    background-color: #5a379e; /* A darker purple */
+}
+
+/* --- Details Row for Errors --- */
+.details-row-p3 td {
+    padding: 0 !important;
+    background-color: #f8f7fa !important;
+    border-top: 1px solid #dcdcdc;
+    border-bottom: 1px solid #dcdcdc;
+}
+.details-row-p3 pre {
+    margin: 0;
+    padding: 15px;
+    background-color: #f8f7fa;
+    color: #000; /* Black text */
+    font-family: "Courier New", Courier, monospace;
+    white-space: pre-wrap;
+    word-break: break-all;
+    font-size: 14px;
+    line-height: 1.5;
+    border-radius: 0;
+}
+
 /* --- Status Log --- */
 #status-area {
     margin-top: 20px;

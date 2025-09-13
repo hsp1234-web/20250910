@@ -183,11 +183,12 @@ select {
 }
 .log-details {
     padding: 15px;
-    background-color: #212529;
-    color: #f8f9fa;
+    background-color: #f8f9fa; /* Light background, consistent with other panels */
+    color: #212529; /* Dark text (black) */
     font-family: monospace;
     white-space: pre-wrap;
     word-break: break-all;
+    border-top: 1px solid var(--border-color); /* Add a separator line */
 }
 .log-details pre {
     margin: 0;

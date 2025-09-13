@@ -92,9 +92,8 @@
 
                 // --- 渲染 AI 分析結果 ---
                 let stage1Html = getStatusHTML(analysis_task ? analysis_task.stage1_status : 'pending');
-                if (analysis_task && analysis_task.stage1_status === 'completed' && analysis_task.stage1_json_path) {
-                    const jsonViewerUrl = `/static/json_viewer.html?path=${encodeURIComponent(analysis_task.stage1_json_path)}`;
-                    stage1Html += ` <a href="${jsonViewerUrl}" target="_blank" class="button-link-inline">查看 JSON</a>`;
+                if (analysis_task && analysis_task.stage1_status === 'completed') {
+                    stage1Html += ` <button class="button-link-inline btn-view-json" data-task-id="${analysis_task.id}">查看 JSON</button>`;
                 } else if (analysis_task && analysis_task.stage1_status === 'failed') {
                     stage1Html += `<br><small style="color: #dc3545;">${analysis_task.stage1_error_log || '無詳細錯誤資訊'}</small>`;
                 }
@@ -135,9 +134,9 @@
                             </tr>
                              <tr>
                                 <th>所有出現紀錄</th>
-                                <td>${occurrencesHtml}</td>
+                                <td><div class="table-responsive-wrapper">${occurrencesHtml}</div></td>
                             </tr>
-                            <tr>
+                            <tr id="stage1-row">
                                 <th>AI 分析 - 第一階段 (JSON)</th>
                                 <td>${stage1Html}</td>
                             </tr>
@@ -182,6 +181,49 @@
             };
 
             loadDetails();
+
+            detailsContainer.addEventListener('click', async (e) => {
+                if (!e.target.classList.contains('btn-view-json')) {
+                    return;
+                }
+
+                const button = e.target;
+                const taskId = button.dataset.taskId;
+                const stage1Row = document.getElementById('stage1-row');
+                const detailsRowId = `json-details-for-${taskId}`;
+                const existingDetailsRow = document.getElementById(detailsRowId);
+
+                if (existingDetailsRow) {
+                    existingDetailsRow.remove();
+                    return;
+                }
+
+                // Remove any other details row that might be open
+                const anyOpenDetails = document.querySelector('.json-details-row');
+                if(anyOpenDetails) anyOpenDetails.remove();
+
+                const detailsRow = document.createElement('tr');
+                detailsRow.id = detailsRowId;
+                detailsRow.classList.add('json-details-row');
+                detailsRow.innerHTML = `<td colspan="2"><pre>正在載入 JSON 資料...</pre></td>`;
+                stage1Row.after(detailsRow);
+
+                try {
+                    button.disabled = true;
+                    const response = await fetch(`/api/analyzer/stage1_result/${taskId}`);
+                    if (!response.ok) {
+                        const errorData = await response.json().catch(() => ({ detail: `伺服器回應錯誤 (狀態 ${response.status})` }));
+                        throw new Error(errorData.detail);
+                    }
+                    const data = await response.json();
+                    detailsRow.querySelector('pre').textContent = JSON.stringify(data, null, 2);
+                } catch (error) {
+                    detailsRow.querySelector('pre').style.color = 'red';
+                    detailsRow.querySelector('pre').textContent = `載入 JSON 失敗: ${error.message}`;
+                } finally {
+                    button.disabled = false;
+                }
+            });
         });
     </script>
 </body>

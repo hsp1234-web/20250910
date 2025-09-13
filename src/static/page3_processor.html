@@ -164,9 +164,13 @@
                         let actions = '';
                         if (file.status === 'processed') {
                              actions = `<a href="/report/${file.id}" target="_blank" class="button-link-inline">查看報告</a>`;
+                        } else if (file.status === 'processing_failed') {
+                            const escapedError = (file.status_message || '無詳細錯誤資訊').replace(/"/g, '&quot;');
+                            actions = `<div><button class="action-btn btn-retry-purple" data-file-id="${file.id}">重新處理</button></div>
+                                <div><button class="action-btn btn-view-details" data-file-id="${file.id}" data-error-details="${escapedError}">查看原因</button></div>`;
                         }
 
-                        html += `<tr>
+                        html += `<tr id="terminal-file-row-${file.id}">
                             <td><input type="checkbox" class="completed-file-checkbox" value="${file.id}"></td>
                             <td title="${file.filename}">${file.filename}</td>
                             <td class="${statusClass}">${translateStatus(file.status)}</td>
@@ -235,8 +239,44 @@
             });
 
             completedFileListContainer.addEventListener('click', (e) => {
-                if (e.target.id === 'completed-select-all') {
+                const target = e.target;
+                if (target.id === 'completed-select-all') {
                     document.querySelectorAll('.completed-file-checkbox').forEach(cb => cb.checked = e.target.checked);
+                    return;
+                }
+
+                if (target.classList.contains('btn-retry-purple')) {
+                    const fileId = parseInt(target.dataset.fileId, 10);
+                    if (fileId) {
+                        logStatus(`正在為檔案 #${fileId} 準備重試...`);
+                        resetFilesAPI([fileId]);
+                    }
+                    return;
+                }
+
+                if (target.classList.contains('btn-view-details')) {
+                    const fileId = target.dataset.fileId;
+                    const currentRow = document.getElementById(`terminal-file-row-${fileId}`);
+                    if (!currentRow) return;
+
+                    const detailsRowId = `details-for-file-${fileId}`;
+                    const existingDetailsRow = document.getElementById(detailsRowId);
+
+                    if (existingDetailsRow) {
+                        existingDetailsRow.remove();
+                    } else {
+                        const anyOpenDetails = completedFileListContainer.querySelector('.details-row-p3');
+                        if (anyOpenDetails) {
+                            anyOpenDetails.remove();
+                        }
+
+                        const errorDetails = target.dataset.errorDetails || '沒有提供詳細的錯誤資訊。';
+                        const detailsRow = document.createElement('tr');
+                        detailsRow.id = detailsRowId;
+                        detailsRow.classList.add('details-row-p3');
+                        detailsRow.innerHTML = `<td colspan="5"><pre>${errorDetails}</pre></td>`;
+                        currentRow.after(detailsRow);
+                    }
                 }
             });
 

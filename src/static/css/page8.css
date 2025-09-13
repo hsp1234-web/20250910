@@ -1,69 +1,167 @@
-/* For page8_file_details.html */
+/* src/static/css/page8.css - Standalone Styles for File Details Page */
+
+/* --- Variables & Base --- */
+:root {
+    --page8-primary-text: #212529;
+    --page8-secondary-text: #495057;
+    --page8-border-color: #dee2e6;
+    --page8-header-bg: #f8f9fa;
+    --page8-body-bg: #ffffff;
+    --page8-panel-bg: #ffffff;
+    --page8-link-color: #007bff;
+    --page8-button-bg: #007bff;
+    --page8-button-hover-bg: #0056b3;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    margin: 0;
+    padding: 0;
+    background-color: var(--page8-body-bg);
+    color: var(--page8-primary-text);
+}
+
+/* --- Layout --- */
+.content {
+    padding: 20px;
+    max-width: 1200px;
+    margin: 20px auto;
+}
+
+.panel {
+    background: var(--page8-panel-bg);
+    border: 1px solid var(--page8-border-color);
+    border-radius: 8px;
+    padding: 25px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+}
+
+h1 {
+    color: #0056b3;
+    margin-top: 0;
+    margin-bottom: 20px;
+    padding-bottom: 10px;
+    border-bottom: 2px solid var(--page8-border-color);
+}
+
+/* --- Main Details Table --- */
 .details-table {
     width: 100%;
     border-collapse: collapse;
+    font-size: 16px;
 }
 
 .details-table th, .details-table td {
-    border: 1px solid #ddd;
-    padding: 12px;
+    padding: 15px;
     text-align: left;
     vertical-align: top;
+    border-bottom: 1px solid var(--page8-border-color);
 }
 
 .details-table th {
-    background-color: #f2f2f2;
-    width: 20%;
-    font-weight: bold;
+    font-weight: 600;
+    width: 25%;
+    color: var(--page8-secondary-text);
 }
 
 .details-table td {
-    width: 80%;
+    width: 75%;
     word-break: break-all;
+}
+
+.details-table pre {
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    background-color: #e9ecef;
+    padding: 12px;
+    border-radius: 4px;
+    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace;
+    font-size: 14px;
+    margin: 0;
+}
+
+/* --- Nested Occurrences Table & Responsive Wrapper --- */
+.table-responsive-wrapper {
+    overflow-x: auto;
+    width: 100%;
+    border: 1px solid var(--page8-border-color);
+    border-radius: 5px;
 }
 
 .occurrences-table {
     width: 100%;
-    margin-top: 10px;
     border-collapse: collapse;
+    min-width: 600px; /* Ensure table has a min-width before scrolling */
 }
 
 .occurrences-table th, .occurrences-table td {
-    border: 1px solid #e0e0e0;
-    padding: 8px;
-    text-align: left;
+    padding: 12px 15px;
+    border-bottom: 1px solid var(--page8-border-color);
+    white-space: nowrap;
 }
 
-.occurrences-table th {
-    background-color: #fafafa;
+.occurrences-table thead {
+    background-color: var(--page8-header-bg);
+}
+.occurrences-table tbody tr:last-child th,
+.occurrences-table tbody tr:last-child td {
+    border-bottom: none;
 }
 
-pre {
+.occurrences-table a {
+    color: var(--page8-link-color);
+    text-decoration: none;
+}
+.occurrences-table a:hover {
+    text-decoration: underline;
+}
+
+
+/* --- JSON Details Row --- */
+.json-details-row td {
+    padding: 0 !important;
+    background-color: #fcfcfd !important;
+}
+.json-details-row pre {
+    margin: 0;
+    padding: 15px;
+    background-color: #f8f9fa;
+    color: var(--page8-primary-text);
+    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace;
     white-space: pre-wrap;
-    word-wrap: break-word;
-    background-color: #eee;
-    padding: 10px;
-    border-radius: 4px;
-    font-family: 'Courier New', Courier, monospace;
+    word-break: break-all;
+    font-size: 14px;
+    border-radius: 0;
+    max-height: 400px;
+    overflow-y: auto;
+    border: none;
+    border-top: 2px dashed var(--page8-border-color);
 }
 
-.status-completed { color: #28a745; }
-.status-processing, .status-analyzing { color: #007bff; }
-.status-pending { color: #6c757d; }
-.status-error, .status-failed { color: #dc3545; }
-.status-downloading { color: #17a2b8; }
+
+/* --- Status & Action Buttons (Self-contained) --- */
+.status-completed { color: #28a745; font-weight: bold; }
+.status-processing, .status-analyzing { color: #007bff; font-weight: bold; }
+.status-pending { color: #6c757d; font-weight: bold; }
+.status-error, .status-failed { color: #dc3545; font-weight: bold; }
+.status-downloading { color: #17a2b8; font-weight: bold; }
 
 .button-link-inline {
     display: inline-block;
-    padding: 5px 10px;
-    background-color: #007bff;
+    padding: 6px 12px;
+    background-color: var(--page8-button-bg);
     color: white;
     text-decoration: none;
+    border: none;
     border-radius: 4px;
     font-size: 14px;
-    text-align: center;
+    cursor: pointer;
+    transition: background-color 0.2s;
 }
-
-.button-link-inline:hover {
-    background-color: #0056b3;
+.button-link-inline:hover:not(:disabled) {
+    background-color: var(--page8-button-hover-bg);
+}
+.button-link-inline:disabled {
+    background-color: #cccccc;
+    cursor: not-allowed;
 }
