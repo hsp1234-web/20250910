@@ -60,7 +60,7 @@ async def remove_key(key_hash: str):
     else:
         raise HTTPException(status_code=404, detail="找不到具有該雜湊值的金鑰。")
 
-@router.post("/keys/validate", summary="重新驗證所有金鑰")
+@router.post("/validate", summary="重新驗證所有金鑰")
 async def validate_all_stored_keys():
     """
     觸發對金鑰池中所有金鑰的重新驗證。

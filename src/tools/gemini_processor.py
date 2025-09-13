@@ -109,15 +109,22 @@ def validate_key():
         if not api_key:
             print("錯誤：未在環境變數中提供 GOOGLE_API_KEY。", file=sys.stderr, flush=True)
             sys.exit(1)
+
         genai.configure(api_key=api_key)
-        genai.list_models()
+        # 執行一個輕量級的 API 呼叫來觸發驗證
+        next(genai.list_models(), None)
+
         log.info("✅ API 金鑰驗證成功。")
         sys.exit(0)
-    except google.api_core.exceptions.PermissionDenied:
-        print("金鑰驗證失敗：Google 拒絕存取。請檢查您的 API 金鑰是否正確且已啟用。", file=sys.stderr, flush=True)
+
+    except google.api_core.exceptions.InvalidArgument as e:
+        print(f"金鑰驗證失敗：無效的 API 金鑰或格式錯誤。Google API 訊息: {e}", file=sys.stderr, flush=True)
+        sys.exit(1)
+    except google.api_core.exceptions.PermissionDenied as e:
+        print(f"金鑰驗證失敗：權限被拒絕。請檢查您的金鑰是否有權限存取該服務。Google API 訊息: {e}", file=sys.stderr, flush=True)
         sys.exit(1)
     except Exception as e:
-        print(f"金鑰驗證時發生未預期的錯誤：{e}", file=sys.stderr, flush=True)
+        print(f"金鑰驗證時發生未預期的網路或其他錯誤：{e}", file=sys.stderr, flush=True)
         sys.exit(1)
 
 def generate_content_with_timeout(model, prompt_parts: list, log_message: str, internal_timeout: int = 100):

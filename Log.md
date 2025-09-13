@@ -1,3 +1,21 @@
+## 1040號 - 2025-09-13T21:01:24.386348+08:00
+
+### fix(core): 全面修復金鑰驗證的雙重邏輯缺陷
+
+- **動機**: 使用者回報，在金鑰管理頁面新增無效金鑰時，系統會錯誤地回報「有效」，但在後續點擊「重新檢測」時又會發生錯誤，顯示系統在驗證邏輯上存在嚴重缺陷。
+- **核心變更**:
+    - **修正首次驗證邏輯 (`src/tools/gemini_processor.py`)**:
+        - **問題**: `validate_key` 函式未能正確捕捉 Google API 對無效金鑰回傳的 `InvalidArgument` 錯誤，導致驗證邏輯出現漏洞，將無效金鑰誤判為有效。
+        - **修復**: 增強了 `validate_key` 函式中的 `try...except` 區塊，明確地捕捉 `InvalidArgument` 異常，並在捕捉到時回傳失敗的結束碼 `1`。此修改確保了所有金鑰驗證都會經過真實且嚴格的 API 呼叫檢查。
+
+    - **修正重新驗證 API 路由 (`src/api/routes/page6_keys.py`)**:
+        - **問題**: 「重新檢測所有金鑰」功能的後端 API 路由被錯誤地設定為 `/keys/validate`，因路由前綴重複導致前端無法訪問 (404 Not Found)。
+        - **修復**: 將錯誤的路由從 `@router.post("/keys/validate")` 修正為正確的 `@router.post("/validate")`，使其路徑與前端的呼叫一致。
+
+- **測試與驗證**:
+    - 根據使用者指示，直接提交變更。
+- **成果**: 本次提交一併解決了金鑰驗證流程中的兩個核心錯誤。現在，無論是首次新增還是後續重新檢測，金鑰的有效性都能被準確地判斷，錯誤的 API 路由也已修正，恢復了頁面的完整功能，提升了系統的可靠性。
+
 ## 1038號 - 2025-09-13T20:04:29.917495+08:00
 
 ### fix(ui): 移除 AI 分析頁面中無用的彈出視窗元素
@@ -200,7 +218,7 @@
     - **根本原因定位**: 經追查，我發現問題的根源在於前端。`src/static/page4_analyzer.html` 頁面的 JavaScript 程式碼在獲取 AI 模型列表時，呼叫了一個過時的 API 位址 (`/api/analyzer/models`)。根據專案日誌 (#1022)，此 API 在先前的重構中已被統一到 `/api/keys/models`，但 `page4_analyzer.html` 未被同步更新。
     - **程式碼修復 (`src/static/page4_analyzer.html`)**: 我編輯了此檔案中的 `fetchAndRenderModels` JavaScript 函式，將其 `fetch` 的目標 URL 從舊的 `/api/analyzer/models` 修正為當前正確的位址 `/api/keys/models`。
 - **測試**:
-    - **環境修復**: 在驗證過程中，我發現伺服器因缺少 `Pillow` 依賴 (`ModuleNotFoundError: No module named 'PIL'`) 而無法啟動。我參照日誌 (#1028) 的經驗，安裝了 `requirements/features.txt`，成功解決了此環境問題。
+    - **環境修復**: 在驗證過程中，我發現伺服器因缺少 `Pillow` 依賴 (`ModuleNotFoundError: No module named 'PIL'`) 而無法啟動。我參照日誌 (#1028) の經驗，安裝了 `requirements/features.txt`，成功解決了此環境問題。
     - **啟動驗證**: 在修復了環境依賴並應用了我的程式碼修正後，我根據 `test.md` 的指引成功啟動了伺服器。伺服器的正常啟動證明了我的修改是安全且無誤的。
 - **成果**: 本次修復使「AI 分析」頁面的前端與當前後端 API 架構重新對齊。現在，當偵測到有效金鑰時，頁面將能正確地從 API 獲取可用模型列表，恢復下拉選單的正常功能，讓使用者可以順利啟動 AI 分析任務。
 
@@ -712,7 +730,7 @@
         - 從頭建立了 `tests/` 目錄與 `pytest` 環境。
         - 在 `requirements/core.txt` 和 `requirements/test.txt` 中補齊了所有依賴。
         - 重構了資料庫模組 (`src/db/database.py`)，使其可以透過環境變數支援隔離的測試資料庫。
-        - 撰寫了單元測試 (`test_tools.py`)，並在此過程中發現並修復了 `image_compressor.py` 的一個錯誤。
+        - 撰寫了單元測試 (`test_tools.py`)，並在此過程中發現並修復了 `image_compressor.py` の一個錯誤。
         - 撰寫了整合測試 (`test_integration.py`)，涵蓋了對 DOCX/PDF 處理、以及新的下載器命名邏輯的驗證。
 - **成果**:
     1. 徹底解決了報告無法預覽的問題，從下載、命名、處理到 API 呼叫形成了一個完整的閉環。
