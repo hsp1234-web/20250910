@@ -76,17 +76,16 @@ def run_stage1_task(task_id: int, file_id: int, model_name: str, server_port: in
         gemini = GeminiManager(api_keys=valid_keys)
 
         # 3. 從資料庫獲取檔案內容
-        # 注意：這裡我們需要一個新的 DB 函式來獲取 `extracted_urls` 的內容
-        # 暫時假設有 `get_extracted_url_details`
-        conn = get_db_connection() # 暫時直接連線，理想情況應透過 client
+        # 修正：從 `extracted_text` 欄位獲取由 page3 處理器提取出的真實檔案內文。
+        conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute("SELECT source_text FROM extracted_urls WHERE id = ?", (file_id,))
+        cursor.execute("SELECT extracted_text FROM extracted_urls WHERE id = ?", (file_id,))
         file_data = cursor.fetchone()
         conn.close()
-        if not file_data or not file_data['source_text']:
-            raise ValueError(f"在資料庫中找不到 ID 為 {file_id} 的檔案或其內容為空。")
+        if not file_data or not file_data['extracted_text']:
+            raise ValueError(f"在資料庫中找不到 ID 為 {file_id} 的檔案，或其 'extracted_text' 內容為空。")
 
-        text_content = file_data['source_text']
+        text_content = file_data['extracted_text']
 
         # 4. 執行 AI 資料提取
         prompt = prompt_template.format(document_text=text_content)
