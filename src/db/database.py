@@ -227,7 +227,18 @@ def initialize_database(conn: sqlite3.Connection = None):
                     raise
             # --- 結束 ---
 
-        log.info("✅ 資料庫初始化完成。`tasks`, `system_logs`, `app_state`, `extracted_urls`, `reports` 資料表已存在。")
+            # --- 為 analysis_tasks 表格新增 file_content_for_analysis 欄位 (2025-09-13) ---
+            try:
+                cursor.execute("ALTER TABLE analysis_tasks ADD COLUMN file_content_for_analysis TEXT")
+                log.info("欄位 'file_content_for_analysis' 已成功新增至 'analysis_tasks' 資料表。")
+            except sqlite3.OperationalError as e:
+                if "duplicate column name" in str(e):
+                    pass # 欄位已存在，是正常情況
+                else:
+                    raise # 其他錯誤則需拋出
+            # --- 結束 ---
+
+        log.info("✅ 資料庫初始化完成。`tasks`, `system_logs`, `app_state`, `extracted_urls`, `reports`, `analysis_tasks` 資料表已存在。")
     except sqlite3.Error as e:
         log.error(f"初始化資料庫時發生錯誤: {e}")
     finally:
@@ -607,6 +618,55 @@ def get_analysis_task(task_id: int) -> dict | None:
             conn.close()
 
 # --- 結束：AI 分析任務專用函式 ---
+
+
+# --- 新增：extracted_urls 專用函式 (2025-09-13) ---
+
+def get_url_by_id(url_id: int) -> dict | None:
+    """根據主鍵 ID 獲取單一 URL 紀錄。"""
+    sql = "SELECT * FROM extracted_urls WHERE id = ?"
+    conn = get_db_connection()
+    if not conn: return None
+    try:
+        cursor = conn.cursor()
+        cursor.execute(sql, (url_id,))
+        row = cursor.fetchone()
+        return dict(row) if row else None
+    except sqlite3.Error as e:
+        log.error(f"❌ 查詢 URL ID {url_id} 時發生錯誤: {e}", exc_info=True)
+        return None
+    finally:
+        if conn:
+            conn.close()
+
+def update_url(url_id: int, updates: dict) -> bool:
+    """通用更新函式，用來更新 extracted_urls 表中的特定欄位。"""
+    if not updates:
+        log.warning("呼叫 update_url 時沒有提供任何更新內容。")
+        return False
+
+    conn = get_db_connection()
+    if not conn: return False
+
+    set_clause = ", ".join([f"{key} = ?" for key in updates.keys()])
+    params = list(updates.values())
+    params.append(url_id)
+
+    sql = f"UPDATE extracted_urls SET {set_clause} WHERE id = ?"
+
+    try:
+        with conn:
+            conn.execute(sql, params)
+        log.info(f"✅ URL 紀錄 {url_id} 已更新: {updates}")
+        return True
+    except sqlite3.Error as e:
+        log.error(f"❌ 更新 URL 紀錄 {url_id} 時出錯: {e}", exc_info=True)
+        return False
+    finally:
+        if conn:
+            conn.close()
+
+# --- 結束 ---
 
 
 def add_system_log(source: str, level: str, message: str) -> bool:

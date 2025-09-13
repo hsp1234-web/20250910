@@ -47,32 +47,6 @@
         }
         h1 {
             color: #0056b3;
-            margin-bottom: 20px;
-        }
-        .controls {
-            margin-bottom: 20px;
-            display: flex;
-            gap: 10px;
-        }
-        .copy-button {
-            padding: 10px 20px;
-            background-color: #007bff;
-            color: white;
-            text-decoration: none;
-            border-radius: 5px;
-            transition: background-color 0.2s;
-            font-weight: 500;
-            border: none;
-            cursor: pointer;
-            font-family: inherit;
-            font-size: 1rem;
-        }
-        .copy-button:hover:not(:disabled) {
-            background-color: #0056b3;
-        }
-        .copy-button:disabled {
-            background-color: #6c757d;
-            cursor: not-allowed;
         }
     </style>
 </head>
@@ -92,10 +66,8 @@
 
     <div class="content">
         <h1>JSON 詳細資料</h1>
-        <div class="controls">
-            <a href="/page4" class="back-button">返回 AI 分析頁面</a>
-            <button id="copy-json-button" class="copy-button">複製 JSON</button>
-        </div>
+        <a href="/page4" class="back-button">返回 AI 分析頁面</a>
+        <button id="copy-button" class="copy-button">複製 JSON</button>
 
         <pre id="json-container"><p>正在載入資料...</p></pre>
     </div>
@@ -104,8 +76,6 @@
         document.addEventListener('DOMContentLoaded', async () => {
             const jsonContainer = document.getElementById('json-container');
             const h1 = document.querySelector('h1');
-            const copyJsonButton = document.getElementById('copy-json-button');
-            let jsonContent = null; // 用於儲存 JSON 內容
 
             // 1. 從 URL 獲取 task_id
             const params = new URLSearchParams(window.location.search);
@@ -114,7 +84,6 @@
             if (!taskId) {
                 jsonContainer.textContent = '錯誤：URL 中缺少 task_id 參數。';
                 h1.textContent = '載入失敗';
-                copyJsonButton.disabled = true;
                 return;
             }
 
@@ -140,31 +109,29 @@
                 const data = await response.json();
 
                 // 3. 格式化並顯示 JSON
-                jsonContent = JSON.stringify(data, null, 2);
-                jsonContainer.textContent = jsonContent;
-                copyJsonButton.disabled = false;
+                jsonContainer.textContent = JSON.stringify(data, null, 2);
 
             } catch (error) {
                 console.error('獲取 JSON 資料時發生錯誤:', error);
                 jsonContainer.textContent = `載入資料時發生錯誤。\n\n${error.message}`;
-                copyJsonButton.disabled = true;
             }
 
-            // 4. 複製按鈕邏輯
-            copyJsonButton.addEventListener('click', () => {
-                if (!jsonContent) return;
-
-                navigator.clipboard.writeText(jsonContent).then(() => {
-                    const originalText = copyJsonButton.innerText;
-                    copyJsonButton.innerText = '已複製 ✅';
-                    copyJsonButton.disabled = true;
+            // --- 新增複製按鈕的邏輯 ---
+            const copyButton = document.getElementById('copy-button');
+            copyButton.addEventListener('click', () => {
+                const jsonText = jsonContainer.textContent;
+                navigator.clipboard.writeText(jsonText).then(() => {
+                    // 提供視覺回饋
+                    const originalText = copyButton.textContent;
+                    copyButton.textContent = '已複製 ✅';
+                    copyButton.style.backgroundColor = '#28a745'; // 綠色
                     setTimeout(() => {
-                        copyJsonButton.innerText = originalText;
-                        copyJsonButton.disabled = false;
+                        copyButton.textContent = originalText;
+                        copyButton.style.backgroundColor = ''; // 恢復原樣
                     }, 2000);
                 }).catch(err => {
-                    console.error('無法複製 JSON: ', err);
-                    alert('複製失敗，您的瀏覽器可能不支援或未授予權限。');
+                    console.error('複製失敗:', err);
+                    alert('複製失敗，請手動複製。');
                 });
             });
         });

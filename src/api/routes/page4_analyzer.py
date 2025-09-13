@@ -75,17 +75,13 @@ def run_stage1_task(task_id: int, file_id: int, model_name: str, server_port: in
             raise ValueError("在金鑰池中找不到任何有效的 API 金鑰。")
         gemini = GeminiManager(api_keys=valid_keys)
 
-        # 3. 從資料庫獲取檔案內容
-        # 修正：從 `extracted_text` 欄位獲取由 page3 處理器提取出的真實檔案內文。
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT extracted_text FROM extracted_urls WHERE id = ?", (file_id,))
-        file_data = cursor.fetchone()
-        conn.close()
-        if not file_data or not file_data['extracted_text']:
-            raise ValueError(f"在資料庫中找不到 ID 為 {file_id} 的檔案，或其 'extracted_text' 內容為空。")
+        # 3. 從資料庫獲取檔案內容 (*** 核心邏輯修改 ***)
+        # 新邏輯：直接從 analysis_tasks 表讀取已儲存的檔案內容
+        analysis_task_data = DB_CLIENT.get_analysis_task(task_id=task_id)
+        if not analysis_task_data or not analysis_task_data.get('file_content_for_analysis'):
+            raise ValueError(f"分析任務 {task_id} 中找不到可供分析的檔案內容 (file_content_for_analysis)。")
 
-        text_content = file_data['extracted_text']
+        text_content = analysis_task_data['file_content_for_analysis']
 
         # 4. 執行 AI 資料提取
         prompt = prompt_template.format(document_text=text_content)

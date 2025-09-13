@@ -37,31 +37,82 @@ log = logging.getLogger('url_extractor')
 
 def parse_chat_log(text: str) -> list[dict]:
     """
-    [簡易版] 從給定的文字中，提取所有 http/https 網址。
-    為了讓測試流程可以繼續，此版本放棄了對作者和時間的複雜解析，
-    只專注於提取最關鍵的網址資訊。
+    從給定的 LINE 聊天紀錄文字中，解析出日期、時間、作者和連結。
+    這個實作是根據使用者提供的聊天紀錄範例所設計。
 
-    :param text: 包含網址的來源文字。
+    :param text: 包含 LINE 聊天紀錄的來源文字。
     :return: 一個字典列表，每個字典包含 'date', 'time', 'author', 'url'。
     """
-    # 網址: 匹配 http/https 開頭的 URL
+    # 偵測 LINE 聊天紀錄中的關鍵模式
+    # 1. 日期行: e.g., "2025/5/6（週二）"
+    date_pattern = re.compile(r'(\d{4}/\d{1,2}/\d{1,2})（週.）')
+    # 2. 發言行: e.g., "13:30\t579-0740320Jack" (後面可能還有文字)
+    #    - \t 是定位字元 (tab)
+    #    - 捕捉時間 (HH:MM) 和作者 (直到下一個 \t 或行尾)
+    message_pattern = re.compile(r'^(\d{2}:\d{2})\t([^\t]+)')
+    # 3. 網址: 匹配 http/https 開頭的 URL
     url_pattern = re.compile(r'https?://\S+')
-    urls = url_pattern.findall(text)
 
     results = []
-    for url in urls:
-        # 清理可能跟在 URL 後面的非 URL 字元（例如中文句號）
-        # 這裡我們假設 URL 不會包含非 ASCII 字元
-        cleaned_url = re.match(r'^[!-~]+', url)
-        if cleaned_url:
-            results.append({
-                'date': None,
-                'time': None,
-                'author': "未知作者",
-                'url': cleaned_url.group(0)
-            })
+    current_date = None
+    last_message_info = None
 
-    log.info(f"從文字中解析出 {len(results)} 個網址。")
+    lines = text.split('\n')
+
+    for i, line in enumerate(lines):
+        line = line.strip()
+        if not line:
+            continue
+
+        date_match = date_pattern.match(line)
+        if date_match:
+            # 將 YYYY/M/D 或 YYYY/MM/DD 格式標準化為 YYYY-MM-DD
+            date_parts = date_match.group(1).split('/')
+            current_date = f"{date_parts[0]}-{int(date_parts[1]):02d}-{int(date_parts[2]):02d}"
+            last_message_info = None # 新的一天，重置作者資訊
+            continue
+
+        message_match = message_pattern.match(line)
+        if message_match:
+            time = message_match.group(1)
+            author = message_match.group(2).strip().split('\t')[0] # 再一次確保只取作者名
+
+            # 過濾掉無效的作者/系統訊息
+            if any(keyword in author for keyword in ["加入聊天", "已收回訊息", "退出聊天"]):
+                last_message_info = None
+                continue
+
+            # 暫存作者資訊，因為連結可能在下一行
+            last_message_info = {'time': time, 'author': author}
+
+            # 檢查發言的同一行是否包含網址
+            url_match_in_line = url_pattern.search(line)
+            if url_match_in_line:
+                url = url_match_in_line.group(0)
+                results.append({
+                    'date': current_date,
+                    'time': time,
+                    'author': author,
+                    'url': url
+                })
+                last_message_info = None # 處理完畢，重置以避免重複關聯
+            continue
+
+        # 如果這行不是日期也不是發言，檢查它是否只包含一個網址
+        # 並且緊跟在一個有效的發言者之後
+        # 使用 fullmatch 確保整行就是一個網址，避免誤判包含網址的普通句子
+        url_match = url_pattern.fullmatch(line)
+        if url_match and last_message_info:
+            url = url_match.group(0)
+            results.append({
+                'date': current_date,
+                'time': last_message_info['time'],
+                'author': last_message_info['author'],
+                'url': url
+            })
+            last_message_info = None # 處理完畢，重置
+
+    log.info(f"從聊天紀錄中解析出 {len(results)} 筆有效的作者-網址配對。")
     return results
 
 

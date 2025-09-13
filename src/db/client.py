@@ -151,6 +151,16 @@ class DBClient:
         """
         return self._send_request("get_analysis_task", {"task_id": task_id})
 
+    # --- extracted_urls methods (2025-09-13) ---
+    def get_url_by_id(self, url_id: int) -> dict | None:
+        """根據 ID 獲取單一 URL 紀錄。"""
+        return self._send_request("get_url_by_id", {"url_id": url_id})
+
+    def update_url(self, url_id: int, updates: dict) -> bool:
+        """更新一個 URL 紀錄的特定欄位。"""
+        return self._send_request("update_url", {"url_id": url_id, "updates": updates})
+    # --- 結束 ---
+
     def get_system_logs(self, levels: list[str] = None, sources: list[str] = None) -> list[dict]:
         """
         從資料庫獲取系統日誌，可選擇性地按等級和來源篩選。
