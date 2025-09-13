@@ -133,6 +133,24 @@ class DBClient:
         """
         return self._send_request("get_all_analysis_tasks")
 
+    def create_or_get_analysis_task(self, file_id: int, filename: str) -> dict:
+        """
+        根據 file_id 建立或獲取一個分析任務。
+        """
+        return self._send_request("create_or_get_analysis_task", {"file_id": file_id, "filename": filename})
+
+    def update_analysis_task(self, task_id: int, updates: dict) -> dict:
+        """
+        更新一個分析任務的特定欄位。
+        """
+        return self._send_request("update_analysis_task", {"task_id": task_id, "updates": updates})
+
+    def get_analysis_task(self, task_id: int) -> dict | None:
+        """
+        根據 ID 獲取單一分析任務的詳細資訊。
+        """
+        return self._send_request("get_analysis_task", {"task_id": task_id})
+
     def get_system_logs(self, levels: list[str] = None, sources: list[str] = None) -> list[dict]:
         """
         從資料庫獲取系統日誌，可選擇性地按等級和來源篩選。

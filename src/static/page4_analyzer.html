@@ -78,7 +78,7 @@
         <div class="panel">
             <div class="panel-header">
                 <h2>狀態日誌</h2>
-                <button id="copy-log-button" class="copy-button" title="複製日誌">📄</button>
+                <button id="copy-log-button" class="copy-button" title="複製日誌">複製</button>
             </div>
             <div id="status-area"></div>
         </div>
@@ -230,7 +230,7 @@
 
             const fetchAndRenderModels = async () => {
                 try {
-                    const response = await fetch('/api/analyzer/models');
+                    const response = await fetch('/api/keys/models');
                     if (!response.ok) throw new Error('無法獲取模型列表');
                     const models = await response.json();
                     stage1ModelSelect.innerHTML = '';
@@ -340,6 +340,23 @@
                 if (e.target.id === 'dashboard-select-all') {
                     document.querySelectorAll('.dashboard-checkbox:not(:disabled)').forEach(cb => cb.checked = e.target.checked);
                 }
+            });
+
+            // --- Copy Log Button ---
+            copyLogButton.addEventListener('click', () => {
+                const logContent = statusArea.innerText;
+                navigator.clipboard.writeText(logContent).then(() => {
+                    const originalText = copyLogButton.innerText;
+                    copyLogButton.innerText = '已複製 ✅';
+                    copyLogButton.disabled = true;
+                    setTimeout(() => {
+                        copyLogButton.innerText = originalText;
+                        copyLogButton.disabled = false;
+                    }, 3000);
+                }).catch(err => {
+                    console.error('無法複製日誌: ', err);
+                    logStatus('複製失敗，您的瀏覽器可能不支援或未授予權限。', 'red');
+                });
             });
 
             // --- WebSocket Setup ---
