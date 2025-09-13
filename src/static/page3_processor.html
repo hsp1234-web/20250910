@@ -99,6 +99,15 @@
                 statusArea.insertAdjacentHTML('afterbegin', `<p style="color: ${color};">${timestamp}: ${message}</p>`);
             };
 
+            const translateStatus = (status) => {
+                const statusMap = {
+                    'processed': '處理成功',
+                    'processing_failed': '處理失敗',
+                    'processed_unsupported': '格式不支援'
+                };
+                return statusMap[status] || status;
+            };
+
             const refreshAllLists = () => {
                 fetchAndRenderPendingFiles();
                 fetchAndRenderTerminalFiles();
@@ -149,18 +158,19 @@
                     files.forEach(file => {
                         let statusClass = '';
                         if (file.status === 'processed') statusClass = 'status-completed';
-                        if (file.status === 'processing_failed') statusClass = 'status-error';
+                        else if (file.status === 'processing_failed') statusClass = 'status-error';
+                        else if (file.status === 'processed_unsupported') statusClass = 'status-unsupported';
 
-                        let actions = `<button class="action-btn" data-action="retry" data-id="${file.id}">重試</button>`;
+                        let actions = '';
                         if (file.status === 'processed') {
-                             actions += ` <a href="/report/${file.id}" target="_blank" class="button-link-inline">查看報告</a>`;
+                             actions = `<a href="/report/${file.id}" target="_blank" class="button-link-inline">查看報告</a>`;
                         }
 
                         html += `<tr>
                             <td><input type="checkbox" class="completed-file-checkbox" value="${file.id}"></td>
-                            <td>${file.filename}</td>
-                            <td class="${statusClass}">${file.status}</td>
-                            <td title="${file.status_message || ''}">${(file.status_message || '').substring(0, 50)}...</td>
+                            <td title="${file.filename}">${file.filename}</td>
+                            <td class="${statusClass}">${translateStatus(file.status)}</td>
+                            <td title="${file.status_message || ''}">${(file.status_message || 'N/A')}</td>
                             <td>${actions}</td>
                         </tr>`;
                     });
@@ -225,10 +235,7 @@
             });
 
             completedFileListContainer.addEventListener('click', (e) => {
-                if (e.target.dataset.action === 'retry') {
-                    const id = parseInt(e.target.dataset.id, 10);
-                    resetFilesAPI([id]);
-                } else if (e.target.id === 'completed-select-all') {
+                if (e.target.id === 'completed-select-all') {
                     document.querySelectorAll('.completed-file-checkbox').forEach(cb => cb.checked = e.target.checked);
                 }
             });

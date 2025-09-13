@@ -84,15 +84,6 @@
         </div>
     </div>
 
-    <!-- Modal for JSON/Error details -->
-    <div id="details-modal" class="modal">
-        <div class="modal-content">
-            <span class="close-button">&times;</span>
-            <h3 id="modal-title">詳細資訊</h3>
-            <pre id="modal-body"></pre>
-        </div>
-    </div>
-
     <script>
         document.addEventListener('DOMContentLoaded', () => {
             // --- DOM Element Cache ---
@@ -106,11 +97,6 @@
             const copyLogButton = document.getElementById('copy-log-button');
             const stage1ModelSelect = document.getElementById('stage1-model-select');
             const stage2ModelSelect = document.getElementById('stage2-model-select');
-            // Modal is no longer used for JSON, but might be for other things. Keep it for now.
-            const modal = document.getElementById('details-modal');
-            const modalTitle = document.getElementById('modal-title');
-            const modalBody = document.getElementById('modal-body');
-            const closeModal = document.querySelector('.close-button');
 
             // --- State ---
             let analysisTasks = [];
@@ -126,6 +112,19 @@
             const logStatus = (message, color = 'black') => {
                 const timestamp = new Date().toLocaleTimeString('zh-TW', { hour12: false });
                 statusArea.insertAdjacentHTML('afterbegin', `<p style="color: ${color};">[${timestamp}] ${message}</p>`);
+            };
+
+            const translateStatus = (status) => {
+                if (!status) return 'N/A';
+                const statusMap = {
+                    'pending': '⏳ 等待中',
+                    'processing': '🔄 處理中',
+                    'completed': '✅ 完成',
+                    'failed': '❌ 失敗',
+                    'processed': '可供分析',
+                    'analyzed': '分析完成'
+                };
+                return statusMap[status.toLowerCase()] || status;
             };
 
             // --- Core Render Functions ---
@@ -147,8 +146,8 @@
 
                         html += `<tr>
                                      <td>${checkbox}</td>
-                                     <td>${file.filename}</td>
-                                     <td class="${statusClass}" title="${statusMessage}">${file.status}</td>
+                                     <td title="${file.filename}">${file.filename}</td>
+                                     <td class="${statusClass}" title="${statusMessage}">${translateStatus(file.status)}</td>
                                  </tr>`;
                     });
                     html += '</tbody></table>';
@@ -169,15 +168,21 @@
                     const errorLog = stage === 1 ? task.stage1_error_log : task.stage2_error_log;
                     const model = stage === 1 ? task.stage1_model : task.stage2_model_used;
 
-                    switch (status) {
-                        case 'pending': return `<span class="status-pending">⏳ 等待中</span>`;
-                        case 'processing':
-                            const modelName = model ? ` (${model.replace('models/', '')})` : '';
-                            return `<span class="status-analyzing" title="${model || ''}">🔄 處理中${modelName}...</span>`;
-                        case 'completed': return `<span class="status-analyzed">✅ 完成</span>`;
-                        case 'failed': return `<span class="status-error" title="${errorLog || ''}">❌ 失敗</span>`;
-                        default: return `<span>${status || '未知'}</span>`;
+                    const translatedStatus = translateStatus(status);
+                    let statusClass = '';
+                    if (status) {
+                        if (status.includes('pending')) statusClass = 'status-pending';
+                        else if (status.includes('processing')) statusClass = 'status-analyzing';
+                        else if (status.includes('completed')) statusClass = 'status-analyzed';
+                        else if (status.includes('failed')) statusClass = 'status-error';
                     }
+
+                    let displayText = translatedStatus;
+                    if (status === 'processing' && model) {
+                        displayText = `${translatedStatus} (${model.replace('models/', '')})`
+                    }
+
+                    return `<span class="${statusClass}" title="${errorLog || ''}">${displayText}</span>`;
                 };
 
                 const getActionsHTML = (task) => {
@@ -210,8 +215,8 @@
                 analysisTasks.forEach(task => {
                     const checkboxDisabled = task.stage1_status !== 'completed' || task.stage2_status === 'processing' || task.stage2_status === 'completed';
                     const detailUrl = task.file_hash ? `/static/page8_file_details.html?hash=${task.file_hash}` : '#';
-                    const filenameLink = task.file_hash ? `<a href="${detailUrl}" title="查看檔案總覽">${task.filename}</a>` : task.filename;
-                    const authorLink = task.author ? (task.file_hash ? `<a href="${detailUrl}" title="查看檔案總覽">${task.author}</a>` : task.author) : 'N/A';
+                    const filenameLink = task.file_hash ? `<a href="${detailUrl}" title="${task.filename}">${task.filename}</a>` : `<span title="${task.filename}">${task.filename}</span>`;
+                    const authorLink = task.author ? (task.file_hash ? `<a href="${detailUrl}" title="${task.author}">${task.author}</a>` : `<span title="${task.author}">${task.author}</span>`) : 'N/A';
 
                     const modelInfo = [task.stage1_model, task.stage2_model_used].filter(Boolean).map(m => m.replace('models/', '')).join('<br>');
                     const tokenUsage = (task.stage1_token_usage || 0) + (task.stage2_token_usage || 0);

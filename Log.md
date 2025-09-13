@@ -1,3 +1,37 @@
+## 1038號 - 2025-09-13T20:04:29.917495+08:00
+
+### fix(ui): 移除 AI 分析頁面中無用的彈出視窗元素
+
+- **動機**: 在前一次提交後，使用者指出在「AI 分析」頁面 (`page4_analyzer.html`) 中，殘留了一個舊的、已不再被使用的「詳細資訊」彈出視窗 (modal) 元素。此元素為先前版本遺留的程式碼，目前顯示詳細資訊的功能已改為在表格中動態展開，因此該元素已成為無用的「死碼」。
+- **核心變更**:
+    - **`src/static/page4_analyzer.html`**:
+        - 移除了定義「詳細資訊」彈出視窗的 `<div id="details-modal" ...>` HTML 區塊。
+        - 刪除了 JavaScript 中宣告 `modal`, `modalTitle`, `modalBody`, `closeModal` 等與該彈出視窗相關的、現已無用的變數。
+- **測試與驗證**:
+    - 根據使用者指示，直接提交此修正。
+- **成果**: 清理了前端程式碼，移除了無用的 HTML 和 JavaScript，使 `page4_analyzer.html` 檔案更乾淨、更易於維護。
+
+## 1037號 - 2025-09-13T19:46:13.876563+08:00
+
+### feat(ui): 獨立優化檔案處理與分析儀表板頁面
+
+- **動機**: 使用者反應「檔案處理」(`page3`) 和「AI 分析」(`page4`) 頁面的表格排版混亂、狀態文字未中文化，且在行動裝置上體驗不佳。使用者特別強調，需要對每個頁面進行獨立的視覺和功能優化，而非進行全站的 CSS 架構統一。
+- **核心變更**:
+    - **頁面三 (`page3_processor.html` & `page3.css`)**:
+        - **CSS 優化**: 重寫了 `page3.css`，專門為「已處理/失敗的檔案」表格新增了更清晰、更整齊的樣式，包括適當的間距、對齊以及 hover 效果。
+        - **響應式設計**: 為表格容器新增了 `overflow-x: auto` 屬性，確保在窄螢幕上可以水平捲動，避免版面破壞。同時為長檔名增加了文字截斷 (`text-overflow: ellipsis`) 效果。
+        - **JavaScript 在地化**: 在 `page3_processor.html` 中，新增了 `translateStatus` 函式，將後端回傳的 `processed`, `processing_failed` 等英文狀態，在前端渲染時轉換為「處理成功」、「處理失敗」等繁體中文。
+        - **介面簡化**: 移除了表格中每一行單獨的「重試」按鈕，將重試功能統一由上方的批次處理按鈕執行，使介面更簡潔。同時，確保了「查看報告」連結擁有與按鈕一致的視覺樣式。
+
+    - **頁面四 (`page4_analyzer.html` & `page4.css`)**:
+        - **CSS 優化**: 同樣地，重寫了 `page4.css`，大幅改善了「分析進度儀表板」表格的視覺呈現，修正了先前版本中欄位對齊錯亂的問題。
+        - **響應式設計**: 為儀表板表格也加入了水平捲動和文字截斷樣式，提升了行動裝置的可用性。
+        - **JavaScript 在地化**: 在 `page4_analyzer.html` 中，擴充了 `translateStatus` 函式，使其能處理 `pending`, `processing`, `completed`, `failed` 等多種狀態，確保儀表板中所有狀態都以一致的繁體中文呈現。
+
+- **測試與驗證**:
+    - 根據使用者「由我來告訴你結果」的指示，跳過了本地啟動與手動驗證環節，直接準備提交。
+
+- **成果**: 本次提交精準地、獨立地解決了兩個核心頁面的 UI/UX 問題。在不改動整體架構的前提下，大幅提升了表格的可讀性、操作的直覺性和在行動裝置上的適應性，完全符合使用者對「不用統一，但是需要整齊」的具體要求。
 ## 1036號 - 2025-09-13T18:34:50.436594+08:00
 
 ### feat(core): 修復後端錯誤並全面增強前端體驗
@@ -798,7 +832,7 @@
 
 - **動機**: 使用者回報，在「檔案處理」頁面點擊「開始處理選中項目」時，前端會顯示「請求失敗：Not Found」錯誤，導致功能無法使用。
 - **核心變更**:
-    - **問題分析**: 經調查，前端正確地向 `/api/processor/start_processing` 發起 POST 請求。然而，在後端 `src/api/routes/page3_processor.py` 中，對應的路由被錯誤地定義為 `@router.post("/api/start_processing")`。由於該路由模組已在 `api_server.py` 中被加上了 `/api/processor` 的前綴，這導致實際的端點路徑變成了錯誤的 `/api/processor/api/start_processing`。
+    - **問題分析**: 經調查，前端正確地向 `/api/processor/start_processing` 發起 POST 請求。然而，在後端 `src/api/routes/page3_processor.py` 中，對應的路由被錯誤地定義為 `@router.post("/api/start_processing")`。由於該路由模組已在 `api_server.py` 中被加上了 `/api/processor` の前綴，這導致實際的端點路徑變成了錯誤的 `/api/processor/api/start_processing`。
     - **程式碼修復**:
         - **`src/api/routes/page3_processor.py`**: 將錯誤的路由定義從 `@router.post("/api/start_processing")` 修正為 `@router.post("/start_processing")`，移除了多餘的 `/api` 前綴。
 - **成果**: 此次修復使後端 API 路由與前端的呼叫完全對齊，徹底解決了 404 錯誤，恢復了檔案處理功能。
