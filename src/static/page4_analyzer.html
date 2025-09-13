@@ -249,21 +249,55 @@
                 }
             };
 
+            const populateModelSelector = (selectorId, models) => {
+                const selector = document.getElementById(selectorId);
+                selector.innerHTML = ''; // 清空舊選項
+
+                // 1. 定義優先序
+                const priorityOrder = [
+                    "models/gemini-2.0-flash-lite",
+                    "models/gemini-2.0-flash",
+                    "models/gemini-2.5-flash-lite",
+                    "models/gemini-2.5-flash"
+                ];
+
+                // 2. 排序模型列表
+                const sortedModels = [...models].sort((a, b) => {
+                    let aPriority = priorityOrder.indexOf(a);
+                    let bPriority = priorityOrder.indexOf(b);
+
+                    // 如果模型不在優先序中，給予一個較大的索引值
+                    if (aPriority === -1) aPriority = priorityOrder.length;
+                    if (bPriority === -1) bPriority = priorityOrder.length;
+
+                    if (aPriority !== bPriority) {
+                        return aPriority - bPriority;
+                    }
+
+                    // 對於優先級相同的模型，按字母順序排序
+                    return a.localeCompare(b);
+                });
+
+                // 3. 填充下拉選單
+                sortedModels.forEach((modelName, index) => {
+                    const option = document.createElement('option');
+                    option.value = modelName;
+                    option.textContent = modelName;
+                    // 將排序後的第一個設為預設選中
+                    if (index === 0) {
+                        option.selected = true;
+                    }
+                    selector.appendChild(option);
+                });
+            };
+
             const fetchAndRenderModels = async () => {
                 try {
                     const response = await fetch('/api/keys/models');
                     if (!response.ok) throw new Error('無法獲取模型列表');
                     const models = await response.json();
-                    stage1ModelSelect.innerHTML = '';
-                    stage2ModelSelect.innerHTML = '';
-                    models.forEach(model => {
-                        const option1 = document.createElement('option');
-                        option1.value = option1.textContent = model;
-                        stage1ModelSelect.appendChild(option1);
-                        const option2 = document.createElement('option');
-                        option2.value = option2.textContent = model;
-                        stage2ModelSelect.appendChild(option2);
-                    });
+                    populateModelSelector('stage1-model-select', models);
+                    populateModelSelector('stage2-model-select', models);
                 } catch (error) {
                     logStatus(`模型載入失敗: ${error.message}`, 'red');
                 }

@@ -134,7 +134,13 @@ class GeminiManager:
                     # 嘗試獲取 token 使用量
                     token_usage = 0
                     if hasattr(response, 'usage_metadata') and response.usage_metadata:
-                        token_usage = response.usage_metadata.get('total_tokens', 0)
+                        try:
+                            # 直接存取 total_token_count 屬性
+                            token_usage = response.usage_metadata.total_token_count
+                        except AttributeError:
+                            # 如果 usage_metadata 或 total_token_count 不存在，則設為 0，確保向前相容
+                            log.warning("無法從 response.usage_metadata 中找到 total_token_count 屬性，回退為 0。")
+                            token_usage = 0
 
                     if output_format == 'json':
                         if raw_text.strip().startswith("```json"):

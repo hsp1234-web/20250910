@@ -27,7 +27,73 @@ router = APIRouter()
 class ProcessRequest(BaseModel):
     ids: List[int]
 
+class ResetRequest(BaseModel):
+    ids: List[int]
+
 # --- API 端點 ---
+@router.get("/terminal_files")
+async def get_terminal_files():
+    """獲取所有已進入終端狀態 (processed, processed_unsupported, processing_failed) 的檔案列表。"""
+    log.info("API: 收到獲取所有終端狀態檔案列表的請求。")
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        # 查詢所有已結束處理的狀態
+        cursor.execute("""
+            SELECT id, url, local_path, status, status_message
+            FROM extracted_urls
+            WHERE status IN ('processed', 'processed_unsupported', 'processing_failed')
+            ORDER BY created_at DESC
+        """)
+        rows = cursor.fetchall()
+        results = [
+            {
+                "id": row['id'],
+                "url": row['url'],
+                "filename": Path(row['local_path']).name if row['local_path'] else 'N/A',
+                "status": row['status'],
+                "status_message": row['status_message']
+            }
+            for row in rows
+        ]
+        return JSONResponse(content=results)
+    except Exception as e:
+        log.error(f"API: 獲取終端狀態檔案時發生錯誤: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="獲取終端狀態檔案時發生伺服器內部錯誤。")
+    finally:
+        if conn:
+            conn.close()
+
+
+@router.post("/reset_files")
+async def reset_files(payload: ResetRequest):
+    """將指定 ID 的檔案狀態重設回 'completed'，以便重新處理。"""
+    if not payload.ids:
+        raise HTTPException(status_code=400, detail="未提供要重設的檔案 ID。")
+
+    log.info(f"API: 收到將 {len(payload.ids)} 個檔案狀態重設為 'completed' 的請求。")
+    conn = None
+    try:
+        conn = get_db_connection()
+        with conn:
+            placeholders = ','.join('?' for _ in payload.ids)
+            sql = f"UPDATE extracted_urls SET status = 'completed', status_message = '等待重新處理' WHERE id IN ({placeholders})"
+            cursor = conn.cursor()
+            cursor.execute(sql, payload.ids)
+            if cursor.rowcount == 0:
+                log.warning(f"API: 重設檔案狀態時，沒有任何 ID ({payload.ids}) 被更新。")
+                raise HTTPException(status_code=404, detail="提供的 ID 在資料庫中不存在或無法被重設。")
+            log.info(f"API: 已成功將 {cursor.rowcount} 個檔案的狀態更新為 'completed'。")
+        return JSONResponse(content={"message": f"成功重設 {cursor.rowcount} 個檔案。", "reset_ids": payload.ids})
+    except Exception as e:
+        log.error(f"API: 重設檔案狀態時發生錯誤: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="重設檔案狀態時發生伺服器內部錯誤。")
+    finally:
+        if conn:
+            conn.close()
+
+
 @router.get("/completed_files")
 async def get_completed_files():
     """獲取所有狀態為 'completed' (已下載完成) 的檔案列表。"""
