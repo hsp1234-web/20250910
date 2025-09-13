@@ -72,7 +72,7 @@ def get_all_keys() -> List[Dict[str, Any]]:
         {
             "name": key.get("name", f"Key-{i+1}"),
             "key_hash": key["key_hash"],
-            "is_valid": key.get("is_valid"),
+            "is_valid": key.get("is_valid", False),
             "last_validated": key.get("last_validated")
         } for i, key in enumerate(keys)
     ]
