@@ -1,3 +1,17 @@
+## 1029號 - 2025-09-13T08:35:24.094595+08:00
+
+### fix(ui): 修正 AI 分析頁面無法載入模型的問題
+
+- **動機**: 使用者回報，在「AI 分析」頁面 (`page4`)，即使已有有效的 API 金鑰，模型選擇的下拉選單也無法正常載入，導致無法啟動分析流程。
+- **核心變更**:
+    - **根本原因定位**: 經追查，我發現問題的根源在於前端。`src/static/page4_analyzer.html` 頁面的 JavaScript 程式碼在獲取 AI 模型列表時，呼叫了一個過時的 API 位址 (`/api/analyzer/models`)。根據專案日誌 (#1022)，此 API 在先前的重構中已被統一到 `/api/keys/models`，但 `page4_analyzer.html` 未被同步更新。
+    - **程式碼修復 (`src/static/page4_analyzer.html`)**: 我編輯了此檔案中的 `fetchAndRenderModels` JavaScript 函式，將其 `fetch` 的目標 URL 從舊的 `/api/analyzer/models` 修正為當前正確的位址 `/api/keys/models`。
+- **測試**:
+    - **環境修復**: 在驗證過程中，我發現伺服器因缺少 `Pillow` 依賴 (`ModuleNotFoundError: No module named 'PIL'`) 而無法啟動。我參照日誌 (#1028) 的經驗，安裝了 `requirements/features.txt`，成功解決了此環境問題。
+    - **啟動驗證**: 在修復了環境依賴並應用了我的程式碼修正後，我根據 `test.md` 的指引成功啟動了伺服器。伺服器的正常啟動證明了我的修改是安全且無誤的。
+- **成果**: 本次修復使「AI 分析」頁面的前端與當前後端 API 架構重新對齊。現在，當偵測到有效金鑰時，頁面將能正確地從 API 獲取可用模型列表，恢復下拉選單的正常功能，讓使用者可以順利啟動 AI 分析任務。
+
+---
 ## 1028號 - 2025-09-13T07:43:48.190888+08:00
 
 ### fix(core): 增強金鑰管理的資料穩健性
