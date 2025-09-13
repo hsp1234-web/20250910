@@ -1,85 +1,65 @@
 # -*- coding: utf-8 -*-
 # ╔══════════════════════════════════════════════════════════════════╗
 # ║                                                                      ║
-# ║    ✨🐺 善狼一鍵啟動器 (v23.1) 🐺                                 ✨🐺 ║
+# ║   ✨🐺 善狼一鍵啟動器 (v25) 🐺                                   ✨🐺 ║
 # ║                                                                      ║
 # ╠══════════════════════════════════════════════════════════════════╣
 # ║                                                                      ║
-# ║ - V23.1 更新日誌 (2025-09-10):                                       ║
-# ║   - **啟動優化**: 重構依賴安裝流程，優先載入核心服務，將大型功能套件 ║
-# ║     改為背景安裝，大幅縮短伺服器可見時間。                         ║
-# ║   - **安裝加速**: 新增 `uv` 安裝程序，確保在可用時使用其取代 pip     ║
-# ║     以加速依賴下載。                                               ║
-# ║   - **配置更新**: 將預設分支更新為 `main` 以支援最新 MPA 架構。      ║
+# ║ - V25 更新日誌 (2025-09-14):                                         ║
+# ║   - **介面簡化**: 根據使用者要求，將大部分設定移至程式碼內部，僅保留 ║
+# ║     「後端版本」作為唯一可見選項，大幅簡化使用者介面。               ║
+# ║   - **版本更新**: 更新內部版本號至 v25，預設分支號碼更新為 15。      ║
 # ║                                                                      ║
 # ╚══════════════════════════════════════════════════════════════════╝
 
-#@title ✨🐺 善狼一鍵啟動器 (v23.1) 🐺 { vertical-output: true, display-mode: "form" }
+#@title ✨🐺 善狼一鍵啟動器 (v25) - 極簡版 🐺 { vertical-output: true, display-mode: "form" }
 #@markdown ---
-#@markdown ### **Part 1: 專案與環境設定**
-#@markdown > **設定 Git 倉庫、分支或標籤，以及專案資料夾。**
+#@markdown ### **唯一設定：後端版本**
+#@markdown > **請在此輸入您想使用的後端版本分支或標籤。**
 #@markdown ---
-#@markdown **後端程式碼倉庫 (REPOSITORY_URL)**
-REPOSITORY_URL = "https://github.com/hsp1234-web/20250910.git" #@param {type:"string"}
 #@markdown **後端版本分支或標籤 (TARGET_BRANCH_OR_TAG)**
-TARGET_BRANCH_OR_TAG = "main" #@param {type:"string"}
-#@markdown **專案資料夾名稱 (PROJECT_FOLDER_NAME)**
-PROJECT_FOLDER_NAME = "wolf_project" #@param {type:"string"}
-#@markdown **強制刷新後端程式碼 (FORCE_REPO_REFRESH)**
-FORCE_REPO_REFRESH = True #@param {type:"boolean"}
-
+TARGET_BRANCH_OR_TAG = "15" #@param {type:"string"}
 #@markdown ---
-#@markdown ### **Part 1.5: 通道啟用設定**
-#@markdown > **選擇要啟動的公開存取通道。建議全部啟用以備不時之需。**
-#@markdown ---
-#@markdown **啟用 Colab 官方代理**
-ENABLE_COLAB_PROXY = True #@param {type:"boolean"}
-#@markdown **啟用 Localtunnel**
-ENABLE_LOCALTUNNEL = True #@param {type:"boolean"}
-#@markdown **啟用 Cloudflare**
-ENABLE_CLOUDFLARE = True #@param {type:"boolean"}
-
-#@markdown ---
-#@markdown ### **Part 2: 儀表板與監控設定**
-#@markdown > **設定儀表板的視覺與行為。**
-#@markdown ---
-#@markdown **儀表板更新頻率 (秒) (UI_REFRESH_SECONDS)**
-UI_REFRESH_SECONDS = 0.5 #@param {type:"number"}
-#@markdown **日誌顯示行數 (LOG_DISPLAY_LINES)**
-LOG_DISPLAY_LINES = 10 #@param {type:"integer"}
-#@markdown **時區設定 (TIMEZONE)**
-TIMEZONE = "Asia/Taipei" #@param {type:"string"}
-
-#@markdown ---
-#@markdown ### **Part 3: 日誌等級可見性**
-#@markdown > **勾選您想在儀表板上看到的日誌等級。**
-#@markdown ---
-SHOW_LOG_LEVEL_BATTLE = True #@param {type:"boolean"}
-SHOW_LOG_LEVEL_SUCCESS = True #@param {type:"boolean"}
-SHOW_LOG_LEVEL_INFO = True #@param {type:"boolean"}
-SHOW_LOG_LEVEL_WARN = True #@param {type:"boolean"}
-SHOW_LOG_LEVEL_ERROR = True #@param {type:"boolean"}
-SHOW_LOG_LEVEL_CRITICAL = True #@param {type:"boolean"}
-SHOW_LOG_LEVEL_DEBUG = True #@param {type:"boolean"}
-
-#@markdown ---
-#@markdown ### **Part 4: 報告與歸檔設定**
-#@markdown > **設定在任務結束時如何儲存報告。**
-#@markdown ---
-#@markdown **日誌歸檔資料夾 (LOG_ARCHIVE_ROOT_FOLDER)**
-LOG_ARCHIVE_ROOT_FOLDER = "paper" #@param {type:"string"}
-#@markdown **伺服器就緒等待超時 (秒) (SERVER_READY_TIMEOUT)**
-SERVER_READY_TIMEOUT = 60 #@param {type:"integer"}
-#@markdown **最大日誌複製數量 (LOG_COPY_MAX_LINES)**
-LOG_COPY_MAX_LINES = 5000 #@param {type:"integer"}
-
-
-#@markdown ---
-#@markdown > **設定完成後，點擊此儲存格左側的「執行」按鈕。**
+#@markdown > **設定完成後，點擊「執行」按鈕。**
+#@markdown > **所有其他設定（如 Git 倉庫）均已移至程式碼內部。**
 #@markdown ---
 
 # ==============================================================================
-# SECTION 0: 環境準備與核心依賴導入
+# SECTION A: 進階設定 (可在此處修改)
+# 說明：以下為不常變動的進階設定。若需調整，請直接修改此區塊的變數值。
+# ==============================================================================
+
+# Part 1: 核心專案設定 (固定)
+REPOSITORY_URL = "https://github.com/hsp1234-web/20250910.git"
+PROJECT_FOLDER_NAME = "wolf_project"
+FORCE_REPO_REFRESH = True
+
+# Part 1.5: 通道啟用設定
+ENABLE_COLAB_PROXY = True
+ENABLE_LOCALTUNNEL = True
+ENABLE_CLOUDFLARE = True
+
+# Part 2: 儀表板與監控設定
+UI_REFRESH_SECONDS = 0.5
+LOG_DISPLAY_LINES = 10
+TIMEZONE = "Asia/Taipei"
+
+# Part 3: 日誌等級可見性
+SHOW_LOG_LEVEL_BATTLE = True
+SHOW_LOG_LEVEL_SUCCESS = True
+SHOW_LOG_LEVEL_INFO = True
+SHOW_LOG_LEVEL_WARN = True
+SHOW_LOG_LEVEL_ERROR = True
+SHOW_LOG_LEVEL_CRITICAL = True
+SHOW_LOG_LEVEL_DEBUG = True
+
+# Part 4: 報告與歸檔設定
+LOG_ARCHIVE_ROOT_FOLDER = "paper"
+SERVER_READY_TIMEOUT = 60
+LOG_COPY_MAX_LINES = 5000
+
+# ==============================================================================
+# SECTION 0: 環境準備與核心依賴導入 (此處開始為核心程式，通常無需修改)
 # ==============================================================================
 import sys
 import subprocess
@@ -152,7 +132,7 @@ class DisplayManager:
         self._thread = threading.Thread(target=self._run, daemon=True)
 
     def _build_output_buffer(self) -> list[str]:
-        output_buffer = ["✨🐺 善狼一鍵啟動器 (v21.1) 🐺", ""]
+        output_buffer = ["✨🐺 善狼一鍵啟動器 (v25) 🐺", ""]
         logs_to_display = self._log_manager.get_display_logs()
         for log in logs_to_display:
             ts = log['timestamp'].strftime('%H:%M:%S')
@@ -256,6 +236,27 @@ class ServerManager:
             from db.database import initialize_database, add_system_log
             initialize_database()
             add_system_log("colab_setup", "INFO", "Git repository cloned successfully.")
+
+            # --- 自動從 Colab Secrets 載入金鑰 ---
+            self._log_manager.log("INFO", "正在嘗試從 Colab Secrets 自動載入 API 金鑰...")
+            key_loader_script = project_path / "scripts" / "load_keys_from_colab.py"
+            if key_loader_script.is_file():
+                try:
+                    key_loader_command = [sys.executable, str(key_loader_script.resolve())]
+                    # 使用 Popen 以便即時讀取輸出
+                    process = subprocess.Popen(key_loader_command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8')
+                    for line in iter(process.stdout.readline, ''):
+                        self._log_manager.log("INFO", line.strip(), "KeyLoader")
+                    process.wait()
+                    if process.returncode == 0:
+                        self._log_manager.log("SUCCESS", "✅ 金鑰載入腳本執行完畢。")
+                    else:
+                        self._log_manager.log("WARN", f"金鑰載入腳本執行結束，但返回碼為 {process.returncode}。")
+                except Exception as e:
+                    self._log_manager.log("ERROR", f"執行金鑰載入腳本時發生錯誤: {e}")
+            else:
+                self._log_manager.log("WARN", "未找到金鑰載入腳本 'scripts/load_keys_from_colab.py'，跳過自動載入。")
+            # --- 金鑰載入結束 ---
 
             # --- JULES: 重構為兩階段依賴安裝 ---
             use_uv = self._ensure_uv_installed()
