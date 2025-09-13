@@ -34,6 +34,7 @@ TEMP_JSON_DIR.mkdir(exist_ok=True)
 REPORTS_DIR.mkdir(exist_ok=True)
 
 import asyncio
+import functools
 
 # --- Pydantic 模型 ---
 class Stage1Request(BaseModel):
@@ -164,7 +165,18 @@ async def run_analysis_task_wrapper(task_id: int, server_port: int, semaphore: a
         loop = asyncio.get_running_loop()
         try:
             # 在執行器中運行阻塞函式
-            await loop.run_in_executor(None, blocking_func, task_id=task_id, server_port=server_port, **kwargs)
+            # 說明：loop.run_in_executor 不接受關鍵字參數來傳遞給目標函式。
+            # 正確的作法是使用 functools.partial 將函式與其所有參數（包括關鍵字參數）綁定在一起，
+            # 產生一個無參數的可呼叫物件，再交給 run_in_executor 執行。
+
+            # 準備傳遞給 blocking_func 的參數，移除 wrapper 自身使用的 'stage' 參數
+            func_kwargs = kwargs.copy()
+            func_kwargs.pop('stage', None)
+
+            # 建立 partial 函式
+            partial_func = functools.partial(blocking_func, task_id=task_id, server_port=server_port, **func_kwargs)
+
+            await loop.run_in_executor(None, partial_func)
         except Exception as e:
              # 這裡的錯誤應該已經在阻塞函式內部處理過了，但為了保險起見
             log.error(f"包裝函式捕獲到未預期的錯誤 (任務 {task_id}): {e}", exc_info=True)
