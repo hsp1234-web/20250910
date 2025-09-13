@@ -230,3 +230,10 @@ button:hover {
     white-space: pre-wrap; /* Allows long text to wrap */
     word-break: break-all;
 }
+
+/* 修正複製按鈕顏色，確保其在淺色背景下清晰可見 */
+#copy-log-button {
+    color: #000000; /* 設定為黑色以提供足夠的對比度 */
+    font-size: 1rem; /* 調整為與周圍文字更協調的大小 */
+    background-color: transparent; /* 確保背景透明 */
+}

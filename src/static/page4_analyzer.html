@@ -283,6 +283,8 @@
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({ file_ids: selectedIds, model_name: modelName })
                 });
+                // 立即刷新儀表板以顯示新任務
+                fetchAnalysisStatus();
             });
 
             startStage2Btn.addEventListener('click', async () => {
