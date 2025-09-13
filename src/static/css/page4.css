@@ -1,263 +1,221 @@
-/* src/static/css/page4.css */
+/* src/static/css/page4.css - Refactored for Page 4 specific enhancements */
+
+/* --- 變數與基本設定 --- */
+:root {
+    --primary-color: #007bff;
+    --primary-hover: #0056b3;
+    --success-color: #28a745;
+    --error-color: #dc3545;
+    --pending-color: #ffc107; /* Yellow for pending */
+    --processing-color: #6f42c1; /* Purple for processing */
+    --link-color: #007bff;
+    --border-color: #dee2e6;
+    --card-bg: #ffffff;
+    --body-bg: #f8f9fa;
+    --text-color: #343a40;
+    --text-light: #6c757d;
+}
 
 body {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     margin: 0;
     padding: 0;
-    background-color: #f8f9fa;
-    color: #343a40;
-}
-
-.page-header {
-    background-color: #ffffff;
-    padding: 15px 20px;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-    text-align: center;
-    position: sticky;
-    top: 0;
-    z-index: 999;
-}
-
-.back-to-menu {
-    text-decoration: none;
-    color: #007bff;
-    font-size: 16px;
-    font-weight: 500;
-}
-
-.back-to-menu:hover {
-    text-decoration: underline;
+    background-color: var(--body-bg);
+    color: var(--text-color);
 }
 
 .content {
     padding: 20px;
-    max-width: 700px;
+    max-width: 1200px; /* Wider for better table display */
     margin: 20px auto;
-    background: #fff;
+}
+
+.panel {
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
     border-radius: 8px;
+    padding: 20px;
+    margin-bottom: 20px;
     box-shadow: 0 4px 8px rgba(0,0,0,0.05);
 }
 
-h1 {
+.panel-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 15px;
+}
+
+h1, h2 {
     color: #0056b3;
+    margin-top: 0;
+}
+
+button, .button-link {
+    padding: 10px 20px;
+    font-size: 1em;
+    color: #fff;
+    background-color: var(--primary-color);
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    transition: background-color 0.3s;
+    margin-right: 10px;
+    margin-top: 5px;
+    text-decoration: none;
+}
+
+button:hover:not(:disabled), .button-link:hover {
+    background-color: var(--primary-hover);
+}
+
+button:disabled {
+    background-color: #cccccc;
+    cursor: not-allowed;
 }
 
 .form-group {
-    margin-bottom: 20px;
+    margin-bottom: 15px;
 }
 
 label {
     display: block;
-    margin-bottom: 8px;
+    margin-bottom: 5px;
     font-weight: 500;
 }
 
-select, input[type="password"] {
+select {
     width: 100%;
-    padding: 12px;
-    border: 1px solid #ced4da;
+    padding: 10px;
     border-radius: 4px;
-    font-size: 16px;
-    box-sizing: border-box;
+    border: 1px solid #ced4da;
 }
 
-select:disabled {
+/* --- Responsive Table Container --- */
+#file-list-container, #analysis-dashboard-container {
+    overflow-x: auto; /* Key for mobile responsiveness */
+}
+
+/* --- Refactored Table Styles --- */
+.results-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 15px;
+    min-width: 1000px; /* Ensure table has a minimum width before scrolling */
+}
+
+.results-table th, .results-table td {
+    padding: 12px 15px;
+    border: 1px solid var(--border-color);
+    text-align: left;
+    vertical-align: middle; /* Better vertical alignment */
+}
+
+.results-table thead {
     background-color: #e9ecef;
 }
 
-/* The main action button should be full width */
-button#start-analysis-btn {
-    padding: 12px 25px;
-    font-size: 1.1em;
-    color: #fff;
-    background-color: #007bff;
-    border: none;
-    border-radius: 5px;
-    cursor: pointer;
-    transition: background-color 0.3s;
-    width: 100%;
+.results-table th {
+    font-weight: 600;
+    white-space: nowrap; /* Prevent headers from wrapping */
 }
 
-/* All other buttons should not be full-width and have a different style */
-button {
-    padding: 8px 16px;
-    font-size: 1em;
-    color: #fff;
-    background-color: #007bff;
-    border: none;
-    border-radius: 5px;
-    cursor: pointer;
-    transition: background-color 0.3s;
-    /* width: 100% is removed */
+.results-table tbody tr:nth-of-type(odd) {
+    background-color: #f8f9fa;
 }
 
-
-button:hover {
-    background-color: #0056b3;
+.results-table tbody tr:hover {
+    background-color: #e2e6ea;
 }
 
-#analysis-status {
-    margin-top: 20px;
-    font-weight: bold;
-    padding: 10px;
-    border-radius: 5px;
-    text-align: center;
-}
-
-.management-links {
-    display: flex;
-    gap: 15px;
-    margin-bottom: 25px;
-    padding-bottom: 20px;
-    border-bottom: 1px solid #eee;
-}
-
-.button-link {
-    display: inline-block;
-    flex-grow: 1;
-    text-align: center;
-    padding: 12px;
-    text-decoration: none;
-    color: white;
-    background-color: #6c757d;
-    border-radius: 5px;
-    font-weight: 500;
-    transition: background-color 0.2s;
-}
-
-.button-link:hover {
-    background-color: #5a6268;
-}
-
-/* --- New Styles for Status Spans and Action Buttons --- */
-
-/* Status Badge Styles */
-.status-processed, .status-analyzing, .status-analyzed, .status-error {
-    padding: 3px 8px;
-    border-radius: 12px;
-    font-size: 0.85em;
-    font-weight: bold;
-    color: white;
+/* --- Text Overflow Handling --- */
+.results-table td:nth-child(2) a, /* Filename link */
+.results-table td:nth-child(3) a { /* Author link */
+    display: block;
+    max-width: 250px; /* Adjust width as needed */
     white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: var(--link-color);
+    text-decoration: none;
+}
+.results-table td:nth-child(2) a:hover,
+.results-table td:nth-child(3) a:hover {
+    text-decoration: underline;
 }
 
-.status-processed { background-color: #17a2b8; } /* Info Blue */
-.status-analyzing { background-color: #6f42c1; } /* Purple */
-.status-analyzed { background-color: #28a745; }  /* Success Green */
-.status-error { background-color: #dc3545; }   /* Danger Red */
-.status-retry { background-color: #fd7e14; }   /* Orange */
 
-/* --- 提升儀表板 UI/UX --- */
+/* --- Status Badge Styles --- */
+.status-pending { color: var(--pending-color); }
+.status-analyzing { color: var(--processing-color); }
+.status-analyzed, .status-completed { color: var(--success-color); }
+.status-error { color: var(--error-color); }
 
-/* 設定表格欄位最小寬度，讓排版更整齊 */
-.results-table td:nth-child(2) { /* 檔案名稱 */
-    min-width: 300px;
-}
-.results-table td:nth-child(3) { /* 作者 */
-    min-width: 120px;
-}
-
-/* 統一定義操作按鈕的基礎樣式 */
+/* --- Action Button Styles --- */
 .action-btn {
+    display: inline-block;
     padding: 5px 10px;
     font-size: 0.9em;
-    margin: 0 2px;
-    cursor: pointer;
+    font-weight: 500;
+    text-align: center;
+    text-decoration: none;
+    color: #fff;
     border: none;
     border-radius: 4px;
-    color: white;
+    cursor: pointer;
     transition: opacity 0.2s;
-    text-decoration: none; /* 統一樣式，也適用於 <a> 標籤 */
-    display: inline-block; /* 確保 <a> 標籤能正確顯示 padding 和 margin */
+    margin: 2px;
 }
 
 .action-btn:hover {
-    opacity: 0.8;
+    opacity: 0.85;
 }
 
-/* 美化操作按鈕，根據您的建議配色 */
-.btn-view {
-    background-color: #007bff; /* 藍色 */
-}
+.btn-view { background-color: var(--primary-color); }
+.btn-report { background-color: var(--success-color); }
+.btn-log { background-color: var(--text-light); }
+.btn-retry { background-color: var(--processing-color); }
 
-.btn-retry {
-    background-color: #6f42c1; /* 紫色 */
+/* --- Log Details in Table --- */
+.details-row td {
+    padding: 0 !important;
+    background-color: #f1f3f5 !important;
 }
-
-.btn-log {
-    background-color: #6c757d; /* 灰色 */
-}
-
-.btn-report {
-    background-color: #28a745; /* 綠色 */
-}
-
-/* Styles for new reports table */
-.model-tag {
-    background-color: #6c757d;
-    color: white;
-    padding: 3px 8px;
-    border-radius: 12px;
-    font-size: 0.85em;
-    font-weight: bold;
-}
-
-.button-link-inline {
-    display: inline-block;
-    padding: 5px 10px;
-    font-size: 0.9em;
-    color: #fff;
-    background-color: #007bff;
-    border-radius: 4px;
-    text-decoration: none;
-    margin: 0 2px;
-    transition: opacity 0.2s;
-}
-.button-link-inline:hover {
-    opacity: 0.8;
-}
-
-.view-details-btn {
-    background-color: #28a745;
-}
-
-/* Styles for expanded JSON details view */
-.json-details-container {
+.log-details {
     padding: 15px;
-    background-color: #f8f9fa;
-    border-top: 2px solid #dee2e6;
-}
-
-.json-details-container h3 {
-    margin-top: 0;
-    color: #495057;
-}
-
-.json-table {
-    width: 100%;
-    border-collapse: collapse;
-    background-color: #fff;
-}
-.json-table th, .json-table td {
-    border: 1px solid #dee2e6;
-    padding: 8px;
-    text-align: left;
-    vertical-align: top;
+    background-color: #212529;
+    color: #f8f9fa;
     font-family: monospace;
-}
-.json-table th {
-    width: 25%;
-    background-color: #e9ecef;
-    font-weight: bold;
-}
-.json-table td {
-    white-space: pre-wrap; /* Allows long text to wrap */
+    white-space: pre-wrap;
     word-break: break-all;
 }
+.log-details pre {
+    margin: 0;
+}
 
-/* 修正複製按鈕顏色，確保其在淺色背景下清晰可見 */
-#copy-log-button {
-    color: #000000; /* 設定為黑色以提供足夠的對比度 */
-    font-size: 1rem; /* 調整為與周圍文字更協調的大小 */
-    background-color: transparent; /* 確保背景透明 */
+/* --- Status Log --- */
+#status-area {
+    margin-top: 20px;
+    border: 1px solid #ccc;
+    padding: 15px;
+    min-height: 100px;
+    max-height: 300px;
+    overflow-y: auto;
+    background: #ffffff;
+    color: #000000;
+    border-radius: 5px;
+    white-space: pre-wrap;
+    font-family: "Courier New", Courier, monospace;
+    font-size: 14px;
+}
+
+#status-area p {
+    margin: 0 0 5px 0;
+    padding: 0;
+}
+
+.copy-button {
+    font-size: 0.8em;
+    padding: 5px 10px;
+    background-color: var(--text-light);
 }

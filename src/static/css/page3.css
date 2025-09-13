@@ -1,58 +1,61 @@
-/* src/static/css/page3.css */
+/* src/static/css/page3.css - Refactored for Page 3 specific enhancements */
+
+/* --- 變數與基本設定 --- */
+:root {
+    --primary-color: #007bff;
+    --primary-hover: #0056b3;
+    --success-color: #28a745;
+    --error-color: #dc3545;
+    --unsupported-color: #6c757d; /* Grey for unsupported */
+    --pending-color: #ffc107; /* Yellow for pending */
+    --link-color: #007bff;
+    --border-color: #dee2e6;
+    --card-bg: #ffffff;
+    --body-bg: #f8f9fa;
+    --text-color: #343a40;
+    --text-light: #6c757d;
+}
 
 body {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     margin: 0;
     padding: 0;
-    background-color: #f8f9fa;
-    color: #343a40;
-}
-
-.page-header {
-    background-color: #ffffff;
-    padding: 15px 20px;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-    text-align: center;
-    position: sticky;
-    top: 0;
-    z-index: 999;
-}
-
-.back-to-menu {
-    text-decoration: none;
-    color: #007bff;
-    font-size: 16px;
-    font-weight: 500;
-}
-
-.back-to-menu:hover {
-    text-decoration: underline;
+    background-color: var(--body-bg);
+    color: var(--text-color);
 }
 
 .content {
     padding: 20px;
-    max-width: 900px;
+    max-width: 1200px; /* Wider for better table display */
     margin: 20px auto;
 }
 
 .panel {
-    background: #ffffff;
-    border: 1px solid #dee2e6;
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
     border-radius: 8px;
     padding: 20px;
     margin-bottom: 20px;
     box-shadow: 0 4px 8px rgba(0,0,0,0.05);
 }
 
+.panel-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 15px;
+}
+
 h1, h2 {
     color: #0056b3;
+    margin-top: 0;
 }
 
 button {
     padding: 10px 20px;
     font-size: 1em;
     color: #fff;
-    background-color: #007bff;
+    background-color: var(--primary-color);
     border: none;
     border-radius: 5px;
     cursor: pointer;
@@ -61,8 +64,8 @@ button {
     margin-top: 5px;
 }
 
-button:hover {
-    background-color: #0056b3;
+button:hover:not(:disabled) {
+    background-color: var(--primary-hover);
 }
 
 button:disabled {
@@ -75,7 +78,7 @@ button:disabled {
     padding: 0;
     max-height: 400px;
     overflow-y: auto;
-    border: 1px solid #dee2e6;
+    border: 1px solid var(--border-color);
     border-radius: 5px;
 }
 
@@ -95,6 +98,79 @@ button:disabled {
     margin-right: 10px;
 }
 
+/* --- Responsive Table Container --- */
+#completed-file-list-container {
+    overflow-x: auto; /* Key for mobile responsiveness */
+}
+
+/* --- Refactored Table Styles --- */
+.results-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 15px;
+    min-width: 800px; /* Ensure table has a minimum width before scrolling */
+}
+
+.results-table th, .results-table td {
+    padding: 12px 15px;
+    border: 1px solid var(--border-color);
+    text-align: left;
+    vertical-align: middle; /* Better vertical alignment */
+}
+
+.results-table thead {
+    background-color: #e9ecef;
+}
+
+.results-table th {
+    font-weight: 600;
+}
+
+.results-table tbody tr:nth-of-type(odd) {
+    background-color: #f8f9fa;
+}
+
+.results-table tbody tr:hover {
+    background-color: #e2e6ea;
+}
+
+/* --- Text Overflow Handling --- */
+.results-table td:nth-child(2), /* Filename */
+.results-table td:nth-child(4) { /* Details */
+    max-width: 350px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* --- Status Badge Styles --- */
+.status-completed { color: var(--success-color); font-weight: bold; }
+.status-error { color: var(--error-color); font-weight: bold; }
+.status-unsupported { color: var(--unsupported-color); font-weight: bold; }
+
+/* --- Action Button & Link Styles --- */
+.action-btn, .button-link-inline {
+    display: inline-block;
+    padding: 6px 12px;
+    font-size: 0.9em;
+    font-weight: 500;
+    text-align: center;
+    text-decoration: none;
+    color: #fff;
+    background-color: var(--primary-color);
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    transition: all 0.2s;
+    margin-right: 5px;
+}
+
+.action-btn:hover, .button-link-inline:hover {
+    background-color: var(--primary-hover);
+    color: #fff;
+}
+
+/* --- Status Log --- */
 #status-area {
     margin-top: 20px;
     border: 1px solid #ccc;
@@ -115,49 +191,8 @@ button:disabled {
     padding: 0;
 }
 
-/* --- 已處理報告列表樣式 --- */
-.processed-list {
-    list-style-type: none; /* 移除預設的圓點 */
-    padding: 0;
-    margin: 0;
-    border: 1px solid #dee2e6;
-    border-radius: 5px;
-    overflow: hidden; /* 確保子元素的圓角正確顯示 */
-}
-
-.processed-item {
-    display: flex;
-    justify-content: space-between; /* 將檔名和按鈕推到兩側 */
-    align-items: center; /* 垂直置中 */
-    padding: 12px 15px;
-    border-bottom: 1px solid #eee;
-}
-
-.processed-item:last-child {
-    border-bottom: none;
-}
-
-/* 檔名樣式 */
-.processed-item span {
-    flex-grow: 1; /* 讓檔名佔用多餘空間 */
-    margin-right: 15px; /* 與按鈕之間保持距離 */
-    word-break: break-all; /* 長檔名自動換行 */
-}
-
-/* 查看報告按鈕樣式 */
-.processed-item .view-button {
-    flex-shrink: 0; /* 防止按鈕被壓縮 */
-    text-decoration: none;
-    color: #007bff;
-    font-weight: 500;
+.copy-button {
+    font-size: 0.8em;
     padding: 5px 10px;
-    border: 1px solid #007bff;
-    border-radius: 5px;
-    transition: all 0.2s ease-in-out;
-}
-
-.processed-item .view-button:hover {
-    background-color: #007bff;
-    color: #fff;
-    text-decoration: none;
+    background-color: var(--text-light);
 }
