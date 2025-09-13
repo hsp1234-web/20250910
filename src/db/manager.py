@@ -69,6 +69,8 @@ ACTION_MAP = {
     "update_analysis_task": database.update_analysis_task,
     "get_all_analysis_tasks": database.get_all_analysis_tasks,
     "get_analysis_task": database.get_analysis_task,
+    "get_urls_by_hash": database.get_urls_by_hash,
+    "get_analysis_task_by_file_id": database.get_analysis_task_by_file_id,
 
     # --- extracted_urls Actions (2025-09-13) ---
     "get_url_by_id": database.get_url_by_id,

@@ -148,7 +148,7 @@ async def add_server_port_to_state(request: Request, call_next):
 
 
 # --- 整合模組化路由 ---
-from api.routes import ui, page1_ingestion, page2_downloader, page3_processor, page4_analyzer, page5_backup, page6_keys, page7_prompts
+from api.routes import ui, page1_ingestion, page2_downloader, page3_processor, page4_analyzer, page5_backup, page6_keys, page7_prompts, page8_details
 
 # UI 路由 (提供 HTML 頁面)
 app.include_router(ui.router, tags=["UI"])
@@ -161,6 +161,7 @@ app.include_router(page4_analyzer.router, prefix="/api/analyzer", tags=["API: AI
 app.include_router(page5_backup.router, prefix="/api/backup", tags=["API: 備份管理"])
 app.include_router(page6_keys.router, prefix="/api/keys", tags=["API: 金鑰管理"])
 app.include_router(page7_prompts.router, prefix="/api/prompts", tags=["API: 提示詞管理"])
+app.include_router(page8_details.router, prefix="/api", tags=["API: 檔案總覽"])
 
 # --- 路徑設定 ---
 # 新的上傳檔案儲存目錄

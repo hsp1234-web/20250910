@@ -578,10 +578,22 @@ def update_analysis_task(task_id: int, updates: dict) -> bool:
 
 def get_all_analysis_tasks() -> list[dict]:
     """
-    獲取所有 AI 分析任務的列表。
+    獲取所有 AI 分析任務的列表，並連帶查詢關聯的 file_hash 和 author。
     :return: 一個包含所有分析任務字典的列表。
     """
-    sql = "SELECT * FROM analysis_tasks ORDER BY created_at DESC"
+    # 2025-09-13: Jules 修改了 SQL 查詢，以 JOIN extracted_urls 來獲取 file_hash 和 author
+    sql = """
+        SELECT
+            at.*,
+            eu.file_hash,
+            eu.author
+        FROM
+            analysis_tasks at
+        LEFT JOIN
+            extracted_urls eu ON at.file_id = eu.id
+        ORDER BY
+            at.created_at DESC
+    """
     conn = get_db_connection()
     if not conn: return []
     try:
@@ -662,6 +674,45 @@ def update_url(url_id: int, updates: dict) -> bool:
     except sqlite3.Error as e:
         log.error(f"❌ 更新 URL 紀錄 {url_id} 時出錯: {e}", exc_info=True)
         return False
+    finally:
+        if conn:
+            conn.close()
+
+# --- 結束 ---
+
+
+# --- 新增：檔案總覽頁面專用函式 (2025-09-13) ---
+
+def get_urls_by_hash(file_hash: str) -> list[dict]:
+    """根據檔案雜湊值獲取所有相關的 URL 紀錄。"""
+    sql = "SELECT * FROM extracted_urls WHERE file_hash = ? ORDER BY created_at ASC"
+    conn = get_db_connection()
+    if not conn: return []
+    try:
+        cursor = conn.cursor()
+        cursor.execute(sql, (file_hash,))
+        rows = cursor.fetchall()
+        return [dict(row) for row in rows]
+    except sqlite3.Error as e:
+        log.error(f"❌ 根據 hash {file_hash} 查詢 URLs 時發生錯誤: {e}", exc_info=True)
+        return []
+    finally:
+        if conn:
+            conn.close()
+
+def get_analysis_task_by_file_id(file_id: int) -> dict | None:
+    """根據 file_id 獲取單一分析任務。"""
+    sql = "SELECT * FROM analysis_tasks WHERE file_id = ?"
+    conn = get_db_connection()
+    if not conn: return None
+    try:
+        cursor = conn.cursor()
+        cursor.execute(sql, (file_id,))
+        task = cursor.fetchone()
+        return dict(task) if task else None
+    except sqlite3.Error as e:
+        log.error(f"❌ 根據 file_id {file_id} 查詢分析任務時發生錯誤: {e}", exc_info=True)
+        return None
     finally:
         if conn:
             conn.close()

@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>頁面八：檔案總覽</title>
+    <link rel="stylesheet" href="/static/css/nav.css">
+    <link rel="stylesheet" href="/static/css/common.css">
+    <link rel="stylesheet" href="/static/css/page8.css">
+</head>
+<body>
+    <nav class="top-nav">
+        <ul>
+            <li><a href="/">鳳凰主頁</a></li>
+            <li><a href="/page1">網址提取</a></li>
+            <li><a href="/page2">批次下載</a></li>
+            <li><a href="/page3">檔案處理</a></li>
+            <li><a href="/page4">AI 分析</a></li>
+            <li><a href="/page5">備份管理</a></li>
+            <li><a href="/page6">金鑰管理</a></li>
+            <li><a href="/page7">提示詞管理</a></li>
+            <!-- This page is not in the main nav, it's accessed via links -->
+        </ul>
+    </nav>
+
+    <div class="content">
+        <div class="panel">
+            <h1>檔案總覽</h1>
+            <div id="details-container">
+                <p>正在載入檔案詳細資訊...</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const detailsContainer = document.getElementById('details-container');
+
+            const getStatusHTML = (status) => {
+                if (!status) return `<span class="status-pending">未開始</span>`;
+                switch (status.toLowerCase()) {
+                    case 'pending': return `<span class="status-pending">⏳ 等待中</span>`;
+                    case 'downloading': return `<span class="status-downloading">📥 下載中</span>`;
+                    case 'completed': return `<span class="status-completed">✅ 已完成</span>`;
+                    case 'processing': return `<span class="status-processing">🔄 處理中</span>`;
+                    case 'processed': return `<span class="status-completed">✅ 已處理</span>`;
+                    case 'analyzed': return `<span class="status-completed">✅ 已分析</span>`;
+                    case 'failed': return `<span class="status-failed">❌ 失敗</span>`;
+                    case 'error': return `<span class="status-error">❌ 錯誤</span>`;
+                    default: return `<span>${status}</span>`;
+                }
+            };
+
+            const formatTaipeiTime = (isoString) => {
+                if (!isoString) return 'N/A';
+                try {
+                    return new Date(isoString).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei', hour12: false }).replace(/\//g, '-');
+                } catch (e) { return '時間格式錯誤'; }
+            };
+
+            const renderDetails = (data) => {
+                const { file_hash, primary_record, all_occurrences, analysis_task } = data;
+
+                // --- 渲染所有出現紀錄的表格 ---
+                let occurrencesHtml = '<p>無</p>';
+                if (all_occurrences && all_occurrences.length > 0) {
+                    occurrencesHtml = `
+                        <table class="occurrences-table">
+                            <thead>
+                                <tr>
+                                    <th>作者</th>
+                                    <th>訊息日期</th>
+                                    <th>訊息時間</th>
+                                    <th>原始網址</th>
+                                    <th>下載狀態</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${all_occurrences.map(occ => `
+                                    <tr>
+                                        <td>${occ.author || 'N/A'}</td>
+                                        <td>${occ.message_date || 'N/A'}</td>
+                                        <td>${occ.message_time || 'N/A'}</td>
+                                        <td><a href="${occ.url}" target="_blank">查看原始連結</a></td>
+                                        <td>${getStatusHTML(occ.status)}</td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    `;
+                }
+
+                // --- 渲染 AI 分析結果 ---
+                let stage1Html = getStatusHTML(analysis_task ? analysis_task.stage1_status : 'pending');
+                if (analysis_task && analysis_task.stage1_status === 'completed' && analysis_task.stage1_json_path) {
+                    const jsonViewerUrl = `/static/json_viewer.html?path=${encodeURIComponent(analysis_task.stage1_json_path)}`;
+                    stage1Html += ` <a href="${jsonViewerUrl}" target="_blank" class="button-link-inline">查看 JSON</a>`;
+                } else if (analysis_task && analysis_task.stage1_status === 'failed') {
+                    stage1Html += `<br><small style="color: #dc3545;">${analysis_task.stage1_error_log || '無詳細錯誤資訊'}</small>`;
+                }
+
+                let stage2Html = getStatusHTML(analysis_task ? analysis_task.stage2_status : 'pending');
+                 if (analysis_task && analysis_task.stage2_status === 'completed' && analysis_task.stage2_report_path) {
+                    const reportFilename = analysis_task.stage2_report_path.split(/[\\/]/).pop();
+                    const reportUrl = `/reports/${reportFilename}`;
+                    stage2Html += ` <a href="${reportUrl}" target="_blank" class="button-link-inline">查看報告</a>`;
+                } else if (analysis_task && analysis_task.stage2_status === 'failed') {
+                     stage2Html += `<br><small style="color: #dc3545;">${analysis_task.stage2_error_log || '無詳細錯誤資訊'}</small>`;
+                }
+
+
+                // --- 渲染主表格 ---
+                const mainHtml = `
+                    <table class="details-table">
+                        <tbody>
+                            <tr>
+                                <th>檔案雜湊 (Hash)</th>
+                                <td><pre>${file_hash}</pre></td>
+                            </tr>
+                            <tr>
+                                <th>原始檔名</th>
+                                <td>${primary_record.local_path ? primary_record.local_path.split(/[\\/]/).pop() : 'N/A'}</td>
+                            </tr>
+                            <tr>
+                                <th>首次出現時間</th>
+                                <td>${formatTaipeiTime(primary_record.created_at)}</td>
+                            </tr>
+                            <tr>
+                                <th>首次出現作者</th>
+                                <td>${primary_record.author || 'N/A'}</td>
+                            </tr>
+                            <tr>
+                                <th>下載後的本地路徑</th>
+                                <td>${primary_record.local_path || 'N/A'}</td>
+                            </tr>
+                             <tr>
+                                <th>所有出現紀錄</th>
+                                <td>${occurrencesHtml}</td>
+                            </tr>
+                            <tr>
+                                <th>AI 分析 - 第一階段 (JSON)</th>
+                                <td>${stage1Html}</td>
+                            </tr>
+                            <tr>
+                                <th>AI 分析 - 第二階段 (報告)</th>
+                                <td>${stage2Html}</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                `;
+
+                detailsContainer.innerHTML = mainHtml;
+            };
+
+            const loadDetails = async () => {
+                const params = new URLSearchParams(window.location.search);
+                const hash = params.get('hash');
+                if (!hash) {
+                    detailsContainer.innerHTML = '<p style="color:red;">錯誤：URL 中缺少檔案雜湊值 (hash)。</p>';
+                    return;
+                }
+
+                try {
+                    const response = await fetch(`/api/details/${hash}`);
+                    if (!response.ok) {
+                        const errorData = await response.json().catch(() => ({ detail: '無法解析伺服器錯誤回應' }));
+                        throw new Error(errorData.detail || `伺服器錯誤: ${response.status}`);
+                    }
+                    const data = await response.json();
+                    renderDetails(data);
+                } catch (error) {
+                    detailsContainer.innerHTML = `<p style="color:red;">載入詳細資訊時發生錯誤: ${error.message}</p>`;
+                }
+            };
+
+            loadDetails();
+        });
+    </script>
+</body>
+</html>

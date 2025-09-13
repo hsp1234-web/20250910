@@ -199,14 +199,19 @@
                 let html = `<table class="results-table">
                     <thead><tr>
                         <th><input type="checkbox" id="dashboard-select-all"></th>
-                        <th>檔案名稱</th><th>第一階段狀態</th><th>第二階段狀態</th><th>操作</th>
+                        <th>檔案名稱</th><th>作者</th><th>第一階段狀態</th><th>第二階段狀態</th><th>操作</th>
                     </tr></thead><tbody>`;
 
                 analysisTasks.forEach(task => {
                     const checkboxDisabled = task.stage1_status !== 'completed' || task.stage2_status === 'processing' || task.stage2_status === 'completed';
+                    const detailUrl = task.file_hash ? `/static/page8_file_details.html?hash=${task.file_hash}` : '#';
+                    const filenameLink = task.file_hash ? `<a href="${detailUrl}" title="查看檔案總覽">${task.filename}</a>` : task.filename;
+                    const authorLink = task.author ? (task.file_hash ? `<a href="${detailUrl}" title="查看檔案總覽">${task.author}</a>` : task.author) : 'N/A';
+
                     html += `<tr>
                         <td><input type="checkbox" class="dashboard-checkbox" value="${task.id}" ${checkboxDisabled ? 'disabled' : ''}></td>
-                        <td>${task.filename}</td>
+                        <td>${filenameLink}</td>
+                        <td>${authorLink}</td>
                         <td>${getStatusHTML(task.stage1_status, task.stage1_error_log)}</td>
                         <td>${getStatusHTML(task.stage2_status, task.stage2_error_log)}</td>
                         <td>${getActionsHTML(task)}</td>

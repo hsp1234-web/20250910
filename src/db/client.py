@@ -151,6 +151,14 @@ class DBClient:
         """
         return self._send_request("get_analysis_task", {"task_id": task_id})
 
+    def get_urls_by_hash(self, file_hash: str) -> list[dict]:
+        """根據檔案雜湊值獲取所有相關的 URL 紀錄。"""
+        return self._send_request("get_urls_by_hash", {"file_hash": file_hash})
+
+    def get_analysis_task_by_file_id(self, file_id: int) -> dict | None:
+        """根據 file_id 獲取單一分析任務。"""
+        return self._send_request("get_analysis_task_by_file_id", {"file_id": file_id})
+
     # --- extracted_urls methods (2025-09-13) ---
     def get_url_by_id(self, url_id: int) -> dict | None:
         """根據 ID 獲取單一 URL 紀錄。"""

@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>頁面九：JSON 檢視器</title>
+    <link rel="stylesheet" href="/static/css/common.css">
+    <style>
+        body {
+            background-color: #f4f4f9;
+            color: #333;
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+        }
+        .content {
+            background-color: white;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 20px;
+            max-width: 1200px;
+            margin: auto;
+        }
+        h1 {
+            border-bottom: 2px solid #007bff;
+            padding-bottom: 10px;
+            color: #007bff;
+        }
+        pre {
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            background-color: #eee;
+            padding: 15px;
+            border-radius: 4px;
+            border: 1px solid #ccc;
+            font-family: 'Courier New', Courier, monospace;
+            font-size: 14px;
+        }
+        .error {
+            color: #dc3545;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <div class="content">
+        <h1>JSON 內容檢視器</h1>
+        <div id="json-container">
+            <p>正在載入 JSON 內容...</p>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const jsonContainer = document.getElementById('json-container');
+
+            const loadJson = async () => {
+                const params = new URLSearchParams(window.location.search);
+                const path = params.get('path');
+                if (!path) {
+                    jsonContainer.innerHTML = '<p class="error">錯誤：URL 中缺少檔案路徑 (path)。</p>';
+                    document.title = "錯誤 - JSON 檢視器";
+                    return;
+                }
+
+                document.title = `${path.split(/[\\/]/).pop()} - JSON 檢視器`;
+
+                try {
+                    const response = await fetch(`/api/get_json_content?path=${encodeURIComponent(path)}`);
+                    if (!response.ok) {
+                        const errorData = await response.json().catch(() => ({ detail: '無法解析伺服器錯誤回應' }));
+                        throw new Error(errorData.detail || `伺服器錯誤: ${response.status}`);
+                    }
+                    const data = await response.json();
+
+                    // Display the formatted JSON
+                    const formattedJson = JSON.stringify(data, null, 2);
+                    jsonContainer.innerHTML = `<pre>${formattedJson}</pre>`;
+
+                } catch (error) {
+                    jsonContainer.innerHTML = `<p class="error">載入 JSON 時發生錯誤: ${error.message}</p>`;
+                }
+            };
+
+            loadJson();
+        });
+    </script>
+</body>
+</html>
