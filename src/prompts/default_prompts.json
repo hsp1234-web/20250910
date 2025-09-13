@@ -1,4 +1,4 @@
 {
-    "stage_1_extraction_prompt": "請從以下文字提取結構化資料：{document_text}",
+    "stage_1_extraction_prompt": "你是一位專業的金融分析師。請根據以下文章內容，提取核心資訊，並嚴格按照指定的 JSON 格式回傳，不要有任何多餘的文字或解釋。\n\n文章內容：\n---\n{document_text}\n---\n\n請提取以下欄位：\n1. \"title\": 文章的標題。\n2. \"sentiment\": 作者對市場的整體看法，只能是 \"看多\" 或 \"看空\"。\n3. \"symbol\": 文章主要分析的金融商品代號（例如股票代號 TSM 或指數代號 ^TWII）。\n\nJSON 格式範例：\n{\n  \"title\": \"這裡放文章標題\",\n  \"sentiment\": \"看多\",\n  \"symbol\": \"TSM\"\n}",
     "stage_2_generation_prompt": "請根據以下資料生成報告：{data_package}"
 }
