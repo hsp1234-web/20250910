@@ -194,13 +194,14 @@
                         const reportUrl = `/reports/${reportFilename}`;
                         actions.push(`<a href="${reportUrl}" target="_blank" class="button-link-inline">檢視報告</a>`);
                     }
+                    // 統一處理失敗狀態的按鈕
                     if (task.stage1_status === 'failed') {
-                        actions.push(`<button class="action-btn" data-action="retry-stage1" data-task-id="${task.id}" data-file-id="${task.file_id}">重試S1</button>`);
-                        actions.push(`<button class="action-btn" data-action="view-error" data-task-id="${task.id}" data-stage="1">查看錯誤</button>`);
+                        actions.push(`<button class="action-btn" data-action="view-log" data-task-id="${task.id}" data-stage="1">查看日誌</button>`);
+                        actions.push(`<button class="action-btn" data-action="retry-stage1" data-task-id="${task.id}" data-file-id="${task.file_id}">重試</button>`);
                     }
                      if (task.stage2_status === 'failed') {
-                        actions.push(`<button class="action-btn" data-action="retry-stage2" data-task-id="${task.id}">重試S2</button>`);
-                        actions.push(`<button class="action-btn" data-action="view-error" data-task-id="${task.id}" data-stage="2">查看錯誤</button>`);
+                        actions.push(`<button class="action-btn" data-action="view-log" data-task-id="${task.id}" data-stage="2">查看日誌</button>`);
+                        actions.push(`<button class="action-btn" data-action="retry-stage2" data-task-id="${task.id}">重試</button>`);
                     }
                     return actions.join(' ');
                 };
@@ -208,7 +209,7 @@
                 let html = `<table class="results-table">
                     <thead><tr>
                         <th><input type="checkbox" id="dashboard-select-all"></th>
-                        <th>檔案名稱</th><th>作者</th><th>第一階段狀態</th><th>第二階段狀態</th><th>操作</th>
+                        <th>檔案名稱</th><th>作者</th><th>模型</th><th>Token 消耗</th><th>第一階段狀態</th><th>第二階段狀態</th><th>操作</th>
                     </tr></thead><tbody>`;
 
                 analysisTasks.forEach(task => {
@@ -217,10 +218,16 @@
                     const filenameLink = task.file_hash ? `<a href="${detailUrl}" title="查看檔案總覽">${task.filename}</a>` : task.filename;
                     const authorLink = task.author ? (task.file_hash ? `<a href="${detailUrl}" title="查看檔案總覽">${task.author}</a>` : task.author) : 'N/A';
 
+                    // 組合模型和 Token 資訊
+                    const modelInfo = [task.stage1_model, task.stage2_model_used].filter(Boolean).join('<br>');
+                    const tokenUsage = (task.stage1_token_usage || 0) + (task.stage2_token_usage || 0);
+
                     html += `<tr>
                         <td><input type="checkbox" class="dashboard-checkbox" value="${task.id}" ${checkboxDisabled ? 'disabled' : ''}></td>
                         <td>${filenameLink}</td>
                         <td>${authorLink}</td>
+                        <td>${modelInfo || 'N/A'}</td>
+                        <td>${tokenUsage > 0 ? tokenUsage.toLocaleString() : 'N/A'}</td>
                         <td>${getStatusHTML(task.stage1_status, task.stage1_error_log)}</td>
                         <td>${getStatusHTML(task.stage2_status, task.stage2_error_log)}</td>
                         <td>${getActionsHTML(task)}</td>
@@ -346,25 +353,42 @@
                 if (action === 'view-json') {
                     // 開啟新的檢視器分頁，而不是顯示彈出視窗
                     window.open(`/static/json_viewer.html?task_id=${taskId}`, '_blank');
-                } else if (action === 'view-error') {
-                    const stage = target.dataset.stage;
-                    const errorLog = stage === '1' ? task.stage1_error_log : task.stage2_error_log;
-                    showModal(`任務 #${taskId} 的錯誤日誌`, errorLog || '沒有詳細的錯誤資訊。');
+                } else if (action === 'view-log') {
+                    const currentRow = target.closest('tr');
+                    const existingLogDiv = document.getElementById(`log-div-${taskId}`);
+
+                    if (existingLogDiv) {
+                        existingLogDiv.remove();
+                    } else {
+                        const stage = target.dataset.stage;
+                        const errorLog = (stage === '1' ? task.stage1_error_log : task.stage2_error_log) || '沒有詳細的錯誤資訊。';
+
+                        const logRow = document.createElement('tr');
+                        logRow.id = `log-div-${taskId}`;
+                        logRow.innerHTML = `<td colspan="8" class="log-details"><pre>${errorLog}</pre></td>`;
+                        currentRow.parentNode.insertBefore(logRow, currentRow.nextSibling);
+                    }
                 } else if (action === 'retry-stage1') {
                     const fileId = parseInt(target.dataset.fileId, 10);
                     const modelName = stage1ModelSelect.value;
+                    if (!modelName) return alert('請選擇第一階段模型。');
+                    logStatus(`正在為檔案 #${fileId} 重試第一階段分析...`, 'blue');
                     await fetch('/api/analyzer/start_stage1_analysis', {
                         method: 'POST',
                         headers: {'Content-Type': 'application/json'},
                         body: JSON.stringify({ file_ids: [fileId], model_name: modelName })
                     });
+                    await fetchAnalysisStatus(); // Refresh dashboard
                 } else if (action === 'retry-stage2') {
                      const modelName = stage2ModelSelect.value;
+                     if (!modelName) return alert('請選擇第二階段模型。');
+                     logStatus(`正在為任務 #${taskId} 重試第二階段分析...`, 'blue');
                      await fetch('/api/analyzer/start_stage2_analysis', {
                         method: 'POST',
                         headers: {'Content-Type': 'application/json'},
                         body: JSON.stringify({ task_ids: [taskId], model_name: modelName })
                     });
+                    await fetchAnalysisStatus(); // Refresh dashboard
                 }
             });
 

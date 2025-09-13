@@ -171,10 +171,12 @@ def initialize_database(conn: sqlite3.Connection = None):
                 stage1_model TEXT,
                 stage1_json_path TEXT,
                 stage1_error_log TEXT,
+                stage1_token_usage INTEGER,
                 stage2_status VARCHAR(20) DEFAULT 'pending',
                 stage2_model_used TEXT,
                 stage2_report_path TEXT,
                 stage2_error_log TEXT,
+                stage2_token_usage INTEGER,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (file_id) REFERENCES extracted_urls (id)
@@ -236,6 +238,22 @@ def initialize_database(conn: sqlite3.Connection = None):
                     pass # 欄位已存在，是正常情況
                 else:
                     raise # 其他錯誤則需拋出
+            # --- 結束 ---
+
+            # --- 為 analysis_tasks 表格新增 token usage 欄位 (2025-09-13) ---
+            token_migrations = {
+                "stage1_token_usage": "INTEGER",
+                "stage2_token_usage": "INTEGER"
+            }
+            for col, col_type in token_migrations.items():
+                try:
+                    cursor.execute(f"ALTER TABLE analysis_tasks ADD COLUMN {col} {col_type}")
+                    log.info(f"欄位 '{col}' 已成功新增至 'analysis_tasks' 資料表。")
+                except sqlite3.OperationalError as e:
+                    if "duplicate column name" in str(e):
+                        pass
+                    else:
+                        raise
             # --- 結束 ---
 
         log.info("✅ 資料庫初始化完成。`tasks`, `system_logs`, `app_state`, `extracted_urls`, `reports`, `analysis_tasks` 資料表已存在。")

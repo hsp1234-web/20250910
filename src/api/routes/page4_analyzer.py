@@ -34,6 +34,7 @@ TEMP_JSON_DIR.mkdir(exist_ok=True)
 REPORTS_DIR.mkdir(exist_ok=True)
 
 import asyncio
+import functools
 
 # --- Pydantic 模型 ---
 class Stage1Request(BaseModel):
@@ -82,8 +83,12 @@ def _run_stage1_blocking_task(task_id: int, file_id: int, model_name: str, serve
 
         # 3. 執行 AI 資料提取
         prompt = prompt_template.format(document_text=text_content)
-        structured_data, error, used_key = gemini.prompt_for_json(prompt=prompt, model_name=model_name)
+        # 現在 structured_data, error, used_key, token_usage 都能正確接收到值
+        structured_data, error, used_key, token_usage = gemini.prompt_for_json(prompt=prompt, model_name=model_name)
+
+        # 檢查 error 物件是否存在。如果存在，它是一個例外物件，應該被 raise。
         if error:
+            # 直接 raise 這個例外物件，而不是 raise error 字串或變數
             raise error
 
         # 4. 儲存 JSON 結果到檔案
@@ -92,8 +97,15 @@ def _run_stage1_blocking_task(task_id: int, file_id: int, model_name: str, serve
         with open(json_path, "w", encoding="utf-8") as f:
             json.dump(structured_data, f, ensure_ascii=False, indent=2)
 
-        # 5. 更新任務狀態為「完成」
-        DB_CLIENT.update_analysis_task(task_id=task_id, updates={"stage1_status": "completed", "stage1_json_path": str(json_path)})
+        # 5. 更新任務狀態為「完成」，並記錄 token 使用量
+        DB_CLIENT.update_analysis_task(
+            task_id=task_id,
+            updates={
+                "stage1_status": "completed",
+                "stage1_json_path": str(json_path),
+                "stage1_token_usage": token_usage
+            }
+        )
         log.info(f"第一階段任務成功：task_id={task_id}，JSON 已儲存至 {json_path}")
 
     except Exception as e:
@@ -129,7 +141,10 @@ def _run_stage2_blocking_task(task_id: int, model_name: str, server_port: int):
 
         # 3. 執行 AI 報告生成
         prompt = prompt_template.format(data_package=json.dumps(structured_data, ensure_ascii=False, indent=2))
-        report_html, error, used_key = gemini.prompt_for_text(prompt=prompt, model_name=model_name)
+        # 同樣，確保能接收到完整的元組，包含 token 使用量
+        report_html, error, used_key, token_usage = gemini.prompt_for_text(prompt=prompt, model_name=model_name)
+
+        # 同樣，檢查並直接 raise 例外物件
         if error:
             raise error
 
@@ -139,8 +154,15 @@ def _run_stage2_blocking_task(task_id: int, model_name: str, server_port: int):
         with open(report_path, "w", encoding="utf-8") as f:
             f.write(report_html)
 
-        # 5. 更新任務狀態為「完成」
-        DB_CLIENT.update_analysis_task(task_id=task_id, updates={"stage2_status": "completed", "stage2_report_path": str(report_path)})
+        # 5. 更新任務狀態為「完成」，並記錄 token 使用量
+        DB_CLIENT.update_analysis_task(
+            task_id=task_id,
+            updates={
+                "stage2_status": "completed",
+                "stage2_report_path": str(report_path),
+                "stage2_token_usage": token_usage
+            }
+        )
         log.info(f"第二階段任務成功：task_id={task_id}，報告已儲存至 {report_path}")
 
     except Exception as e:
@@ -164,7 +186,18 @@ async def run_analysis_task_wrapper(task_id: int, server_port: int, semaphore: a
         loop = asyncio.get_running_loop()
         try:
             # 在執行器中運行阻塞函式
-            await loop.run_in_executor(None, blocking_func, task_id=task_id, server_port=server_port, **kwargs)
+            # 說明：loop.run_in_executor 不接受關鍵字參數來傳遞給目標函式。
+            # 正確的作法是使用 functools.partial 將函式與其所有參數（包括關鍵字參數）綁定在一起，
+            # 產生一個無參數的可呼叫物件，再交給 run_in_executor 執行。
+
+            # 準備傳遞給 blocking_func 的參數，移除 wrapper 自身使用的 'stage' 參數
+            func_kwargs = kwargs.copy()
+            func_kwargs.pop('stage', None)
+
+            # 建立 partial 函式
+            partial_func = functools.partial(blocking_func, task_id=task_id, server_port=server_port, **func_kwargs)
+
+            await loop.run_in_executor(None, partial_func)
         except Exception as e:
              # 這裡的錯誤應該已經在阻塞函式內部處理過了，但為了保險起見
             log.error(f"包裝函式捕獲到未預期的錯誤 (任務 {task_id}): {e}", exc_info=True)

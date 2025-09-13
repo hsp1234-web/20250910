@@ -142,8 +142,16 @@
                                 <td>${stage1Html}</td>
                             </tr>
                             <tr>
+                                <th>第一階段 Token 消耗</th>
+                                <td>${(analysis_task && analysis_task.stage1_token_usage) ? analysis_task.stage1_token_usage.toLocaleString() : 'N/A'}</td>
+                            </tr>
+                            <tr>
                                 <th>AI 分析 - 第二階段 (報告)</th>
                                 <td>${stage2Html}</td>
+                            </tr>
+                             <tr>
+                                <th>第二階段 Token 消耗</th>
+                                <td>${(analysis_task && analysis_task.stage2_token_usage) ? analysis_task.stage2_token_usage.toLocaleString() : 'N/A'}</td>
                             </tr>
                         </tbody>
                     </table>
