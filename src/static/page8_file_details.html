@@ -5,7 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>頁面八：檔案總覽</title>
     <link rel="stylesheet" href="/static/css/nav.css">
-    <link rel="stylesheet" href="/static/css/common.css">
     <link rel="stylesheet" href="/static/css/page8.css">
 </head>
 <body>
@@ -19,36 +18,37 @@
             <li><a href="/page5">備份管理</a></li>
             <li><a href="/page6">金鑰管理</a></li>
             <li><a href="/page7">提示詞管理</a></li>
-            <!-- This page is not in the main nav, it's accessed via links -->
         </ul>
     </nav>
 
-    <div class="content">
-        <div class="panel">
-            <h1>檔案總覽</h1>
-            <div id="details-container">
-                <p>正在載入檔案詳細資訊...</p>
-            </div>
+    <div class="container">
+        <div class="header">
+            <h1 id="page-title">檔案總覽</h1>
+            <a href="/page4" class="button">返回分析列表</a>
+        </div>
+        <div id="details-container">
+            <p>正在載入檔案詳細資訊...</p>
         </div>
     </div>
 
     <script>
         document.addEventListener('DOMContentLoaded', () => {
             const detailsContainer = document.getElementById('details-container');
+            const pageTitle = document.getElementById('page-title');
 
             const getStatusHTML = (status) => {
-                if (!status) return `<span class="status-pending">未開始</span>`;
-                switch (status.toLowerCase()) {
-                    case 'pending': return `<span class="status-pending">⏳ 等待中</span>`;
-                    case 'downloading': return `<span class="status-downloading">📥 下載中</span>`;
-                    case 'completed': return `<span class="status-completed">✅ 已完成</span>`;
-                    case 'processing': return `<span class="status-processing">🔄 處理中</span>`;
-                    case 'processed': return `<span class="status-completed">✅ 已處理</span>`;
-                    case 'analyzed': return `<span class="status-completed">✅ 已分析</span>`;
-                    case 'failed': return `<span class="status-failed">❌ 失敗</span>`;
-                    case 'error': return `<span class="status-error">❌ 錯誤</span>`;
-                    default: return `<span>${status}</span>`;
+                if (!status) return `<span class="status-badge status-pending">未開始</span>`;
+                const s = status.toLowerCase();
+                if (s.includes('completed') || s.includes('processed') || s.includes('analyzed')) {
+                    return `<span class="status-badge status-completed">✅ ${status}</span>`;
                 }
+                if (s.includes('failed') || s.includes('error')) {
+                    return `<span class="status-badge status-failed">❌ ${status}</span>`;
+                }
+                if (s.includes('processing')) {
+                    return `<span class="status-badge status-processing">🔄 ${status}</span>`;
+                }
+                return `<span class="status-badge status-pending">${status}</span>`;
             };
 
             const formatTaipeiTime = (isoString) => {
@@ -61,110 +61,116 @@
             const renderDetails = (data) => {
                 const { file_hash, primary_record, all_occurrences, analysis_task } = data;
 
-                // --- 渲染所有出現紀錄的表格 ---
-                let occurrencesHtml = '<p>無</p>';
+                pageTitle.textContent = `檔案總覽: ${primary_record.local_path ? primary_record.local_path.split(/[\\/]/).pop() : '未知檔案'}`;
+
+                // --- Card 1: 基本資訊 ---
+                const basicInfoCard = `
+                    <div class="card">
+                        <h2>基本資訊</h2>
+                        <div class="info-grid">
+                            <div class="info-item">
+                                <span class="info-label">首次出現作者</span>
+                                <span class="info-value">${primary_record.author || 'N/A'}</span>
+                            </div>
+                            <div class="info-item">
+                                <span class="info-label">首次出現時間</span>
+                                <span class="info-value">${formatTaipeiTime(primary_record.created_at)}</span>
+                            </div>
+                            <div class="info-item">
+                                <span class="info-label">本地路徑</span>
+                                <span class="info-value">${primary_record.local_path || 'N/A'}</span>
+                            </div>
+                            <div class="info-item info-item-full">
+                                <span class="info-label">檔案雜湊 (SHA256)</span>
+                                <pre class="info-value">${file_hash}</pre>
+                            </div>
+                        </div>
+                    </div>
+                `;
+
+                // --- Card 2: 所有出現紀錄 ---
+                let occurrencesCard = '';
                 if (all_occurrences && all_occurrences.length > 0) {
-                    occurrencesHtml = `
-                        <table class="occurrences-table">
-                            <thead>
-                                <tr>
-                                    <th>作者</th>
-                                    <th>訊息日期</th>
-                                    <th>訊息時間</th>
-                                    <th>原始網址</th>
-                                    <th>下載狀態</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                ${all_occurrences.map(occ => `
-                                    <tr>
-                                        <td>${occ.author || 'N/A'}</td>
-                                        <td>${occ.message_date || 'N/A'}</td>
-                                        <td>${occ.message_time || 'N/A'}</td>
-                                        <td><a href="${occ.url}" target="_blank">查看原始連結</a></td>
-                                        <td>${getStatusHTML(occ.status)}</td>
-                                    </tr>
-                                `).join('')}
-                            </tbody>
-                        </table>
+                    occurrencesCard = `
+                        <div class="card">
+                            <h2>所有出現紀錄 (${all_occurrences.length})</h2>
+                            <div class="table-container">
+                                <table class="occurrences-table">
+                                    <thead>
+                                        <tr>
+                                            <th>作者</th>
+                                            <th>訊息日期</th>
+                                            <th>訊息時間</th>
+                                            <th>原始網址</th>
+                                            <th>下載狀態</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        ${all_occurrences.map(occ => `
+                                            <tr>
+                                                <td>${occ.author || 'N/A'}</td>
+                                                <td>${occ.message_date || 'N/A'}</td>
+                                                <td>${occ.message_time || 'N/A'}</td>
+                                                <td><a href="${occ.url}" target="_blank">查看連結</a></td>
+                                                <td>${getStatusHTML(occ.status)}</td>
+                                            </tr>
+                                        `).join('')}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
                     `;
                 }
 
-                // --- 渲染 AI 分析結果 ---
-                let stage1Html = getStatusHTML(analysis_task ? analysis_task.stage1_status : 'pending');
+                // --- Card 3: AI 分析結果 ---
+                let stage1Html = `<div class="analysis-status">${getStatusHTML(analysis_task ? analysis_task.stage1_status : 'pending')}</div>`;
                 if (analysis_task && analysis_task.stage1_status === 'completed' && analysis_task.stage1_json_path) {
-                    const jsonViewerUrl = `/static/json_viewer.html?path=${encodeURIComponent(analysis_task.stage1_json_path)}`;
-                    stage1Html += ` <a href="${jsonViewerUrl}" target="_blank" class="button-link-inline">查看 JSON</a>`;
+                    // 將 a 標籤改為 button，並加入 data-* 屬性用於 JS 抓取
+                    stage1Html += `<button class="button-inline" data-action="view-json" data-path="${analysis_task.stage1_json_path}">查看 JSON</button>`;
                 } else if (analysis_task && analysis_task.stage1_status === 'failed') {
-                    stage1Html += `<br><small style="color: #dc3545;">${analysis_task.stage1_error_log || '無詳細錯誤資訊'}</small>`;
+                    stage1Html += `<div class="error-log">${analysis_task.stage1_error_log || '無詳細錯誤資訊'}</div>`;
                 }
 
-                let stage2Html = getStatusHTML(analysis_task ? analysis_task.stage2_status : 'pending');
-                 if (analysis_task && analysis_task.stage2_status === 'completed' && analysis_task.stage2_report_path) {
+                // 預留位置給 JSON 檢視器
+                const jsonViewerPlaceholder = `<div id="json-viewer-container" class="json-viewer-container"></div>`;
+
+                let stage2Html = `<div class="analysis-status">${getStatusHTML(analysis_task ? analysis_task.stage2_status : 'pending')}</div>`;
+                if (analysis_task && analysis_task.stage2_status === 'completed' && analysis_task.stage2_report_path) {
                     const reportFilename = analysis_task.stage2_report_path.split(/[\\/]/).pop();
                     const reportUrl = `/reports/${reportFilename}`;
-                    stage2Html += ` <a href="${reportUrl}" target="_blank" class="button-link-inline">查看報告</a>`;
+                    stage2Html += `<a href="${reportUrl}" target="_blank" class="button-inline">查看報告</a>`;
                 } else if (analysis_task && analysis_task.stage2_status === 'failed') {
-                     stage2Html += `<br><small style="color: #dc3545;">${analysis_task.stage2_error_log || '無詳細錯誤資訊'}</small>`;
+                    stage2Html += `<div class="error-log">${analysis_task.stage2_error_log || '無詳細錯誤資訊'}</div>`;
                 }
 
+                const analysisCard = `
+                    <div class="card">
+                        <h2>AI 分析結果</h2>
+                        <div class="analysis-grid">
+                            <div class="analysis-item-label">第一階段 (JSON)</div>
+                            <div class="analysis-item-value">${stage1Html}</div>
+                            ${jsonViewerPlaceholder}
 
-                // --- 渲染主表格 ---
-                const mainHtml = `
-                    <table class="details-table">
-                        <tbody>
-                            <tr>
-                                <th>檔案雜湊 (Hash)</th>
-                                <td><pre>${file_hash}</pre></td>
-                            </tr>
-                            <tr>
-                                <th>原始檔名</th>
-                                <td>${primary_record.local_path ? primary_record.local_path.split(/[\\/]/).pop() : 'N/A'}</td>
-                            </tr>
-                            <tr>
-                                <th>首次出現時間</th>
-                                <td>${formatTaipeiTime(primary_record.created_at)}</td>
-                            </tr>
-                            <tr>
-                                <th>首次出現作者</th>
-                                <td>${primary_record.author || 'N/A'}</td>
-                            </tr>
-                            <tr>
-                                <th>下載後的本地路徑</th>
-                                <td>${primary_record.local_path || 'N/A'}</td>
-                            </tr>
-                             <tr>
-                                <th>所有出現紀錄</th>
-                                <td>${occurrencesHtml}</td>
-                            </tr>
-                            <tr>
-                                <th>AI 分析 - 第一階段 (JSON)</th>
-                                <td>${stage1Html}</td>
-                            </tr>
-                            <tr>
-                                <th>第一階段 Token 消耗</th>
-                                <td>${(analysis_task && analysis_task.stage1_token_usage) ? analysis_task.stage1_token_usage.toLocaleString() : 'N/A'}</td>
-                            </tr>
-                            <tr>
-                                <th>AI 分析 - 第二階段 (報告)</th>
-                                <td>${stage2Html}</td>
-                            </tr>
-                             <tr>
-                                <th>第二階段 Token 消耗</th>
-                                <td>${(analysis_task && analysis_task.stage2_token_usage) ? analysis_task.stage2_token_usage.toLocaleString() : 'N/A'}</td>
-                            </tr>
-                        </tbody>
-                    </table>
+                            <div class="analysis-item-label">第一階段 Token</div>
+                            <div class="analysis-item-value">${(analysis_task && analysis_task.stage1_token_usage) ? analysis_task.stage1_token_usage.toLocaleString() : 'N/A'}</div>
+
+                            <div class="analysis-item-label">第二階段 (報告)</div>
+                            <div class="analysis-item-value">${stage2Html}</div>
+
+                            <div class="analysis-item-label">第二階段 Token</div>
+                            <div class="analysis-item-value">${(analysis_task && analysis_task.stage2_token_usage) ? analysis_task.stage2_token_usage.toLocaleString() : 'N/A'}</div>
+                        </div>
+                    </div>
                 `;
 
-                detailsContainer.innerHTML = mainHtml;
+                detailsContainer.innerHTML = basicInfoCard + occurrencesCard + analysisCard;
             };
 
             const loadDetails = async () => {
                 const params = new URLSearchParams(window.location.search);
                 const hash = params.get('hash');
                 if (!hash) {
-                    detailsContainer.innerHTML = '<p style="color:red;">錯誤：URL 中缺少檔案雜湊值 (hash)。</p>';
+                    detailsContainer.innerHTML = '<p class="error">錯誤：URL 中缺少檔案雜湊值 (hash)。</p>';
                     return;
                 }
 
@@ -177,9 +183,49 @@
                     const data = await response.json();
                     renderDetails(data);
                 } catch (error) {
-                    detailsContainer.innerHTML = `<p style="color:red;">載入詳細資訊時發生錯誤: ${error.message}</p>`;
+                    detailsContainer.innerHTML = `<p class="error">載入詳細資訊時發生錯誤: ${error.message}</p>`;
                 }
             };
+
+            // --- Event listener for dynamic content ---
+            detailsContainer.addEventListener('click', async (e) => {
+                if (e.target.dataset.action === 'view-json') {
+                    const button = e.target;
+                    const path = button.dataset.path;
+                    const container = document.getElementById('json-viewer-container');
+
+                    // 如果已經顯示，再次點擊則隱藏
+                    if (container.classList.contains('visible')) {
+                        container.innerHTML = '';
+                        container.classList.remove('visible');
+                        button.textContent = '查看 JSON';
+                        return;
+                    }
+
+                    button.textContent = '載入中...';
+                    button.disabled = true;
+
+                    try {
+                        const response = await fetch(`/api/get_json_content?path=${encodeURIComponent(path)}`);
+                        if (!response.ok) throw new Error(`伺服器錯誤 ${response.status}`);
+                        const data = await response.json();
+
+                        const pre = document.createElement('pre');
+                        pre.textContent = JSON.stringify(data, null, 2);
+                        container.innerHTML = '';
+                        container.appendChild(pre);
+                        container.classList.add('visible');
+                        button.textContent = '隱藏 JSON';
+
+                    } catch (error) {
+                        container.innerHTML = `<p class="error">無法載入 JSON: ${error.message}</p>`;
+                        container.classList.add('visible');
+                         button.textContent = '重試';
+                    } finally {
+                        button.disabled = false;
+                    }
+                }
+            });
 
             loadDetails();
         });

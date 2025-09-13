@@ -183,11 +183,13 @@ select {
 }
 .log-details {
     padding: 15px;
-    background-color: #212529;
-    color: #f8f9fa;
+    background-color: #f8f9fa; /* 改為淺色背景 */
+    color: #212529;             /* 改為深色文字 */
     font-family: monospace;
-    white-space: pre-wrap;
+    white-space: pre-wrap;      /* 保留自動換行 */
     word-break: break-all;
+    overflow-x: auto;           /* 新增水平捲動以適應行動裝置 */
+    font-size: 14px;            /* 確保字體清晰 */
 }
 .log-details pre {
     margin: 0;

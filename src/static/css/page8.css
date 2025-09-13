@@ -1,69 +1,216 @@
-/* For page8_file_details.html */
-.details-table {
-    width: 100%;
-    border-collapse: collapse;
+/* --- 核心變數 --- */
+:root {
+    --primary-color: #007bff;
+    --primary-hover: #0056b3;
+    --border-color: #dee2e6;
+    --card-bg: #ffffff;
+    --body-bg: #f8f9fa;
+    --text-color: #212529;
+    --text-light: #6c757d;
+    --font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --mono-font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace;
 }
 
-.details-table th, .details-table td {
-    border: 1px solid #ddd;
-    padding: 12px;
-    text-align: left;
-    vertical-align: top;
+/* --- 基本樣式 --- */
+body {
+    font-family: var(--font-family);
+    margin: 0;
+    background-color: var(--body-bg);
+    color: var(--text-color);
 }
 
-.details-table th {
-    background-color: #f2f2f2;
-    width: 20%;
-    font-weight: bold;
+.container {
+    max-width: 1200px;
+    margin: 1.5rem auto;
+    padding: 0 1rem;
 }
 
-.details-table td {
-    width: 80%;
+/* --- 頁首 --- */
+.header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1.5rem;
+}
+
+.header h1 {
+    font-size: 1.8rem;
+    margin: 0;
+    color: var(--text-color);
+}
+
+.button {
+    padding: 0.6rem 1.2rem;
+    font-size: 0.9rem;
+    font-weight: 500;
+    color: #fff;
+    background-color: var(--primary-color);
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    text-decoration: none;
+    transition: background-color 0.2s;
+}
+
+.button:hover {
+    background-color: var(--primary-hover);
+}
+
+/* --- 卡片佈局 --- */
+.card {
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    margin-bottom: 1.5rem;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+    padding: 1.5rem;
+}
+
+.card h2 {
+    font-size: 1.25rem;
+    margin-top: 0;
+    margin-bottom: 1rem;
+    border-bottom: 1px solid var(--border-color);
+    padding-bottom: 0.75rem;
+}
+
+/* --- 資訊網格 (基本資訊用) --- */
+.info-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 1rem;
+}
+
+.info-item {
+    display: flex;
+    flex-direction: column;
+}
+
+.info-item-full {
+    grid-column: 1 / -1;
+}
+
+.info-label {
+    font-size: 0.85rem;
+    color: var(--text-light);
+    margin-bottom: 0.25rem;
+    font-weight: 500;
+}
+
+.info-value {
+    font-size: 1rem;
     word-break: break-all;
+}
+
+.info-value pre {
+    margin: 0;
+    padding: 0.5rem;
+    background-color: var(--body-bg);
+    border-radius: 4px;
+    font-family: var(--mono-font-family);
+    font-size: 14px;
+}
+
+/* --- 表格容器 (出現紀錄用) --- */
+.table-container {
+    overflow-x: auto;
 }
 
 .occurrences-table {
     width: 100%;
-    margin-top: 10px;
     border-collapse: collapse;
+    min-width: 600px;
 }
 
 .occurrences-table th, .occurrences-table td {
-    border: 1px solid #e0e0e0;
-    padding: 8px;
+    border: 1px solid var(--border-color);
+    padding: 0.75rem;
     text-align: left;
 }
 
-.occurrences-table th {
-    background-color: #fafafa;
+.occurrences-table thead {
+    background-color: var(--body-bg);
 }
 
-pre {
-    white-space: pre-wrap;
-    word-wrap: break-word;
-    background-color: #eee;
-    padding: 10px;
-    border-radius: 4px;
-    font-family: 'Courier New', Courier, monospace;
+/* --- AI 分析網格 --- */
+.analysis-grid {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    align-items: center;
+    gap: 1rem;
 }
 
-.status-completed { color: #28a745; }
-.status-processing, .status-analyzing { color: #007bff; }
-.status-pending { color: #6c757d; }
-.status-error, .status-failed { color: #dc3545; }
-.status-downloading { color: #17a2b8; }
+.analysis-item-label {
+    font-weight: 600;
+    text-align: right;
+}
 
-.button-link-inline {
-    display: inline-block;
-    padding: 5px 10px;
-    background-color: #007bff;
-    color: white;
-    text-decoration: none;
-    border-radius: 4px;
+.analysis-item-value {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.error-log {
+    font-size: 0.85rem;
+    color: #dc3545;
+}
+
+/* --- JSON 檢視器容器 --- */
+.json-viewer-container {
+    grid-column: 1 / -1; /* 讓容器佔滿整行 */
+    background-color: #f8f9fa; /* 淺色背景 */
+    color: #212529;             /* 深色文字 */
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 1rem;
+    margin-top: 0.5rem;
+    display: none; /* 預設隱藏 */
+    max-height: 500px;
+    overflow: auto; /* 同時處理垂直與水平捲動 */
+}
+
+.json-viewer-container.visible {
+    display: block;
+}
+
+.json-viewer-container pre {
+    margin: 0;
+    font-family: var(--mono-font-family);
     font-size: 14px;
-    text-align: center;
+    white-space: pre-wrap;
+    word-break: break-all;
 }
 
-.button-link-inline:hover {
-    background-color: #0056b3;
+/* --- 狀態標籤 --- */
+.status-badge {
+    padding: 0.25em 0.6em;
+    font-size: 0.8rem;
+    font-weight: 600;
+    border-radius: 10px;
+    color: #fff;
+    white-space: nowrap;
+}
+.status-completed { background-color: #28a745; }
+.status-processing { background-color: #007bff; }
+.status-pending { background-color: #6c757d; color: var(--text-color); background-color: #e9ecef; }
+.status-failed { background-color: #dc3545; }
+
+/* --- 行內按鈕 --- */
+.button-inline {
+    padding: 0.3rem 0.8rem;
+    font-size: 0.85rem;
+    font-weight: 500;
+    color: #fff;
+    background-color: var(--primary-color);
+    border: 1px solid var(--primary-color);
+    border-radius: 5px;
+    cursor: pointer;
+    text-decoration: none;
+    transition: background-color 0.2s;
+}
+
+.button-inline:hover {
+    background-color: var(--primary-hover);
+    border-color: var(--primary-hover);
 }
