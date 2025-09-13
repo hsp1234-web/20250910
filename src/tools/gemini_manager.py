@@ -24,39 +24,51 @@ class ApiKey:
 class GeminiManager:
     """
     管理與 Google Gemini API 的所有互動。
-    支援多金鑰輪換和自動重試機制。
+    支援多金鑰輪換、冷卻機制和自動重試機制。
     """
-    def __init__(self, api_keys: List[Dict[str, str]], timeout: int = 180, max_retries: int = 3):
+    def __init__(self, api_keys: List[Dict[str, str]], timeout: int = 180, max_retries: int = 3, cooldown_seconds: int = 60):
         if not genai:
             raise ImportError("GeminiManager 無法初始化，因為 google.generativeai 模組未安裝。")
         if not api_keys:
             raise ValueError("API 金鑰列表不可為空。")
+
         self.key_pool = deque([ApiKey(key_value=k['value'], name=k['name']) for k in api_keys])
+        self._key_map = {k.key: k for k in self.key_pool} # 預先建立金鑰對應表
+        self.cooldown_keys: Dict[str, float] = {}  # key_value -> cooldown_end_timestamp
+        self.cooldown_seconds = cooldown_seconds
+
         self.timeout = timeout
         self.max_retries = max_retries
         self._lock = threading.Lock()
-        logging.info(f"Gemini 管理器已初始化，共載入 {len(self.key_pool)} 組 API 金鑰。")
+        logging.info(f"Gemini 管理器已初始化，共載入 {len(self.key_pool)} 組 API 金鑰。冷卻時間: {cooldown_seconds} 秒。")
+
+    def _activate_cooled_down_keys(self):
+        """檢查冷卻中的金鑰，並將已到期的移回主金鑰池。"""
+        now = time.time()
+        # 使用 list(self.cooldown_keys.items()) 來避免在迭代時修改字典
+        for key_value, cooldown_end in list(self.cooldown_keys.items()):
+            if now >= cooldown_end:
+                # 從冷卻池中移除
+                del self.cooldown_keys[key_value]
+                # 從預先建立的對應表中尋找 ApiKey 物件
+                key_obj = self._key_map.get(key_value)
+                if key_obj:
+                    self.key_pool.append(key_obj)
+                    logging.info(f"金鑰 '{key_obj.name}' 已結束冷卻，返回可用金鑰池。")
 
     def list_available_models(self) -> List[str]:
         """
         列出所有支援 'generateContent' 方法的可用 Gemini 模型。
         會使用金鑰池中的一個金鑰來進行查詢。
-
-        Returns:
-            一個包含模型名稱字串的列表。
-
-        Raises:
-            ValueError: 如果金鑰池為空。
-            Exception: 如果 API 呼叫失敗。
         """
         if not genai:
             logging.warning("無法列出模型，因為 google.generativeai 未安裝。")
             return []
 
         with self._lock:
+            self._activate_cooled_down_keys()
             if not self.key_pool:
-                raise ValueError("無法列出模型，因為金鑰池是空的。")
-            # 使用第一個金鑰進行操作，但不出列
+                raise ValueError(f"無法列出模型，因為金鑰池是空的 (可能有 {len(self.cooldown_keys)} 個金鑰正在冷卻)。")
             api_key = self.key_pool[0]
 
         logging.info(f"正在使用金鑰 '{api_key.name}' 查詢可用的模型...")
@@ -70,7 +82,6 @@ class GeminiManager:
             return available_models
         except Exception as e:
             logging.error(f"使用金鑰 '{api_key.name}' 查詢模型時發生錯誤: {e}", exc_info=True)
-            # 如果查詢失敗，我們將異常向上拋出，讓 API 層來處理並回傳適當的 HTTP 錯誤。
             raise e
 
     def _api_call_wrapper(self, task_name: str, model_name: str, prompt_content: List[Any], output_format: str = 'json'):
@@ -79,15 +90,15 @@ class GeminiManager:
 
         last_error = None
 
-        # 獲取當前金鑰池的快照進行本次操作，並確保執行緒安全
         with self._lock:
+            self._activate_cooled_down_keys()
             keys_to_try = list(self.key_pool)
 
         if not keys_to_try:
-            logging.error(f"[{task_name}] 金鑰池為空，無法執行 API 請求。")
-            return None, ValueError("金鑰池為空"), "N/A"
+            error_msg = f"金鑰池為空，無法執行 API 請求。(有 {len(self.cooldown_keys)} 個金鑰正在冷卻中)"
+            logging.error(f"[{task_name}] {error_msg}")
+            return None, ValueError(error_msg), "N/A"
 
-        # 外層迴圈：遍歷所有可用的金鑰 (實現故障轉移)
         for i, api_key in enumerate(keys_to_try):
             tag = f"{task_name}-{api_key.name}"
             logging.info(f"[{tag}] 準備使用金鑰 #{i+1}/{len(keys_to_try)} 執行 API 請求...")
@@ -101,7 +112,6 @@ class GeminiManager:
 
             generation_config = GenerationConfig(response_mime_type="application/json") if output_format == 'json' else None
 
-            # 內層迴圈：使用單一金鑰進行重試 (應對暫時性錯誤)
             for attempt in range(self.max_retries):
                 logging.info(f"[{tag}] 正在執行第 {attempt + 1}/{self.max_retries} 次嘗試 (模型: {model_name}, 格式: {output_format})...")
                 try:
@@ -115,23 +125,17 @@ class GeminiManager:
                     if not raw_text:
                         raise ValueError("API 回傳空內容")
 
-                    # --- 成功處理 ---
-                    # 將剛用過的有效金鑰輪換到隊伍末端，以實現負載均衡
                     with self._lock:
-                        try:
-                            # 為了執行緒安全，我們只在確定 key 存在時才操作
+                        if api_key in self.key_pool:
                             self.key_pool.remove(api_key)
                             self.key_pool.append(api_key)
-                        except ValueError:
-                            # 如果在多執行緒環境下，key 已被其他執行緒移除，則忽略
-                            logging.warning(f"[{tag}] 在輪換金鑰時，找不到 key，可能已被其他執行緒處理。")
 
                     logging.info(f"[{tag}] API 請求成功。")
                     if output_format == 'json':
                         if raw_text.strip().startswith("```json"):
                             raw_text = raw_text.strip()[7:-3].strip()
                         return json.loads(raw_text), None, api_key.name
-                    else:  # output_format == 'text'
+                    else:
                         if raw_text.strip().startswith("```html"):
                             raw_text = raw_text.strip()[7:-3].strip()
                         elif raw_text.strip().startswith("```"):
@@ -140,27 +144,31 @@ class GeminiManager:
 
                 except Exception as e:
                     last_error = e
-                    last_error_str = f"{type(e).__name__}: {e}"
+                    last_error_str = f"{type(e).__name__}: {e}".lower()
 
-                    # 檢查是否為永久性錯誤 (例如配額)，若是，則直接跳出內層迴圈換下一個金鑰
-                    if any(s in last_error_str.lower() for s in ["quota", "permission_denied", "invalid_api_key", "invalid_argument"]):
+                    is_permanent_error = any(s in last_error_str for s in ["permission_denied", "invalid_api_key", "invalid_argument"])
+                    is_rate_limit_error = any(s in last_error_str for s in ["quota", "resourceexhausted", "429"])
+
+                    if is_rate_limit_error:
+                        logging.error(f"[{tag}] 遭遇配額耗盡錯誤。將此金鑰移至冷卻區 {self.cooldown_seconds} 秒。")
+                        with self._lock:
+                            if api_key in self.key_pool:
+                                self.key_pool.remove(api_key)
+                                self.cooldown_keys[api_key.key] = time.time() + self.cooldown_seconds
+                        break # 跳出內層重試迴圈，嘗試下一個金鑰
+
+                    if is_permanent_error:
                         logging.error(f"[{tag}] 遭遇永久性錯誤: {last_error_str}。將立即嘗試下一個金鑰。")
-                        break # 跳出內層重試迴圈
+                        break
 
-                    # 檢查是否為暫時性錯誤
-                    if any(s in last_error_str.lower() for s in ["500", "503", "timed out", "deadline", "aborted", "reset"]) and attempt < self.max_retries - 1:
+                    if attempt < self.max_retries - 1:
                         wait_time = 2**(attempt + 1)
-                        logging.warning(f"[{tag}] 遭遇暫時性錯誤，{wait_time} 秒後重試...");
+                        logging.warning(f"[{tag}] 遭遇暫時性錯誤: {last_error_str}，{wait_time} 秒後重試...");
                         time.sleep(wait_time)
-                        continue # 繼續內層重試迴圈
+                        continue
 
-                    # 如果是其他未知錯誤，或已達最大重試次數，也跳出內層迴圈
                     break
 
-            # 如果內層迴圈是因為 break 而結束 (而不是 return)，我們會繼續外層迴圈嘗試下一個金鑰
-            # 如果內層迴圈是因為成功 (return) 而結束，則此處不會被執行
-
-        # 如果遍歷完所有金鑰後仍然失敗
         logging.error(f"[{task_name}] 在嘗試了 {len(keys_to_try)} 組金鑰後，API 請求最終失敗。最後一個錯誤: {last_error}")
         return None, last_error, "all_keys_failed"
 

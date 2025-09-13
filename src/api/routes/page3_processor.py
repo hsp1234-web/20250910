@@ -167,10 +167,19 @@ def run_processing_task(url_id: int, port: int):
         text_content = content_data.get("text", "") if content_data else ""
         image_paths_json = json.dumps(content_data.get("image_paths", [])) if content_data else "[]"
 
+        # 檢查內容提取是否成功，並設定對應的狀態
+        if not text_content and not json.loads(image_paths_json):
+            # 如果文字和圖片都為空，標記為不支援或空檔案
+            status = 'processed_unsupported'
+            status_message = '不支援的檔案類型或檔案為空，無法提取任何內容。'
+        else:
+            status = 'processed'
+            status_message = '處理成功'
+
         # 更新 extracted_urls 表
         update_payload = {
-            "status": 'processed',
-            "status_message": '處理成功',
+            "status": status,
+            "status_message": status_message,
             "file_hash": file_hash,
             "extracted_image_paths": image_paths_json,
             "extracted_text": text_content
