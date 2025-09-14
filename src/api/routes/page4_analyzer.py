@@ -5,11 +5,10 @@ import logging
 import sys
 import json
 import uuid
-import requests
 from pathlib import Path
 from typing import List, Dict, Any
 
-from fastapi import APIRouter, HTTPException, Request, BackgroundTasks, Depends
+from fastapi import APIRouter, HTTPException, Request, BackgroundTasks
 from pydantic import BaseModel
 
 # --- 路徑修正與模듈匯入 ---
@@ -45,22 +44,15 @@ class Stage2Request(BaseModel):
     task_ids: List[int]
     model_name: str
 
-# --- WebSocket 通知輔助函式 ---
-def _send_websocket_notification(server_port: int, message: Dict):
-    """向主伺服器的內部端點發送通知。"""
-    try:
-        # 修正：使用在 api_server.py 中註冊的正確端點
-        url = f"http://127.0.0.1:{server_port}/api/internal/notify_task_update"
-        # 讓 payload 自身包含足夠的類型資訊
-        response = requests.post(url, json=message, timeout=5)
-        response.raise_for_status()
-    except requests.RequestException as e:
-        log.error(f"無法發送 WebSocket 通知: {e}")
+# --- WebSocket 通知輔助函式 (已由佇列取代) ---
+# JULES (2025-09-13): 移除了舊的 _send_websocket_notification 函式。
+# 現在所有通知都將透過一個從主應用程式傳入的 asyncio.Queue 來發送。
 
 # --- 重構後的背景任務函式 (同步阻塞部分) ---
-def _run_stage1_blocking_task(task_id: int, file_id: int, model_name: str, server_port: int):
+def _run_stage1_blocking_task(task_id: int, file_id: int, model_name: str, queue: asyncio.Queue, loop: asyncio.AbstractEventLoop):
     """
     執行第一階段 AI 分析的同步阻塞部分。
+    現在透過 queue 和 loop 來發送非同步通知。
     """
     log.info(f"第一階段任務實際執行開始：task_id={task_id}, file_id={file_id}, model={model_name}")
     try:
@@ -86,7 +78,9 @@ def _run_stage1_blocking_task(task_id: int, file_id: int, model_name: str, serve
 
         # 新增：在呼叫 API 前發送一個更細緻的狀態更新
         DB_CLIENT.update_analysis_task(task_id=task_id, updates={"stage1_status": "gemini_processing"})
-        _send_websocket_notification(server_port, {"type": "analysis_update", "task_id": task_id, "status": "gemini_processing", "stage": 1, "result": DB_CLIENT.get_analysis_task(task_id)})
+        # JULES (2025-09-13): 改用佇列發送通知
+        notification_msg = {"type": "analysis_update", "task_id": task_id, "status": "gemini_processing", "stage": 1, "result": DB_CLIENT.get_analysis_task(task_id)}
+        asyncio.run_coroutine_threadsafe(queue.put(notification_msg), loop)
 
         # 現在 structured_data, error, used_key, token_usage 都能正確接收到值
         structured_data, error, used_key, token_usage = gemini.prompt_for_json(prompt=prompt, model_name=model_name)
@@ -118,9 +112,10 @@ def _run_stage1_blocking_task(task_id: int, file_id: int, model_name: str, serve
         log.error(f"第一階段任務失敗：task_id={task_id}，{error_message}", exc_info=True)
         DB_CLIENT.update_analysis_task(task_id=task_id, updates={"stage1_status": "failed", "stage1_error_log": error_message})
 
-def _run_stage2_blocking_task(task_id: int, model_name: str, server_port: int):
+def _run_stage2_blocking_task(task_id: int, model_name: str, queue: asyncio.Queue, loop: asyncio.AbstractEventLoop):
     """
     執行第二階段 AI 分析的同步阻塞部分。
+    現在透過 queue 和 loop 來發送非同步通知。
     """
     log.info(f"第二階段任務實際執行開始：task_id={task_id}, model={model_name}")
     try:
@@ -149,7 +144,10 @@ def _run_stage2_blocking_task(task_id: int, model_name: str, server_port: int):
 
         # 新增：在呼叫 API 前發送一個更細緻的狀態更新
         DB_CLIENT.update_analysis_task(task_id=task_id, updates={"stage2_status": "gemini_processing"})
-        _send_websocket_notification(server_port, {"type": "analysis_update", "task_id": task_id, "status": "gemini_processing", "stage": 2, "result": DB_CLIENT.get_analysis_task(task_id)})
+        # JULES (2025-09-13): 改用佇列發送通知
+        notification_msg = {"type": "analysis_update", "task_id": task_id, "status": "gemini_processing", "stage": 2, "result": DB_CLIENT.get_analysis_task(task_id)}
+        asyncio.run_coroutine_threadsafe(queue.put(notification_msg), loop)
+
 
         # 同樣，確保能接收到完整的元組，包含 token 使用量
         report_html, error, used_key, token_usage = gemini.prompt_for_text(prompt=prompt, model_name=model_name)
@@ -182,18 +180,21 @@ def _run_stage2_blocking_task(task_id: int, model_name: str, server_port: int):
 
 
 # --- 新的非同步包裝函式 (用於併發控制) ---
-async def run_analysis_task_wrapper(task_id: int, server_port: int, semaphore: asyncio.Semaphore, blocking_func, **kwargs):
+async def run_analysis_task_wrapper(task_id: int, semaphore: asyncio.Semaphore, blocking_func, queue: asyncio.Queue, loop: asyncio.AbstractEventLoop, **kwargs):
     """
     一個通用的非同步包裝函式，用於控制併發並執行阻塞的分析任務。
+    現在接收 queue 和 loop 以便將通知功能傳遞下去。
     """
     async with semaphore:
         log.info(f"任務 {task_id} 已取得信號量，準備執行...")
         # 更新任務狀態為「處理中」
         stage = kwargs.get("stage", 1)
         DB_CLIENT.update_analysis_task(task_id=task_id, updates={f"stage{stage}_status": "processing", f"stage{stage}_model": kwargs.get("model_name")})
-        _send_websocket_notification(server_port, {"type": "analysis_update", "task_id": task_id, "status": "processing", "stage": stage, "result": DB_CLIENT.get_analysis_task(task_id)})
 
-        loop = asyncio.get_running_loop()
+        # JULES (2025-09-13): 直接將通知放入佇列
+        notification_msg = {"type": "analysis_update", "task_id": task_id, "status": "processing", "stage": stage, "result": DB_CLIENT.get_analysis_task(task_id)}
+        await queue.put(notification_msg)
+
         try:
             # 在執行器中運行阻塞函式
             # 說明：loop.run_in_executor 不接受關鍵字參數來傳遞給目標函式。
@@ -204,8 +205,8 @@ async def run_analysis_task_wrapper(task_id: int, server_port: int, semaphore: a
             func_kwargs = kwargs.copy()
             func_kwargs.pop('stage', None)
 
-            # 建立 partial 函式
-            partial_func = functools.partial(blocking_func, task_id=task_id, server_port=server_port, **func_kwargs)
+            # 建立 partial 函式，現在包含 queue 和 loop
+            partial_func = functools.partial(blocking_func, task_id=task_id, queue=queue, loop=loop, **func_kwargs)
 
             await loop.run_in_executor(None, partial_func)
         except Exception as e:
@@ -215,7 +216,9 @@ async def run_analysis_task_wrapper(task_id: int, server_port: int, semaphore: a
             log.info(f"任務 {task_id} 執行完畢，釋放信號量。")
             # 總是在最後發送最終狀態的通知
             final_task_state = DB_CLIENT.get_analysis_task(task_id)
-            _send_websocket_notification(server_port, {"type": "analysis_update", f"task_type": f"analysis_stage_{stage}", "task_id": task_id, "status": final_task_state.get(f'stage{stage}_status'), "result": final_task_state})
+            final_notification_msg = {"type": "analysis_update", "task_type": f"analysis_stage_{stage}", "task_id": task_id, "status": final_task_state.get(f'stage{stage}_status'), "result": final_task_state}
+            # JULES (2025-09-13): 即使在 finally 區塊，也從非同步函式直接放入佇列
+            await queue.put(final_notification_msg)
 
 # --- 新的 API 端點 ---
 
@@ -225,10 +228,13 @@ async def start_stage1_analysis(request: Request, payload: Stage1Request, backgr
     if not payload.file_ids:
         raise HTTPException(status_code=400, detail="檔案 ID 列表不可為空。")
 
-    server_port = request.app.state.server_port
+    # JULES (2025-09-13): 從 app.state 獲取佇列和信號量，並獲取當前的事件迴圈
     semaphore = request.app.state.analysis_semaphore
-    if not server_port or not semaphore:
-        raise HTTPException(status_code=500, detail="伺服器狀態未完全初始化（缺少埠號或信號量）。")
+    queue = request.app.state.notification_queue
+    loop = asyncio.get_running_loop()
+
+    if not semaphore or not queue:
+        raise HTTPException(status_code=500, detail="伺服器狀態未完全初始化（缺少佇列或信號量）。")
 
     tasks_created = []
     conn = get_db_connection()
@@ -247,9 +253,10 @@ async def start_stage1_analysis(request: Request, payload: Stage1Request, backgr
             background_tasks.add_task(
                 run_analysis_task_wrapper,
                 task_id=task['id'],
-                server_port=server_port,
                 semaphore=semaphore,
                 blocking_func=_run_stage1_blocking_task,
+                queue=queue,
+                loop=loop,
                 file_id=file_id,
                 model_name=payload.model_name,
                 stage=1
@@ -265,10 +272,13 @@ async def start_stage2_analysis(request: Request, payload: Stage2Request, backgr
     if not payload.task_ids:
         raise HTTPException(status_code=400, detail="任務 ID 列表不可為空。")
 
-    server_port = request.app.state.server_port
+    # JULES (2025-09-13): 從 app.state 獲取佇列和信號量，並獲取當前的事件迴圈
     semaphore = request.app.state.analysis_semaphore
-    if not server_port or not semaphore:
-        raise HTTPException(status_code=500, detail="無法確定伺服器埠號或信號量。")
+    queue = request.app.state.notification_queue
+    loop = asyncio.get_running_loop()
+
+    if not semaphore or not queue:
+        raise HTTPException(status_code=500, detail="伺服器狀態未完全初始化（缺少佇列或信號量）。")
 
     for task_id in payload.task_ids:
         task_data = DB_CLIENT.get_analysis_task(task_id=task_id)
@@ -276,9 +286,10 @@ async def start_stage2_analysis(request: Request, payload: Stage2Request, backgr
             background_tasks.add_task(
                 run_analysis_task_wrapper,
                 task_id=task_id,
-                server_port=server_port,
                 semaphore=semaphore,
                 blocking_func=_run_stage2_blocking_task,
+                queue=queue,
+                loop=loop,
                 model_name=payload.model_name,
                 stage=2
             )

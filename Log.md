@@ -1,3 +1,22 @@
+## 1050號 - 2025-09-14T14:33:56.338524+08:00
+
+### fix(core): 重構後端內部通訊以解決 WebSocket 通知逾時問題
+
+- **動機**: 系統日誌中反覆出現 `ERROR - 無法發送 WebSocket 通知: HTTPConnectionPool(...) Read timed out` 的錯誤。經分析，根本原因為背景分析任務在完成工作後，試圖透過一個內部的 HTTP 請求來命令主伺服器發送 WebSocket 通知。這種「自己呼叫自己」的模式，在非同步應用中極易因資源競爭而導致死鎖或逾時。
+- **核心變更**:
+    - **導入非同步佇列 (`src/api/api_server.py`)**:
+        - 徹底移除了有問題的 `/api/internal/notify_task_update` HTTP 端點。
+        - 改為在 FastAPI 應用程式的生命週期 (`lifespan`) 中，建立一個全域的 `asyncio.Queue` 作為新的通訊中樞。
+        - 同時啟動了一個常駐的「訊息廣播員」(`notification_broadcaster`) 背景任務。此任務是唯一負責從佇列中讀取訊息，並透過 WebSocket 將其廣播給所有前端的角色。
+    - **改造背景任務 (`src/api/routes/page4_analyzer.py`)**:
+        - 完全移除了舊的、基於 `requests` 的通知函式。
+        - 修改了所有背景分析任務，使其不再傳遞 `server_port`，而是接收主應用程式的 `queue` 和 `loop` 物件。
+        - 所有需要發送通知的地方，現在都改為呼叫 `asyncio.run_coroutine_threadsafe(queue.put(message), loop)`。這個方法可以安全地、非阻塞地從背景執行緒將訊息放入主執行緒的佇列中。
+- **測試與驗證**:
+    - **修正依賴**: 在測試過程中，發現 `requirements/core.txt` 中缺少 `Pillow` 依賴導致伺服器啟動失敗，已將其補上。
+    - **端對端驗證**: 嚴格遵循 `test.md` 的指引啟動了應用程式。透過 `curl` 指令觸發了一次分析任務。
+    - **日誌分析**: 仔細檢查了 `orchestrator.log`，日誌清晰地顯示：1) 分析任務成功將通知放入佇列。2) 「訊息廣播員」成功從佇列中取出並準備廣播。3) 原本的 `Read timed out` 錯誤已完全消失。
+- **成果**: 本次提交從根本上重構了後端的內部通訊模式，用一個穩健、可靠的非同步佇列取代了脆弱的內部 HTTP 請求。這徹底解決了導致 WebSocket 通知失敗的逾時與死鎖問題，大幅提升了系統的穩定性與可靠性。
 ## 1049號 - 2025-09-14T13:25:16.438564+08:00
 
 ### feat(analyzer): 增強分析儀表板的狀態顯示與即時反饋

@@ -107,13 +107,63 @@ manager = ConnectionManager()
 db_client = get_client()
 
 # --- FastAPI Lifespan Manager ---
+
+async def notification_broadcaster(app: FastAPI):
+    """
+    一個常駐的背景任務，專門用來監聽通知佇列，
+    並將收到的訊息廣播給所有 WebSocket 用戶端。
+    """
+    log.info("訊息廣播員已啟動，正在監聽通知佇列...")
+    while True:
+        try:
+            # 從佇列中等待並獲取下一則通知訊息
+            message = await app.state.notification_queue.get()
+            log.info(f"📬 佇列收到訊息，準備廣播: {message.get('type', 'N/A')} (Task: {message.get('task_id', 'N/A')})")
+
+            # 使用 WebSocket 管理器廣播訊息
+            await app.state.manager.broadcast_json(message)
+
+            # 標示此任務已完成
+            app.state.notification_queue.task_done()
+        except asyncio.CancelledError:
+            log.info("訊息廣播員收到取消請求，即將關閉。")
+            break
+        except Exception as e:
+            log.error(f"訊息廣播員發生未預期的錯誤: {e}", exc_info=True)
+            # 等待一小段時間再繼續，避免快速的錯誤迴圈
+            await asyncio.sleep(1)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # 在應用程式啟動時執行的程式碼
+    """
+    管理應用程式生命週期的非同步上下文管理器。
+    負責在啟動時初始化資源，在關閉時進行清理。
+    """
+    # --- 應用程式啟動時 ---
+    # 1. 設定資料庫日誌
     setup_database_logging()
     log.info("資料庫日誌處理器已透過 lifespan 事件設定。")
-    yield
-    # 可以在此處加入應用程式關閉時執行的程式碼
+
+    # 2. 建立全域非同步通知佇列
+    queue = asyncio.Queue()
+    app.state.notification_queue = queue
+    log.info("全域非同步通知佇列已建立。")
+
+    # 3. 啟動訊息廣播員背景任務
+    broadcaster_task = asyncio.create_task(notification_broadcaster(app))
+    app.state.broadcaster_task = broadcaster_task
+
+    yield # 應用程式在此處運行
+
+    # --- 應用程式關閉時 ---
+    # 1. 優雅地關閉訊息廣播員
+    log.info("正在關閉應用程式...")
+    app.state.broadcaster_task.cancel()
+    try:
+        await app.state.broadcaster_task
+    except asyncio.CancelledError:
+        log.info("訊息廣播員已成功關閉。")
 
 # --- FastAPI 應用實例 ---
 app = FastAPI(title="鳳凰音訊轉錄儀 API (v3 - 重構)", version="3.0", lifespan=lifespan)
@@ -1339,51 +1389,13 @@ async def get_all_app_states_endpoint():
         raise HTTPException(status_code=500, detail="獲取所有應用程式狀態時發生內部錯誤。")
 
 
-@app.post("/api/internal/notify_task_update", status_code=200)
-async def notify_task_update(payload: Dict):
-    """
-    一個內部端點，供 Worker 程序在任務完成時呼叫，
-    以便透過 WebSocket 將更新廣播給前端。
-    """
-    task_id = payload.get("task_id")
-    status = payload.get("status")
-    result = payload.get("result")
-    # 從 payload 獲取 task_type，這是從背景任務傳來的，比重新查詢資料庫更可靠
-    task_type = payload.get("task_type", "unknown")
-
-    log.info(f"🔔 收到來自背景任務的更新通知: Task {task_id} ({task_type}) -> {status}")
-
-    # 根據任務類型決定 WebSocket 訊息類型
-    message_type = "GENERIC_UPDATE" # Default
-    if task_type == "download":
-        message_type = "DOWNLOAD_COMPLETE"
-    elif task_type == "processing":
-        message_type = "PROCESSING_COMPLETE"
-    elif "youtube" in task_type or "gemini" in task_type:
-        message_type = "YOUTUBE_STATUS"
-    elif "transcribe" in task_type:
-        message_type = "TRANSCRIPTION_STATUS"
-
-    log.info(f"根據任務類型 '{task_type}'，將使用 WebSocket 訊息類型: '{message_type}'")
-
-    # 確保 result 是字典格式
-    if isinstance(result, str):
-        try:
-            result = json.loads(result)
-        except json.JSONDecodeError:
-            log.warning(f"來自 worker 的任務 {task_id} 結果不是有效的 JSON 格式。")
-
-    message = {
-        "type": message_type,
-        "payload": {
-            "task_id": task_id,
-            "status": status,
-            "result": result,
-            "task_type": task_type
-        }
-    }
-    await manager.broadcast_json(message)
-    return {"status": "notification_sent"}
+# --- (已移除) 內部通知端點 ---
+# JULES (2025-09-13):
+# 移除了舊的 /api/internal/notify_task_update 端點。
+# 此端點會導致背景任務在 HTTP 請求中呼叫自己，引發超時和死鎖問題。
+# 新的架構改用一個在應用程式生命週期中運行的常駐 asyncio.Queue 和一個
+# 「訊息廣播員」背景任務來處理所有來自背景任務的 WebSocket 通知。
+# 這種發布/訂閱模式更穩健、更可靠，且完全解耦。
 
 
 # --- 主程式啟動 ---
