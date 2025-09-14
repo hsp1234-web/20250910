@@ -28,14 +28,39 @@
             <p>此頁面用於管理您的 Google API 金鑰池。有效的金鑰將被用於 AI 分析任務。</p>
         </div>
 
+        <!-- 新增：模式選擇 -->
         <div class="panel">
-            <h2>新增金鑰</h2>
+            <h2>金鑰輸入模式</h2>
+            <div class="form-group radio-group">
+                <input type="radio" id="mode-manual" name="key-mode" value="manual" checked>
+                <label for="mode-manual">手動輸入</label>
+                <input type="radio" id="mode-authorized" name="key-mode" value="authorized">
+                <label for="mode-authorized">從授權來源載入</label>
+            </div>
+        </div>
+
+        <!-- 模式一：手動輸入 -->
+        <div id="manual-input-panel" class="panel">
+            <h2>新增金鑰 (手動)</h2>
             <div class="form-group">
-                <input type="password" id="new-key-input" placeholder="在此貼上新的 API 金鑰">
+                <textarea id="new-keys-textarea" placeholder="在此貼上多個 API 金鑰（一行一個）" rows="5"></textarea>
                 <input type="text" id="new-key-name-input" placeholder="為金鑰設定一個別名 (可選)">
+                <small>說明：若貼上多個金鑰，別名只會套用於第一個金鑰。</small>
                 <button id="add-key-btn">新增金鑰</button>
             </div>
             <div id="add-key-status"></div>
+        </div>
+
+        <!-- 模式二：從授權來源載入 -->
+        <div id="authorized-load-panel" class="panel" style="display: none;">
+            <h2>從授權來源載入 (自動)</h2>
+            <p>此模式會嘗試從伺服器環境變數中讀取名為 <code>GOOGLE_API_KEY</code>, <code>GOOGLE_API_KEY_1</code>... 的金鑰。</p>
+            <div class="form-group">
+                <label for="key-load-count">金鑰載入數量 (0-20):</label>
+                <input type="number" id="key-load-count" min="0" max="20" value="5">
+                <button id="load-from-env-btn">開始載入</button>
+            </div>
+            <div id="load-from-env-status"></div>
         </div>
 
         <div class="panel">
@@ -61,17 +86,41 @@
 
     <script>
     document.addEventListener('DOMContentLoaded', () => {
+        // --- 元素選擇器 ---
         const keyListContainer = document.getElementById('key-list-container');
+        const validateAllBtn = document.getElementById('validate-all-btn');
+        const fetchModelsBtn = document.getElementById('fetch-models-btn');
+        const modelListContainer = document.getElementById('model-list-container');
+
+        // 模式選擇
+        const modeManualRadio = document.getElementById('mode-manual');
+        const modeAuthorizedRadio = document.getElementById('mode-authorized');
+        const manualInputPanel = document.getElementById('manual-input-panel');
+        const authorizedLoadPanel = document.getElementById('authorized-load-panel');
+
+        // 手動模式元素
         const addKeyBtn = document.getElementById('add-key-btn');
-        const newKeyInput = document.getElementById('new-key-input');
+        const newKeysTextarea = document.getElementById('new-keys-textarea');
         const newKeyNameInput = document.getElementById('new-key-name-input');
         const addKeyStatus = document.getElementById('add-key-status');
-        const validateAllBtn = document.getElementById('validate-all-btn');
 
-        const renderStatus = (element, message, isError = false) => {
-            element.textContent = message;
-            element.style.color = isError ? 'red' : 'green';
-            setTimeout(() => { element.textContent = ''; }, 5000);
+        // 授權模式元素
+        const loadFromEnvBtn = document.getElementById('load-from-env-btn');
+        const keyLoadCountInput = document.getElementById('key-load-count');
+        const loadFromEnvStatus = document.getElementById('load-from-env-status');
+
+        // --- 通用函式 ---
+        const renderStatus = (element, message, isError = false, append = false) => {
+            if (append) {
+                const p = document.createElement('p');
+                p.textContent = message;
+                p.style.color = isError ? 'red' : 'green';
+                element.appendChild(p);
+            } else {
+                element.innerHTML = ''; // 清空
+                element.textContent = message;
+                element.style.color = isError ? 'red' : 'green';
+            }
         };
 
         const renderKeyList = (keys) => {
@@ -110,87 +159,102 @@
             }
         };
 
-        let validationController;
+        // --- 事件監聽器 ---
 
+        // 模式切換邏輯
+        modeManualRadio.addEventListener('change', () => {
+            manualInputPanel.style.display = 'block';
+            authorizedLoadPanel.style.display = 'none';
+        });
+
+        modeAuthorizedRadio.addEventListener('change', () => {
+            manualInputPanel.style.display = 'none';
+            authorizedLoadPanel.style.display = 'block';
+        });
+
+        // 手動模式邏輯
         addKeyBtn.addEventListener('click', async () => {
-            // 取消任何正在進行的驗證請求，因為此操作優先級更高
-            if (validationController) {
-                validationController.abort();
-            }
-
-            const key = newKeyInput.value.trim();
+            const keys = newKeysTextarea.value.trim().split('\\n').filter(k => k.trim() !== '');
             const name = newKeyNameInput.value.trim();
-            if (!key) {
+
+            if (keys.length === 0) {
                 renderStatus(addKeyStatus, 'API 金鑰不可為空。', true);
                 return;
             }
+
             addKeyBtn.disabled = true;
             addKeyBtn.textContent = '新增中...';
-            try {
-                const response = await fetch('/api/keys', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ api_key: key, name: name || null })
-                });
-                const result = await response.json();
-                if (!response.ok) throw new Error(result.detail || '新增失敗');
-                renderStatus(addKeyStatus, result.message, false);
-                newKeyInput.value = '';
-                newKeyNameInput.value = '';
-                newKeyInput.style.borderColor = '#ccc'; // 成功後重設邊框顏色
-                fetchKeys();
-            } catch (error) {
-                renderStatus(addKeyStatus, `錯誤: ${error.message}`, true);
-            } finally {
-                addKeyBtn.disabled = false;
-                addKeyBtn.textContent = '新增金鑰';
+            addKeyStatus.innerHTML = ''; // 清空狀態區
+
+            for (let i = 0; i < keys.length; i++) {
+                const key = keys[i].trim();
+                // 別名只套用在第一個金鑰上
+                const keyName = (i === 0 && name) ? name : null;
+                renderStatus(addKeyStatus, `正在處理金鑰 #${i + 1}...`, false, true);
+
+                try {
+                    const response = await fetch('/api/keys', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({ api_key: key, name: keyName })
+                    });
+                    const result = await response.json();
+                    if (!response.ok) throw new Error(result.detail || '新增失敗');
+                    renderStatus(addKeyStatus, `✅ 金鑰 #${i + 1} (${result.name}) 新增成功。`, false, true);
+                } catch (error) {
+                    renderStatus(addKeyStatus, `❌ 金鑰 #${i + 1} 新增失敗: ${error.message}`, true, true);
+                }
             }
+
+            newKeysTextarea.value = '';
+            newKeyNameInput.value = '';
+            addKeyBtn.disabled = false;
+            addKeyBtn.textContent = '新增金鑰';
+            fetchKeys();
         });
 
-        newKeyInput.addEventListener('blur', async () => {
-            const key = newKeyInput.value.trim();
-            addKeyStatus.textContent = ''; // 清除之前的狀態
-            if (!key) {
-                newKeyInput.style.borderColor = '#ccc'; // 重設邊框
+        // 授權模式邏輯
+        loadFromEnvBtn.addEventListener('click', async () => {
+            const count = parseInt(keyLoadCountInput.value, 10);
+            if (isNaN(count) || count < 0 || count > 20) {
+                renderStatus(loadFromEnvStatus, '請輸入 0-20 之間的有效數字。', true);
                 return;
             }
 
-            // 如果有正在進行的驗證，先取消它
-            if (validationController) {
-                validationController.abort();
-            }
-            validationController = new AbortController();
-            const signal = validationController.signal;
-
-            renderStatus(addKeyStatus, '正在驗證金鑰...', false);
-            newKeyInput.style.borderColor = '#ffc107'; // "驗證中" 的顏色
+            loadFromEnvBtn.disabled = true;
+            loadFromEnvBtn.textContent = '載入中...';
+            renderStatus(loadFromEnvStatus, `正在從授權來源請求載入 ${count + 1} 組金鑰...`, false);
 
             try {
-                const response = await fetch('/api/keys/test', {
+                const response = await fetch('/api/keys/load_from_authorized_source', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ api_key: key }),
-                    signal: signal // 將 signal 傳遞給 fetch
+                    body: JSON.stringify({ count: count })
                 });
                 const result = await response.json();
-                if (result.is_valid) {
-                    renderStatus(addKeyStatus, '金鑰有效！', false);
-                    newKeyInput.style.borderColor = '#28a745'; // 綠色代表有效
-                } else {
-                    renderStatus(addKeyStatus, '金鑰無效或發生錯誤。', true);
-                    newKeyInput.style.borderColor = '#dc3545'; // 紅色代表無效
-                }
+                if (!response.ok) throw new Error(result.detail || '請求失敗');
+
+                const summary = result.summary;
+                let report = `<b>載入報告:</b><br>`;
+                report += `嘗試總數: ${summary.total_attempted}<br>`;
+                report += `成功新增: ${summary.successfully_added}<br>`;
+                report += `已存在: ${summary.already_existed}<br>`;
+                report += `未找到: ${summary.not_found}<br>`;
+                report += `無效金鑰: ${summary.invalid_keys}`;
+                loadFromEnvStatus.innerHTML = report;
+                loadFromEnvStatus.style.color = 'black';
+
             } catch (error) {
-                if (error.name === 'AbortError') {
-                    console.log('驗證請求被新的操作中斷。');
-                    // 如果是我們主動中斷的，則不顯示錯誤
-                } else {
-                    renderStatus(addKeyStatus, '驗證請求失敗。', true);
-                    newKeyInput.style.borderColor = '#dc3545';
-                }
+                renderStatus(loadFromEnvStatus, `錯誤: ${error.message}`, true);
+            } finally {
+                loadFromEnvBtn.disabled = false;
+                loadFromEnvBtn.textContent = '開始載入';
+                fetchKeys();
             }
         });
 
+
+        // 其他既有功能
         keyListContainer.addEventListener('click', async (e) => {
             if (e.target.classList.contains('delete-btn')) {
                 const keyHash = e.target.dataset.hash;
@@ -225,9 +289,6 @@
             }
         });
 
-        const fetchModelsBtn = document.getElementById('fetch-models-btn');
-        const modelListContainer = document.getElementById('model-list-container');
-
         fetchModelsBtn.addEventListener('click', async () => {
             fetchModelsBtn.disabled = true;
             fetchModelsBtn.textContent = '查詢中...';
@@ -243,7 +304,6 @@
                 if (result.length > 0) {
                     let modelHtml = '<ul>';
                     result.forEach(model => {
-                        // 顯示 models/ 開頭的完整模型名稱
                         modelHtml += `<li>${model}</li>`;
                     });
                     modelHtml += '</ul>';
@@ -260,6 +320,7 @@
             }
         });
 
+        // --- 初始載入 ---
         fetchKeys();
 
         const centerActiveNavButton = () => {

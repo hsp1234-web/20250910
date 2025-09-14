@@ -20,6 +20,11 @@
 #@markdown **後端版本分支或標籤 (TARGET_BRANCH_OR_TAG)**
 TARGET_BRANCH_OR_TAG = "15" #@param {type:"string"}
 #@markdown ---
+#@markdown ### **選用功能：自動載入金鑰**
+#@markdown > 勾選此項，啟動器將嘗試從 Colab Secrets (祕密) 中自動載入 `GEMINI_API_KEY_...` 系列金鑰。
+#@markdown > **注意**：若您是首次授權，Colab 會彈出一個授權視窗，這是正常現象。
+ATTEMPT_LOAD_KEYS_FROM_SECRETS = True #@param {type:"boolean"}
+#@markdown ---
 #@markdown > **設定完成後，點擊「執行」按鈕。**
 #@markdown > **所有其他設定（如 Git 倉庫）均已移至程式碼內部。**
 #@markdown ---
@@ -237,25 +242,28 @@ class ServerManager:
             initialize_database()
             add_system_log("colab_setup", "INFO", "Git repository cloned successfully.")
 
-            # --- 自動從 Colab Secrets 載入金鑰 ---
-            self._log_manager.log("INFO", "正在嘗試從 Colab Secrets 自動載入 API 金鑰...")
-            key_loader_script = project_path / "scripts" / "load_keys_from_colab.py"
-            if key_loader_script.is_file():
-                try:
-                    key_loader_command = [sys.executable, str(key_loader_script.resolve())]
-                    # 使用 Popen 以便即時讀取輸出
-                    process = subprocess.Popen(key_loader_command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8')
-                    for line in iter(process.stdout.readline, ''):
-                        self._log_manager.log("INFO", line.strip(), "KeyLoader")
-                    process.wait()
-                    if process.returncode == 0:
-                        self._log_manager.log("SUCCESS", "✅ 金鑰載入腳本執行完畢。")
-                    else:
-                        self._log_manager.log("WARN", f"金鑰載入腳本執行結束，但返回碼為 {process.returncode}。")
-                except Exception as e:
-                    self._log_manager.log("ERROR", f"執行金鑰載入腳本時發生錯誤: {e}")
+            # --- 自動從 Colab Secrets 載入金鑰 (可選) ---
+            if ATTEMPT_LOAD_KEYS_FROM_SECRETS:
+                self._log_manager.log("INFO", "正在根據使用者設定，嘗試從 Colab Secrets 自動載入 API 金鑰...")
+                key_loader_script = project_path / "scripts" / "load_keys_from_colab.py"
+                if key_loader_script.is_file():
+                    try:
+                        key_loader_command = [sys.executable, str(key_loader_script.resolve())]
+                        # 使用 Popen 以便即時讀取輸出
+                        process = subprocess.Popen(key_loader_command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8')
+                        for line in iter(process.stdout.readline, ''):
+                            self._log_manager.log("INFO", line.strip(), "KeyLoader")
+                        process.wait()
+                        if process.returncode == 0:
+                            self._log_manager.log("SUCCESS", "✅ 金鑰載入腳本執行完畢。")
+                        else:
+                            self._log_manager.log("WARN", f"金鑰載入腳本執行結束，但返回碼為 {process.returncode}。")
+                    except Exception as e:
+                        self._log_manager.log("ERROR", f"執行金鑰載入腳本時發生錯誤: {e}")
+                else:
+                    self._log_manager.log("WARN", "未找到金鑰載入腳本 'scripts/load_keys_from_colab.py'，跳過自動載入。")
             else:
-                self._log_manager.log("WARN", "未找到金鑰載入腳本 'scripts/load_keys_from_colab.py'，跳過自動載入。")
+                self._log_manager.log("INFO", "使用者未勾選「自動載入金鑰」，已跳過此步驟。")
             # --- 金鑰載入結束 ---
 
             # --- JULES: 重構為兩階段依賴安裝 ---

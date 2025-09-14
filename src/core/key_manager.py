@@ -158,3 +158,57 @@ def get_all_valid_keys_for_manager() -> List[Dict[str, str]]:
         for i, key in enumerate(valid_keys)
     ]
     return manager_keys
+
+def add_keys_from_environment(count: int) -> Dict[str, Any]:
+    """
+    從環境變數中讀取 API 金鑰並將其新增到金鑰池。
+    這是一個伺服器端的操作，用於「授權來源」模式。
+
+    :param count: 要嘗試讀取的金鑰數量。例如，count=2 會嘗試讀取
+                  GOOGLE_API_KEY, GOOGLE_API_KEY_1, GOOGLE_API_KEY_2。
+    :return: 一個包含操作結果的字典。
+    """
+    if not isinstance(count, int) or count < 0:
+        raise ValueError("金鑰數量必須是一個非負整數。")
+
+    # 金鑰名稱的基本部分
+    base_key_name = "GOOGLE_API_KEY"
+
+    # 建立要檢查的目標金鑰名稱列表
+    target_key_names = [base_key_name]
+    if count > 0:
+        target_key_names.extend([f"{base_key_name}_{i}" for i in range(1, count + 1)])
+
+    summary = {
+        "total_attempted": len(target_key_names),
+        "successfully_added": 0,
+        "already_existed": 0,
+        "not_found": 0,
+        "invalid_keys": 0,
+        "details": []
+    }
+
+    for key_name in target_key_names:
+        key_value = os.environ.get(key_name)
+
+        if not key_value:
+            summary["not_found"] += 1
+            summary["details"].append({"name": key_name, "status": "未在環境變數中找到"})
+            continue
+
+        try:
+            result = add_key(key_value, key_name)
+            if result.get("is_valid"):
+                summary["successfully_added"] += 1
+                summary["details"].append({"name": key_name, "status": "成功新增並驗證"})
+            else:
+                summary["invalid_keys"] += 1
+                summary["details"].append({"name": key_name, "status": "新增但驗證失敗"})
+        except ValueError as e:
+            # 通常是 "此 API 金鑰已存在" 的錯誤
+            summary["already_existed"] += 1
+            summary["details"].append({"name": key_name, "status": "已存在，跳過"})
+        except Exception as e:
+            summary["details"].append({"name": key_name, "status": f"發生未預期錯誤: {e}"})
+
+    return summary

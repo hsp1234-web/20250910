@@ -26,6 +26,9 @@ class KeyRequest(BaseModel):
 class TestKeyRequest(BaseModel):
     api_key: str
 
+class LoadFromEnvRequest(BaseModel):
+    count: int = Field(..., ge=0, le=20, title="要載入的金鑰數量")
+
 # --- API 端點 ---
 
 @router.get("", summary="獲取所有金鑰的狀態")
@@ -72,6 +75,20 @@ async def validate_all_stored_keys():
     except Exception as e:
         log.error(f"重新驗證金鑰時發生錯誤: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="重新驗證金鑰時發生伺服器內部錯誤。")
+
+@router.post("/load_from_authorized_source", summary="從授權來源（環境變數）載入金鑰")
+async def load_keys_from_env(payload: LoadFromEnvRequest):
+    """
+    從伺服器環境變數中讀取 GOOGLE_API_KEY... 系列金鑰並新增至金鑰池。
+    """
+    try:
+        result_summary = key_manager.add_keys_from_environment(payload.count)
+        return {"message": "從授權來源載入金鑰完成。", "summary": result_summary}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        log.error(f"從環境變數載入金鑰時發生錯誤: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="從環境變數載入金鑰時發生伺服器內部錯誤。")
 
 @router.get("/models", summary="獲取所有可用的 AI 模型")
 async def get_available_models():
