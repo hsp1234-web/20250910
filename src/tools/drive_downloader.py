@@ -5,6 +5,7 @@ import filetype
 import uuid
 import requests
 import re
+from urllib.parse import urlparse
 from pathlib import Path
 import sys
 
@@ -34,6 +35,20 @@ def _get_extension_from_headers(url: str) -> Optional[str]:
                          return ext
     except Exception as e:
         logging.warning(f"從 headers 獲取檔名時發生錯誤: {e}")
+    return None
+
+
+def _get_extension_from_url_path(url: str) -> Optional[str]:
+    """從 URL 的路徑部分提取副檔名作為最後的備案。"""
+    try:
+        path = urlparse(url).path
+        ext = Path(path).suffix
+        # 進行一些基本驗證，確保副檔名是合理的 (例如 .pdf, 而非 .)
+        if ext and 1 < len(ext) <= 10:
+            logging.info(f"從 URL 路徑中成功解析出副檔名: {ext}")
+            return ext
+    except Exception as e:
+        logging.warning(f"從 URL 路徑解析副檔名時出錯: {e}")
     return None
 
 
@@ -75,8 +90,12 @@ def download_file(
             logging.info("無法從 headers 獲取副檔名，嘗試使用 filetype 進行內容偵測。")
             kind = filetype.guess(str(temp_path))
             if kind is None:
-                logging.warning(f"無法偵測檔案類型：{url_id}。將不設定副檔名。")
-                extension = ""
+                logging.warning(f"filetype 無法偵測檔案類型：{url_id}。")
+                # 新增的最後備案：從 URL 路徑解析
+                extension = _get_extension_from_url_path(url)
+                if not extension:
+                    logging.warning(f"所有方法均失敗，URL ID: {url_id}。將不設定副檔名。")
+                    extension = ""
             else:
                 extension = f".{kind.extension}"
                 logging.info(f"filetype 偵測到檔案類型: {kind.mime} -> 副檔名: {extension}")

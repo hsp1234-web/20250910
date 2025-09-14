@@ -1,12 +1,16 @@
 # src/core/filename_utils.py
 import re
 
-def sanitize_for_filename(text: str) -> str:
+from typing import Optional
+
+
+def sanitize_for_filename(text: str, max_length: Optional[int] = 50) -> str:
     """
     對文字進行淨化，使其適用於檔名。
     - 保留中日韓文字、英文字母、數字、底線和連字號。
     - 將所有其他字元（包括空格）替換為底線。
     - 移除多餘的連續底線。
+    - 可選擇性地截斷至指定最大長度。
     """
     if not text:
         return ""
@@ -20,5 +24,11 @@ def sanitize_for_filename(text: str) -> str:
 
     # 步驟 3: 移除開頭和結尾的底線
     sanitized_text = sanitized_text.strip('_')
+
+    # 步驟 4: (新增) 根據 max_length 截斷字串
+    if max_length is not None and len(sanitized_text) > max_length:
+        sanitized_text = sanitized_text[:max_length]
+        # 再次移除結尾可能因截斷產生的底線
+        sanitized_text = sanitized_text.strip('_')
 
     return sanitized_text
