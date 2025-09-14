@@ -248,7 +248,7 @@
                 }).catch(err => logStatus('複製失敗', 'red'));
             });
 
-            // --- WebSocket Setup ---
+            // --- WebSocket Setup (Refactored) ---
             const setupWebSocket = () => {
                 const ws = new WebSocket(`${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/api/ws`);
                 ws.onopen = () => logStatus('WebSocket 連線成功。', 'blue');
@@ -256,12 +256,72 @@
                     logStatus('WebSocket 連線已中斷。5 秒後嘗試重新連線...', 'orange');
                     setTimeout(setupWebSocket, 5000);
                 };
+                ws.onerror = (error) => console.error("WebSocket Error:", error);
+
                 ws.onmessage = (event) => {
                     const data = JSON.parse(event.data);
-                    logStatus(`收到 WebSocket 訊息: ${data.type}`, 'purple');
-                    if (data.type === 'DOWNLOAD_COMPLETE' || data.type === 'PROCESSING_COMPLETE') {
-                        logStatus('偵測到狀態變更，正在更新所有列表...', 'green');
-                        setTimeout(refreshAllLists, 500);
+
+                    if (data.type !== 'task_update') {
+                        // 如果有下載完成的訊息，也觸發待處理列表的更新
+                        if (data.task_type === 'download' && data.status === 'completed') {
+                            logStatus('偵測到新檔案已下載完成，正在更新待處理列表...', 'green');
+                            setTimeout(fetchAndRenderPendingFiles, 500);
+                        }
+                        return;
+                    }
+
+                    if (data.task_type !== 'processing') {
+                        return;
+                    }
+
+                    const task_id = data.task_id;
+                    const status = data.status;
+                    const result = data.result;
+
+                    logStatus(`收到處理任務 #${task_id} 的更新: ${status}`, 'purple');
+
+                    const listItem = document.querySelector(`input.file-checkbox[value="${task_id}"]`)?.closest('li');
+
+                    if (!listItem) {
+                        logStatus(`警告: 在列表中找不到任務 #${task_id}。可能已被處理。`, 'orange');
+                         // 即使找不到，也刷新終端列表以確保狀態一致
+                        if (status === 'processed' || status === 'processing_failed' || status === 'processed_unsupported') {
+                            fetchAndRenderTerminalFiles();
+                        }
+                        return;
+                    }
+
+                    // 移除舊狀態
+                    listItem.classList.remove('status-processing', 'status-error', 'status-completed');
+
+                    // 清理舊的狀態標籤
+                    const oldStatusLabel = listItem.querySelector('.status-label');
+                    if (oldStatusLabel) oldStatusLabel.remove();
+
+                    switch (status) {
+                        case 'processing':
+                            listItem.classList.add('status-processing');
+                            listItem.insertAdjacentHTML('beforeend', ` <span class="status-label" style="color: #2980b9; font-weight: bold;">⚙️ 處理中...</span>`);
+                            break;
+                        case 'processing_failed':
+                            listItem.classList.add('status-error');
+                            listItem.insertAdjacentHTML('beforeend', ` <span class="status-label" style="color: #c0392b; font-weight: bold;">❌ 失敗</span>`);
+                            // 動畫效果後移除並更新終端列表
+                            setTimeout(() => {
+                                listItem.remove();
+                                fetchAndRenderTerminalFiles();
+                            }, 1500);
+                            break;
+                        case 'processed':
+                        case 'processed_unsupported':
+                            listItem.classList.add('status-completed');
+                            listItem.insertAdjacentHTML('beforeend', ` <span class="status-label" style="color: #27ae60; font-weight: bold;">✅ 完成</span>`);
+                             // 動畫效果後移除並更新終端列表
+                            setTimeout(() => {
+                                listItem.remove();
+                                fetchAndRenderTerminalFiles();
+                            }, 1500);
+                            break;
                     }
                 };
             };

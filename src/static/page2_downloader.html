@@ -187,21 +187,84 @@
                     setTimeout(setupWebSocket, 5000);
                 };
                 ws.onerror = (error) => console.error("WebSocket Error:", error);
+
                 ws.onmessage = (event) => {
                     const data = JSON.parse(event.data);
-                    logStatus(`收到 WebSocket 訊息: ${data.type}`, 'blue');
-                    if (data.type === 'URLS_EXTRACTED' || data.type === 'DOWNLOAD_COMPLETE') {
-                        let message = data.type === 'URLS_EXTRACTED'
-                            ? '偵測到新的 URL 已被提取，正在更新列表...'
-                            : '偵測到下載任務完成，正在更新列表...';
-                        logStatus(message, 'green');
-                        // 稍作延遲以等待資料庫完全更新
-                        setTimeout(() => {
-                            fetchAndRenderUrls();
-                            fetchAndRenderCompletedFiles(); // 同時更新已完成列表
-                        }, 500);
+
+                    // 我們只關心 'task_update' 類型的訊息
+                    if (data.type !== 'task_update') {
+                        // 如果有新的 URL 被提取，也重新整理列表
+                        if (data.type === 'URLS_EXTRACTED') {
+                             logStatus('偵測到新的 URL 已被提取，正在更新列表...', 'green');
+                             setTimeout(fetchAndRenderUrls, 500);
+                        }
+                        return;
+                    }
+
+                    // 我們只關心 'download' 類型的任務
+                    if (data.task_type !== 'download') {
+                        return;
+                    }
+
+                    const task_id = data.task_id;
+                    const status = data.status;
+                    const result = data.result; // result 現在是完整的資料庫紀錄物件
+
+                    logStatus(`收到下載任務 #${task_id} 的更新: ${status}`, 'purple');
+
+                    const row = document.querySelector(`input.url-checkbox[value="${task_id}"]`)?.closest('tr');
+
+                    if (!row) {
+                        logStatus(`警告: 在表格中找不到任務 #${task_id} 對應的列。可能已被處理。`, 'orange');
+                        // 即使找不到列，如果任務完成了，我們也應該更新「已完成」列表
+                        if (status === 'completed') {
+                            fetchAndRenderCompletedFiles();
+                        }
+                        return;
+                    }
+
+                    // 移除所有舊的狀態指示器
+                    row.classList.remove('status-processing', 'status-error', 'status-completed');
+
+                    switch (status) {
+                        case 'downloading':
+                            row.classList.add('status-processing');
+                            // 在最後一格新增狀態提示
+                            updateRowStatusCell(row, '📥 下載中...', '#2980b9');
+                            break;
+                        case 'download_failed':
+                        case 'failed':
+                            row.classList.add('status-error');
+                            const errorMessage = result.status_message || '未知錯誤';
+                            updateRowStatusCell(row, `❌ 失敗: ${errorMessage}`, '#c0392b');
+                            break;
+                        case 'completed':
+                            row.classList.add('status-completed');
+                            updateRowStatusCell(row, `✅ 完成`, '#27ae60');
+                            // 動畫效果後移除
+                            setTimeout(() => {
+                                row.remove();
+                                // 更新已完成列表
+                                fetchAndRenderCompletedFiles();
+                                logStatus(`任務 #${task_id} 已完成並從待辦列表移除。`);
+                            }, 1500);
+                            break;
                     }
                 };
+            };
+
+            const updateRowStatusCell = (row, text, color) => {
+                let statusCell = row.querySelector('.status-cell');
+                if (!statusCell) {
+                    // 如果狀態欄不存在，則新增一個
+                    const header = document.querySelector('.results-table thead tr');
+                    if (!header.querySelector('.status-header')) {
+                         header.insertAdjacentHTML('beforeend', '<th class="status-header">狀態</th>');
+                    }
+                    statusCell = row.insertCell(-1);
+                    statusCell.className = 'status-cell';
+                }
+                statusCell.innerHTML = `<span style="color: ${color}; font-weight: bold;">${text}</span>`;
             };
 
             const fetchAndRenderCompletedFiles = async () => {
