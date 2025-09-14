@@ -454,9 +454,29 @@
                 };
                 ws.onmessage = (event) => {
                     const data = JSON.parse(event.data);
-                    if (data.type === 'STATUS_UPDATE') {
-                        logStatus('收到狀態更新通知，正在刷新儀表板...', 'purple');
-                        fetchAnalysisStatus();
+                    // 修正：監聽由 page4_analyzer.py 發送的正確訊息類型 'analysis_update'
+                    if (data.type === 'analysis_update') {
+                        // 優化：直接使用 WebSocket 推送的資料更新前端，避免額外的 API call
+                        if (data.result && data.result.id) {
+                            const updatedTask = data.result;
+                            const taskIndex = analysisTasks.findIndex(t => t.id === updatedTask.id);
+
+                            if (taskIndex > -1) {
+                                // 更新現有任務
+                                analysisTasks[taskIndex] = updatedTask;
+                                logStatus(`任務 #${updatedTask.id} 狀態已更新。`, 'purple');
+                            } else {
+                                // 新增任務 (例如，由其他使用者觸發)
+                                analysisTasks.unshift(updatedTask);
+                                logStatus(`收到新的分析任務 #${updatedTask.id}。`, 'purple');
+                            }
+                            // 直接用更新後的本地資料重新渲染儀表板
+                            renderAnalysisDashboard();
+                        } else {
+                            // 保留舊的刷新邏輯作為後備
+                            logStatus('收到通用狀態更新通知，正在刷新儀表板...', 'purple');
+                            fetchAnalysisStatus();
+                        }
                     }
                 };
             };
