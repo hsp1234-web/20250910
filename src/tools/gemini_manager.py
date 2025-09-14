@@ -185,30 +185,35 @@ class GeminiManager:
         logging.error(f"[{task_name}] 在嘗試了 {len(keys_to_try)} 組金鑰後，API 請求最終失敗。最後一個錯誤: {last_error}")
         return None, last_error, "all_keys_failed", 0
 
-    def prompt_for_json(self, prompt: str, model_name: str = "gemini-2.0-flash") -> Optional[Dict]:
+    def prompt_for_json(self, prompt: str, images: Optional[List[Image.Image]] = None, model_name: str = "gemini-1.5-flash-latest") -> Optional[Dict]:
         """
-        使用自訂提示詞執行請求，並期望回傳一個 JSON 物件。
-        適用於第一階段的結構化資料提取。
+        使用自訂提示詞執行請求，可選擇性地附帶圖片，並期望回傳一個 JSON 物件。
         """
-        # 說明：修改回傳值，使其從只回傳 result，變為回傳完整的 (result, error, used_key) 元組。
-        # 這是為了解決下游函式無法正確接收到錯誤狀態的問題。
+        prompt_content = [prompt]
+        if images:
+            prompt_content.extend(images)
+            logging.info(f"請求中包含 {len(images)} 張圖片。")
+
         return self._api_call_wrapper(
             task_name="PromptForJson",
             model_name=model_name,
-            prompt_content=[prompt],
+            prompt_content=prompt_content,
             output_format='json'
         )
 
-    def prompt_for_text(self, prompt: str, model_name: str = "gemini-1.5-pro-latest") -> Optional[str]:
+    def prompt_for_text(self, prompt: str, images: Optional[List[Image.Image]] = None, model_name: str = "gemini-1.5-pro-latest") -> Optional[str]:
         """
-        使用自訂提示詞執行請求，並期望回傳純文字 (例如 HTML)。
-        適用於第二階段的報告生成。
+        使用自訂提示詞執行請求，可選擇性地附帶圖片，並期望回傳純文字。
         """
-        # 說明：同樣修改回傳值，使其回傳完整的 (result, error, used_key) 元組。
+        prompt_content = [prompt]
+        if images:
+            prompt_content.extend(images)
+            logging.info(f"請求中包含 {len(images)} 張圖片。")
+
         return self._api_call_wrapper(
             task_name="PromptForText",
             model_name=model_name,
-            prompt_content=[prompt],
+            prompt_content=prompt_content,
             output_format='text'
         )
 

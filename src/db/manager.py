@@ -42,8 +42,9 @@ log = logging.getLogger('DBManagerServer')
 
 # --- 伺服器設定 ---
 # JULES: 將 PORT 設為 0，讓作業系統動態選擇可用埠號
-# JULES'S FIX (2025-09-12): 改為固定埠號以簡化服務發現
-HOST, PORT = "127.0.0.1", 50001
+# JULES'S FIX (2025-09-14): 恢復為動態埠號分配，以從根本上解決「位址已使用」的錯誤。
+# 協調器 (Orchestrator) 已被驗證可以處理動態埠號。
+HOST, PORT = "127.0.0.1", 0
 
 # --- 指令分派 ---
 # 建立一個函式名稱與指令 action 的對應字典

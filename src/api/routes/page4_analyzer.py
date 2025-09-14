@@ -20,6 +20,9 @@ from db.client import get_client
 from db.database import get_db_connection
 from core import key_manager, prompt_manager
 from tools.gemini_manager import GeminiManager
+from tools.universal_downloader import UniversalDownloader
+from tools.content_extractor import extract_content
+from PIL import Image
 
 # --- 常數與設定 ---
 log = logging.getLogger(__name__)
@@ -317,6 +320,127 @@ async def get_stage1_result(task_id: int):
 
     with open(json_path, "r", encoding="utf-8") as f:
         return json.load(f)
+
+# --- 新增：URL 即時分析流程 ---
+
+class UrlAnalysisRequest(BaseModel):
+    url: str
+    model_name: str
+    # 未來可以擴充，接收使用者上傳的圖片路徑
+    # user_image_paths: Optional[List[str]] = None
+
+def _run_url_analysis_blocking_task(url: str, model_name: str, queue: asyncio.Queue, loop: asyncio.AbstractEventLoop):
+    """
+    一個獨立的背景任務，用於處理從 URL 開始的完整分析流程。
+    """
+    task_id = f"url_{uuid.uuid4().hex[:8]}"
+    log.info(f"URL 分析任務啟動：task_id={task_id}, url={url}")
+
+    def notify(status: str, result: Any = None):
+        """輔助函式，用於發送狀態通知。"""
+        msg = {"type": "url_analysis_update", "task_id": task_id, "status": status, "result": result}
+        asyncio.run_coroutine_threadsafe(queue.put(msg), loop)
+
+    try:
+        # 0. 發送初始狀態
+        notify("starting")
+
+        # 1. 下載檔案
+        notify("downloading")
+        downloader = UniversalDownloader(output_dir=str(TEMP_JSON_DIR / "url_downloads"))
+        downloaded_path = downloader.download(url)
+        if not downloaded_path:
+            raise FileNotFoundError("檔案下載失敗。")
+        notify("download_complete", {"downloaded_path": str(downloaded_path)})
+
+        # 2. 提取內容
+        notify("extracting")
+        image_output_dir = TEMP_JSON_DIR / f"extracted_images_{task_id}"
+        extraction_result = extract_content(str(downloaded_path), str(image_output_dir))
+        if not extraction_result:
+            raise ValueError("從下載的檔案中提取內容失敗。")
+
+        text_content = extraction_result["text"]
+        image_paths = extraction_result["image_paths"]
+        notify("extraction_complete", {"text_length": len(text_content), "image_count": len(image_paths)})
+
+        # 3. 準備 AI 分析
+        all_prompts = prompt_manager.get_all_prompts()
+        prompt_template = all_prompts.get("stage_1_extraction_prompt") # 複用現有的提示詞
+        if not prompt_template:
+            raise ValueError("在提示詞庫中找不到 'stage_1_extraction_prompt'。")
+
+        valid_keys = key_manager.get_all_valid_keys_for_manager()
+        if not valid_keys:
+            raise ValueError("在金鑰池中找不到任何有效的 API 金鑰。")
+
+        gemini = GeminiManager(api_keys=valid_keys)
+
+        # 載入圖片
+        images = []
+        if image_paths:
+            for img_path in image_paths:
+                try:
+                    images.append(Image.open(img_path))
+                except Exception as e:
+                    log.warning(f"無法開啟提取出的圖片 {img_path}: {e}")
+
+        prompt = prompt_template.format(document_text=text_content)
+
+        # 4. 執行 AI 圖文分析
+        notify("gemini_processing")
+        structured_data, error, used_key, token_usage = gemini.prompt_for_json(
+            prompt=prompt,
+            images=images,
+            model_name=model_name
+        )
+
+        if error:
+            raise error
+
+        # 5. 儲存結果並完成
+        json_filename = f"url_analysis_{task_id}.json"
+        json_path = TEMP_JSON_DIR / json_filename
+        with open(json_path, "w", encoding="utf-8") as f:
+            json.dump(structured_data, f, ensure_ascii=False, indent=2)
+
+        final_result = {
+            "json_path": str(json_path),
+            "token_usage": token_usage,
+            "used_key": used_key,
+            "source_url": url
+        }
+        log.info(f"URL 分析任務成功：task_id={task_id}，結果已儲存至 {json_path}")
+        notify("completed", final_result)
+
+    except Exception as e:
+        error_message = f"錯誤: {type(e).__name__}: {str(e)}"
+        log.error(f"URL 分析任務失敗：task_id={task_id}，{error_message}", exc_info=True)
+        notify("failed", {"error": error_message})
+
+
+@router.post("/start_analysis_from_url")
+async def start_analysis_from_url(request: Request, payload: UrlAnalysisRequest, background_tasks: BackgroundTasks):
+    """
+    接收一個 URL，並啟動一個完整的背景任務來下載、提取和分析。
+    """
+    # JULES (2025-09-13): 從 app.state 獲取佇列和信號量，並獲取當前的事件迴圈
+    queue = request.app.state.notification_queue
+    loop = asyncio.get_running_loop()
+
+    if not queue or not loop:
+         raise HTTPException(status_code=500, detail="伺服器狀態未完全初始化（缺少佇列或事件迴圈）。")
+
+    background_tasks.add_task(
+        _run_url_analysis_blocking_task,
+        url=payload.url,
+        model_name=payload.model_name,
+        queue=queue,
+        loop=loop
+    )
+
+    return {"message": "已成功啟動 URL 分析任務。請透過 WebSocket 監聽進度。"}
+
 
 # --- 保留但可選用的端點 ---
 
