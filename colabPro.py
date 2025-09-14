@@ -1,39 +1,29 @@
 # -*- coding: utf-8 -*-
 # ╔══════════════════════════════════════════════════════════════════╗
 # ║                                                                      ║
-# ║   ✨🐺 善狼一鍵啟動器 (v26) 🐺                                   ✨🐺 ║
+# ║   ✨🐺 善狼一鍵啟動器 (v27) 🐺                                   ✨🐺 ║
 # ║                                                                      ║
 # ╠══════════════════════════════════════════════════════════════════╣
 # ║                                                                      ║
-# ║ - V26 更新日誌 (2025-09-14):                                         ║
-# ║   - **新增進階金鑰載入**: 實作了全新的雙模式金鑰載入系統。           ║
-# ║   - **模式一 (自動)**: 可依指定數量從 Colab Secrets 載入金鑰。       ║
-# ║   - **模式二 (手動)**: 允許使用者直接在介面中貼上一或多個金鑰。      ║
+# ║ - V27 更新日誌 (2025-09-14):                                         ║
+# ║   - **介面再次簡化**: 根據使用者最終要求，移除模式選擇和手動輸入，   ║
+# ║     將金鑰載入流程固定為「自動從 Colab Secrets 載入」。             ║
+# ║   - **保留核心選項**: 介面僅保留「後端版本」與「金鑰載入數量」。      ║
 # ║                                                                      ║
 # ╚══════════════════════════════════════════════════════════════════╝
 
-#@title ✨🐺 善狼一鍵啟動器 (v26) - 進階金鑰管理 🐺 { vertical-output: true, display-mode: "form" }
+#@title ✨🐺 善狼一鍵啟動器 (v27) - 終極簡化版 🐺 { vertical-output: true, display-mode: "form" }
 #@markdown ---
-#@markdown ### **第一步：後端版本設定**
-#@markdown > **請在此輸入您想使用的後端版本分支或標籤。**
+#@markdown ### **核心設定**
+#@markdown > **請確認以下兩個核心設定。**
+#@markdown ---
+#@markdown **後端版本分支或標籤**
 TARGET_BRANCH_OR_TAG = "15" #@param {type:"string"}
-#@markdown ---
-#@markdown ### **第二步：金鑰載入設定**
-#@markdown > **請選擇您的 API 金鑰載入方式。**
-KEY_INPUT_MODE = "\u81EA\u52D5\u5F9E Colab Secrets \u8F09\u5165" #@param ["自動從 Colab Secrets 載入", "手動在下方貼上金鑰"]
-
-#@markdown ---
-#@markdown #### **模式一：自動從 Colab Secrets 載入**
-#@markdown > **金鑰載入數量 (有效範圍 0-20)**：輸入 `2` 將載入 3 組金鑰 (KEY, KEY_1, KEY_2)。
-#@markdown > **注意**：只有當上方模式選擇「自動」時，此設定才有效。
+#@markdown **自動從 Colab Secrets 載入的金鑰數量 (0-20)**
+#@markdown > 輸入 `2` 將載入 `GOOGLE_API_KEY`, `_1`, `_2` 共三組金鑰。
 KEY_LOAD_COUNT_LIMIT = 2 #@param {type:"number"}
-
 #@markdown ---
-#@markdown #### **模式二：手動貼上金鑰**
-#@markdown > **手動輸入金鑰 (一行一個)**：當上方模式選擇「手動」時，請在此處貼上您的 API 金鑰。
-MANUAL_KEYS_TEXTAREA = "" #@param {type:"string"}
-#@markdown ---
-#@markdown > **設定完成後，點擊下方的「執行」按鈕。**
+#@markdown > **設定完成後，點擊「執行」按鈕。**
 #@markdown ---
 
 # ==============================================================================
@@ -249,42 +239,32 @@ class ServerManager:
             initialize_database()
             add_system_log("colab_setup", "INFO", "Git repository cloned successfully.")
 
-            # --- (中文註解) 核心金鑰注入邏輯 ---
-            # 根據使用者在 Colab UI 上的選擇，決定如何執行金鑰注入腳本。
-            # 這是為了將複雜的判斷邏輯保留在啟動器內，讓注入腳本本身盡可能單純。
-            self._log_manager.log("INFO", "正在準備執行金鑰注入...")
+            # --- (中文註解) 核心金鑰注入邏輯（終極簡化版） ---
+            # 根據使用者的最終要求，此版本啟動器將始終以「自動」模式運行。
+            # 它會讀取使用者在 UI 上設定的 `KEY_LOAD_COUNT_LIMIT` 數量，
+            # 並將其作為參數傳遞給金鑰注入腳本。
+            self._log_manager.log("INFO", "正在準備執行金鑰自動注入...")
             key_injector_script = project_path / "scripts" / "colab_key_injector.py"
             if key_injector_script.is_file():
-                command = [sys.executable, str(key_injector_script.resolve())]
-
-                # 判斷使用者選擇的模式
-                if "自動" in KEY_INPUT_MODE:
-                    self._log_manager.log("INFO", "偵測到「自動」模式。")
-                    command.extend(["--mode", "auto", "--count", str(KEY_LOAD_COUNT_LIMIT)])
-                elif "手動" in KEY_INPUT_MODE:
-                    self._log_manager.log("INFO", "偵測到「手動」模式。")
-                    if not MANUAL_KEYS_TEXTAREA.strip():
-                        self._log_manager.log("WARN", "使用者選擇手動模式，但未提供任何金鑰，跳過注入。")
-                        command = None # 設定 command 為 None 來跳過執行
+                # (中文註解) 固定使用 --mode auto，並傳入使用者指定的數量
+                command = [
+                    sys.executable,
+                    str(key_injector_script.resolve()),
+                    "--mode", "auto",
+                    "--count", str(KEY_LOAD_COUNT_LIMIT)
+                ]
+                
+                try:
+                    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8')
+                    for line in iter(process.stdout.readline, ''):
+                        self._log_manager.log("INFO", line.strip(), "KeyInjector")
+                    process.wait()
+                    if process.returncode == 0:
+                        self._log_manager.log("SUCCESS", "✅ 金鑰注入腳本執行完畢。")
                     else:
-                        command.extend(["--mode", "manual", "--manual-keys", MANUAL_KEYS_TEXTAREA])
-                else:
-                    self._log_manager.log("WARN", "無法識別的金鑰載入模式，跳過注入。")
-                    command = None # 設定 command 為 None 來跳過執行
-
-                # 如果 command 有效，則執行它
-                if command:
-                    try:
-                        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8')
-                        for line in iter(process.stdout.readline, ''):
-                            self._log_manager.log("INFO", line.strip(), "KeyInjector")
-                        process.wait()
-                        if process.returncode == 0:
-                            self._log_manager.log("SUCCESS", "✅ 金鑰注入腳本執行完畢。")
-                        else:
-                            self._log_manager.log("WARN", f"金鑰注入腳本執行結束，但返回碼為 {process.returncode}。")
-                    except Exception as e:
-                        self._log_manager.log("ERROR", f"執行金鑰注入腳本時發生錯誤: {e}")
+                        self._log_manager.log("WARN", f"金鑰注入腳本執行結束，但返回碼為 {process.returncode}。")
+                except Exception as e:
+                    self._log_manager.log("ERROR", f"執行金鑰注入腳本時發生錯誤: {e}")
             else:
                 self._log_manager.log("WARN", f"未找到金鑰注入腳本 '{key_injector_script}'，跳過金鑰載入。")
             # --- 金鑰注入邏輯結束 ---
