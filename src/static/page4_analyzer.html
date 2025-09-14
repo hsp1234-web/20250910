@@ -119,6 +119,7 @@
                 const statusMap = {
                     'pending': '⏳ 等待中',
                     'processing': '🔄 處理中',
+                    'gemini_processing': '🤖 Gemini 分析中',
                     'completed': '✅ 完成',
                     'failed': '❌ 失敗',
                     'processed': '可供分析',
@@ -170,16 +171,28 @@
 
                     const translatedStatus = translateStatus(status);
                     let statusClass = '';
-                    if (status) {
-                        if (status.includes('pending')) statusClass = 'status-pending';
-                        else if (status.includes('processing')) statusClass = 'status-analyzing';
-                        else if (status.includes('completed')) statusClass = 'status-analyzed';
-                        else if (status.includes('failed')) statusClass = 'status-error';
-                    }
-
                     let displayText = translatedStatus;
-                    if (status === 'processing' && model) {
-                        displayText = `${translatedStatus} (${model.replace('models/', '')})`
+
+                    switch (status) {
+                        case 'pending':
+                            statusClass = 'status-pending';
+                            break;
+                        case 'processing':
+                            statusClass = 'status-analyzing'; // Purple color
+                            if (model) displayText = `${translatedStatus} (${model.replace('models/', '')})`;
+                            break;
+                        case 'gemini_processing':
+                            statusClass = 'status-gemini'; // Orange color
+                            if (model) displayText = `${translatedStatus} (${model.replace('models/', '')})`;
+                            break;
+                        case 'completed':
+                            statusClass = 'status-completed'; // Green color
+                            break;
+                        case 'failed':
+                            statusClass = 'status-error';
+                            break;
+                        default:
+                            statusClass = '';
                     }
 
                     return `<span class="${statusClass}" title="${errorLog || ''}">${displayText}</span>`;
@@ -319,7 +332,15 @@
                     });
                     if (response.ok) {
                         logStatus('分析請求已成功發送，正在更新儀表板狀態...', 'purple');
+                        // 先獲取後端建立的任務列表
                         await fetchAnalysisStatus();
+                        // 前端立即預測性地更新狀態為「處理中」以提供即時反饋
+                        analysisTasks.forEach(task => {
+                            if (selectedIds.includes(task.file_id)) {
+                                task.stage1_status = 'processing';
+                            }
+                        });
+                        renderAnalysisDashboard(); // 立即重繪
                     } else {
                         const errorData = await response.json().catch(() => ({ error: '無法解析伺服器錯誤回應' }));
                         logStatus(`啟動分析失敗: ${errorData.error || response.statusText}`, 'red');
@@ -454,9 +475,29 @@
                 };
                 ws.onmessage = (event) => {
                     const data = JSON.parse(event.data);
-                    if (data.type === 'STATUS_UPDATE') {
-                        logStatus('收到狀態更新通知，正在刷新儀表板...', 'purple');
-                        fetchAnalysisStatus();
+                    // 修正：監聽由 page4_analyzer.py 發送的正確訊息類型 'analysis_update'
+                    if (data.type === 'analysis_update') {
+                        // 優化：直接使用 WebSocket 推送的資料更新前端，避免額外的 API call
+                        if (data.result && data.result.id) {
+                            const updatedTask = data.result;
+                            const taskIndex = analysisTasks.findIndex(t => t.id === updatedTask.id);
+
+                            if (taskIndex > -1) {
+                                // 更新現有任務
+                                analysisTasks[taskIndex] = updatedTask;
+                                logStatus(`任務 #${updatedTask.id} 狀態已更新。`, 'purple');
+                            } else {
+                                // 新增任務 (例如，由其他使用者觸發)
+                                analysisTasks.unshift(updatedTask);
+                                logStatus(`收到新的分析任務 #${updatedTask.id}。`, 'purple');
+                            }
+                            // 直接用更新後的本地資料重新渲染儀表板
+                            renderAnalysisDashboard();
+                        } else {
+                            // 保留舊的刷新邏輯作為後備
+                            logStatus('收到通用狀態更新通知，正在刷新儀表板...', 'purple');
+                            fetchAnalysisStatus();
+                        }
                     }
                 };
             };

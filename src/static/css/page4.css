@@ -147,8 +147,9 @@ select {
 
 /* --- Status Badge Styles --- */
 .status-pending { color: var(--pending-color); }
-.status-analyzing { color: var(--processing-color); }
-.status-analyzed, .status-completed { color: var(--success-color); }
+.status-analyzing { color: var(--processing-color); } /* Purple */
+.status-gemini { color: #fd7e14; } /* Orange */
+.status-analyzed, .status-completed { color: var(--success-color); } /* Green */
 .status-error { color: var(--error-color); }
 
 /* --- Action Button Styles --- */

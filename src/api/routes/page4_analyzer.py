@@ -83,6 +83,11 @@ def _run_stage1_blocking_task(task_id: int, file_id: int, model_name: str, serve
 
         # 3. 執行 AI 資料提取
         prompt = prompt_template.format(document_text=text_content)
+
+        # 新增：在呼叫 API 前發送一個更細緻的狀態更新
+        DB_CLIENT.update_analysis_task(task_id=task_id, updates={"stage1_status": "gemini_processing"})
+        _send_websocket_notification(server_port, {"type": "analysis_update", "task_id": task_id, "status": "gemini_processing", "stage": 1, "result": DB_CLIENT.get_analysis_task(task_id)})
+
         # 現在 structured_data, error, used_key, token_usage 都能正確接收到值
         structured_data, error, used_key, token_usage = gemini.prompt_for_json(prompt=prompt, model_name=model_name)
 
@@ -141,6 +146,11 @@ def _run_stage2_blocking_task(task_id: int, model_name: str, server_port: int):
 
         # 3. 執行 AI 報告生成
         prompt = prompt_template.format(data_package=json.dumps(structured_data, ensure_ascii=False, indent=2))
+
+        # 新增：在呼叫 API 前發送一個更細緻的狀態更新
+        DB_CLIENT.update_analysis_task(task_id=task_id, updates={"stage2_status": "gemini_processing"})
+        _send_websocket_notification(server_port, {"type": "analysis_update", "task_id": task_id, "status": "gemini_processing", "stage": 2, "result": DB_CLIENT.get_analysis_task(task_id)})
+
         # 同樣，確保能接收到完整的元組，包含 token 使用量
         report_html, error, used_key, token_usage = gemini.prompt_for_text(prompt=prompt, model_name=model_name)
 
@@ -181,7 +191,7 @@ async def run_analysis_task_wrapper(task_id: int, server_port: int, semaphore: a
         # 更新任務狀態為「處理中」
         stage = kwargs.get("stage", 1)
         DB_CLIENT.update_analysis_task(task_id=task_id, updates={f"stage{stage}_status": "processing", f"stage{stage}_model": kwargs.get("model_name")})
-        _send_websocket_notification(server_port, {"type": "analysis_update", "task_id": task_id, "status": "processing", "stage": stage})
+        _send_websocket_notification(server_port, {"type": "analysis_update", "task_id": task_id, "status": "processing", "stage": stage, "result": DB_CLIENT.get_analysis_task(task_id)})
 
         loop = asyncio.get_running_loop()
         try:
