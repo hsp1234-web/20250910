@@ -53,6 +53,22 @@
             </div>
         </div>
 
+        <!-- Panel 1.5: 從 URL 即時分析 -->
+        <div class="panel">
+            <h2>從 URL 進行即時分析</h2>
+            <p>貼上一個公開可存取的檔案 URL（例如 Google Drive, Dropbox），系統將會自動下載、提取圖文並進行第一階段分析。</p>
+            <div class="form-group">
+                <label for="url-input">檔案 URL:</label>
+                <input type="text" id="url-input" class="url-input" placeholder="請在此貼上檔案的公開網址">
+            </div>
+            <div style="margin-top: 20px;">
+                <button id="start-url-analysis-btn">⚡ 從 URL 開始分析</button>
+            </div>
+            <div id="url-analysis-status" class="status-container">
+                <!-- URL 分析的即時狀態會顯示在這裡 -->
+            </div>
+        </div>
+
         <!-- Panel 2: 分析進度儀表板 -->
         <div class="panel">
             <h2>分析進度儀表板</h2>
@@ -97,6 +113,11 @@
             const copyLogButton = document.getElementById('copy-log-button');
             const stage1ModelSelect = document.getElementById('stage1-model-select');
             const stage2ModelSelect = document.getElementById('stage2-model-select');
+            // 新增: URL 分析相關元素
+            const urlInput = document.getElementById('url-input');
+            const startUrlAnalysisBtn = document.getElementById('start-url-analysis-btn');
+            const urlAnalysisStatus = document.getElementById('url-analysis-status');
+
 
             // --- State ---
             let analysisTasks = [];
@@ -365,6 +386,34 @@
                 });
             });
 
+            startUrlAnalysisBtn.addEventListener('click', async () => {
+                const url = urlInput.value.trim();
+                if (!url) return alert('請輸入有效的 URL。');
+                if (stage1ModelSelect.disabled) return alert('請先新增有效的 API 金鑰才能開始分析。');
+                const modelName = stage1ModelSelect.value;
+                if (!modelName) return alert('請選擇分析模型。');
+
+                logStatus(`啟動 URL 分析任務: ${url}`, 'blue');
+                urlAnalysisStatus.innerHTML = `<div class="status-item status-pending">任務已啟動，正在等待後端處理...</div>`;
+
+                try {
+                    const response = await fetch('/api/analyzer/start_analysis_from_url', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ url: url, model_name: modelName })
+                    });
+                    if (!response.ok) {
+                        const errorData = await response.json().catch(() => ({ detail: '無法解析伺服器錯誤回應' }));
+                        throw new Error(errorData.detail || response.statusText);
+                    }
+                    const data = await response.json();
+                    logStatus(data.message, 'purple');
+                } catch (error) {
+                    logStatus(`啟動 URL 分析失敗: ${error.message}`, 'red');
+                    urlAnalysisStatus.innerHTML = `<div class="status-item status-error">任務啟動失敗: ${error.message}</div>`;
+                }
+            });
+
             dashboardContainer.addEventListener('click', async (e) => {
                 const target = e.target.closest('.action-btn');
                 if (!target) return;
@@ -475,28 +524,52 @@
                 };
                 ws.onmessage = (event) => {
                     const data = JSON.parse(event.data);
-                    // 修正：監聽由 page4_analyzer.py 發送的正確訊息類型 'analysis_update'
+
                     if (data.type === 'analysis_update') {
-                        // 優化：直接使用 WebSocket 推送的資料更新前端，避免額外的 API call
                         if (data.result && data.result.id) {
                             const updatedTask = data.result;
                             const taskIndex = analysisTasks.findIndex(t => t.id === updatedTask.id);
-
                             if (taskIndex > -1) {
-                                // 更新現有任務
                                 analysisTasks[taskIndex] = updatedTask;
-                                logStatus(`任務 #${updatedTask.id} 狀態已更新。`, 'purple');
                             } else {
-                                // 新增任務 (例如，由其他使用者觸發)
                                 analysisTasks.unshift(updatedTask);
-                                logStatus(`收到新的分析任務 #${updatedTask.id}。`, 'purple');
                             }
-                            // 直接用更新後的本地資料重新渲染儀表板
+                            logStatus(`資料庫任務 #${updatedTask.id} 狀態已更新。`, 'purple');
                             renderAnalysisDashboard();
-                        } else {
-                            // 保留舊的刷新邏輯作為後備
-                            logStatus('收到通用狀態更新通知，正在刷新儀表板...', 'purple');
-                            fetchAnalysisStatus();
+                        }
+                    } else if (data.type === 'url_analysis_update') {
+                        logStatus(`URL 分析任務 #${data.task_id} 狀態: ${data.status}`, 'purple');
+
+                        const statusTranslations = {
+                            'starting': '⏳ 任務啟動中...',
+                            'downloading': '📥 正在下載檔案...',
+                            'download_complete': '✅ 下載完成',
+                            'extracting': '🔍 正在提取內容...',
+                            'extraction_complete': `✅ 內容提取完成 (文字: ${data.result?.text_length}字, 圖片: ${data.result?.image_count}張)`,
+                            'gemini_processing': '🤖 正在進行 AI 圖文分析...',
+                            'completed': `🎉 分析全部完成！結果已儲存。Token 消耗: ${data.result?.token_usage}`,
+                            'failed': `❌ 任務失敗: ${data.result?.error}`
+                        };
+
+                        const statusText = statusTranslations[data.status] || data.status;
+                        const statusClass = data.status === 'failed' ? 'status-error' : 'status-completed';
+
+                        // 為每個任務創建或更新其狀態 div
+                        let taskDiv = document.getElementById(`url-task-${data.task_id}`);
+                        if (!taskDiv) {
+                            taskDiv = document.createElement('div');
+                            taskDiv.id = `url-task-${data.task_id}`;
+                            taskDiv.className = 'status-item';
+                            urlAnalysisStatus.prepend(taskDiv);
+                        }
+
+                        taskDiv.innerHTML = `<strong>任務 #${data.task_id}:</strong> ${statusText}`;
+                        taskDiv.className = `status-item ${statusClass}`;
+
+                        if (data.status === 'completed') {
+                            taskDiv.innerHTML += ` <a href="/api/analyzer/stage1_result/${data.task_id}" target="_blank">(檢視JSON)</a>`;
+                            // 為了讓使用者知道可以開始新的任務，清空輸入框
+                            urlInput.value = '';
                         }
                     }
                 };
