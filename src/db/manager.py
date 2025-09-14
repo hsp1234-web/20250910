@@ -41,9 +41,22 @@ logging.basicConfig(level=logging.INFO, format=LOG_FORMAT)
 log = logging.getLogger('DBManagerServer')
 
 # --- 伺服器設定 ---
-# JULES: 將 PORT 設為 0，讓作業系統動態選擇可用埠號
-# JULES'S FIX (2025-09-12): 改為固定埠號以簡化服務發現
-HOST, PORT = "127.0.0.1", 50001
+# 核心原則：PORT 必須設定為 0。
+#
+# 說明：
+# 將 PORT 設定為 0，能讓作業系統動態地為此伺服器分配一個當下可用的埠號。
+# 這是解決「Address already in use」錯誤的關鍵。
+#
+# 系統的 `orchestrator.py` (協調器) 被設計用來處理這種動態埠號分配。
+# 其運作方式如下：
+# 1. 啟動此 `db_manager` 伺服器。
+# 2. 伺服器啟動後，會將作業系統分配的實際埠號透過標準輸出 (stdout) 印出。
+#    (例如: "DB_MANAGER_PORT: 54321")
+# 3. 協調器會捕獲這個輸出，從而得知要連線到哪個埠號。
+#
+# 警告：請勿將此處改為任何固定的埠號。這樣做會破壞服務發現機制，
+# 並重新導致埠號衝突問題。
+HOST, PORT = "127.0.0.1", 0
 
 # --- 指令分派 ---
 # 建立一個函式名稱與指令 action 的對應字典
