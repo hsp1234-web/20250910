@@ -1,12 +1,11 @@
 import os
 import logging
 import gdown
-import filetype
 import uuid
-import requests
 import re
 from pathlib import Path
 import sys
+import shutil
 
 # --- 路徑修正 ---
 SRC_DIR = Path(__file__).resolve().parent.parent
@@ -15,27 +14,6 @@ sys.path.insert(0, str(SRC_DIR))
 from core.time_utils import format_iso_for_filename
 from core.filename_utils import sanitize_for_filename
 from typing import Optional
-
-def _get_extension_from_headers(url: str) -> Optional[str]:
-    """嘗試從 HTTP headers 中獲取檔名和副檔名。"""
-    try:
-        with requests.get(url, stream=True, allow_redirects=True, timeout=10) as r:
-            r.raise_for_status()
-            content_disposition = r.headers.get('content-disposition')
-            if content_disposition:
-                # e.g., 'attachment; filename="example.docx"'
-                filenames = re.findall('filename="(.+?)"', content_disposition)
-                if filenames:
-                    filename = filenames[0]
-                    # 確保副檔名存在且小於 10 個字元
-                    if "." in filename and len(filename.split('.')[-1]) < 10:
-                         ext = f".{filename.split('.')[-1]}"
-                         logging.info(f"從 Content-Disposition 標頭中成功解析出副檔名: {ext}")
-                         return ext
-    except Exception as e:
-        logging.warning(f"從 headers 獲取檔名時發生錯誤: {e}")
-    return None
-
 
 def download_file(
     url: str,
@@ -46,42 +24,57 @@ def download_file(
     message_time: Optional[str]
 ) -> Optional[str]:
     """
-    從指定的 URL (特別是 Google Drive) 智慧地檔案。
-    - 優先從 HTTP headers 獲取副檔名。
-    - 若失敗，則使用 filetype 函式庫來偵測檔案的副檔名。
-    - 檔名會根據條件式時間戳和作者資訊建立。
+    更可靠的下載函式 v7 (最終版):
+    - 為每次下載建立一個唯一的臨時子目錄，以隔離檔案。
+    - 信任 gdown 函式庫來處理下載。
+    - 如果下載的是資料夾，使用 shutil 將其壓縮。
+    - 最後根據系統規則重新命名檔案。
     """
     os.makedirs(output_dir, exist_ok=True)
     logging.info(f"準備從 URL 下載：{url} (ID: {url_id})")
 
-    temp_filename = f"temp_{uuid.uuid4()}"
-    temp_path = Path(output_dir) / temp_filename
+    # 建立一個臨時的、唯一的子目錄來進行下載，避免檔案衝突
+    temp_target_dir = Path(output_dir) / f"temp_download_{uuid.uuid4()}"
 
     try:
-        # 步驟 1: 預先獲取副檔名
-        extension = _get_extension_from_headers(url)
+        temp_target_dir.mkdir()
 
-        # 步驟 2: 下載檔案到暫存路徑
-        gdown.download(url, str(temp_path), quiet=False, fuzzy=True)
+        # 將所有內容下載到這個臨時目錄中
+        # gdown.download 會回傳下載的檔案路徑，gdown.download_folder 會回傳一個路徑列表
+        is_folder = "/drive/folders/" in url
+        if is_folder:
+            downloaded_items = gdown.download_folder(url, output=str(temp_target_dir), quiet=False, use_cookies=True)
+        else:
+            downloaded_items = [gdown.download(url, output=str(temp_target_dir), quiet=False, fuzzy=True, use_cookies=True)]
 
-        if not temp_path.exists() or temp_path.stat().st_size == 0:
-            logging.error(f"❌ 下載失敗：gdown 執行完畢但未建立有效的檔案於 {temp_path}。")
-            if temp_path.exists():
-                temp_path.unlink()
-            return None
+        if not downloaded_items or downloaded_items[0] is None:
+            raise Exception("gdown 未返回有效的檔案路徑。")
 
-        # 步驟 3: 如果從 headers 中未獲取到副檔名，則使用 filetype 作為備案
-        if not extension:
-            logging.info("無法從 headers 獲取副檔名，嘗試使用 filetype 進行內容偵測。")
-            kind = filetype.guess(str(temp_path))
-            if kind is None:
-                logging.warning(f"無法偵測檔案類型：{url_id}。將不設定副檔名。")
-                extension = ""
-            else:
-                extension = f".{kind.extension}"
-                logging.info(f"filetype 偵測到檔案類型: {kind.mime} -> 副檔名: {extension}")
+        # 找出下載的成品 (可能是檔案或資料夾)
+        # gdown 下載資料夾時，會在 output 目錄下再建立一個以資料夾命名的子目錄
+        items_in_temp_dir = list(temp_target_dir.iterdir())
+        if not items_in_temp_dir:
+            raise Exception("臨時下載目錄中找不到任何檔案。")
 
-        # 步驟 4: 根據最終需求建立檔名
+        # 假設下載的成品是臨時目錄中的第一個項目
+        downloaded_artifact = items_in_temp_dir[0]
+
+        # 如果成品是資料夾，壓縮它
+        if downloaded_artifact.is_dir():
+            logging.info(f"偵測到下載的是資料夾，路徑: {downloaded_artifact}。將其壓縮為 .zip。")
+            zip_filename_base = str(Path(output_dir) / downloaded_artifact.name)
+            zip_path_str = shutil.make_archive(zip_filename_base, 'zip', str(downloaded_artifact))
+
+            final_artifact_path = Path(zip_path_str)
+        else:
+            final_artifact_path = downloaded_artifact
+
+        if not final_artifact_path.exists() or not final_artifact_path.is_file() or final_artifact_path.stat().st_size == 0:
+            raise Exception(f"下載產生的成品 {final_artifact_path} 不是一個有效的檔案。")
+
+        extension = final_artifact_path.suffix.lower()
+
+        # 根據我們的規則建立最終檔名
         parts = [str(url_id)]
         if author:
             sanitized_author = sanitize_for_filename(author)
@@ -90,21 +83,25 @@ def download_file(
             source_timestamp_str = f"{message_date}T{message_time}:00"
             timestamp = format_iso_for_filename(source_timestamp_str)
             parts.append(timestamp)
-            logging.info(f"使用 LINE 訊息時間 '{source_timestamp_str}' 產生檔名。")
-        else:
-            logging.info(f"無 LINE 訊息時間，檔名將不包含時間戳。")
 
         final_filename = f"{'_'.join(parts)}{extension}"
         final_path = Path(output_dir) / final_filename
 
-        # 步驟 5: 將暫存檔重新命名為最終檔名
-        temp_path.rename(final_path)
+        if final_path.exists():
+            final_path.unlink()
+
+        final_artifact_path.rename(final_path)
 
         logging.info(f"✅ 檔案成功下載並命名為：{final_path}")
         return str(final_path)
 
+    except gdown.exceptions.FileURLRetrievalError as e:
+        logging.error(f"❌ Google Drive 檔案無法存取 (URL ID: {url_id})。請檢查權限。錯誤: {e}")
+        return None
     except Exception as e:
         logging.error(f"❌ 下載過程中發生嚴重錯誤 (URL ID: {url_id}): {e}", exc_info=True)
-        if temp_path.exists():
-            temp_path.unlink()
         return None
+    finally:
+        # 無論成功或失敗，都清理臨時目錄
+        if temp_target_dir.exists():
+            shutil.rmtree(temp_target_dir)
