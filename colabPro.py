@@ -239,32 +239,60 @@ class ServerManager:
             initialize_database()
             add_system_log("colab_setup", "INFO", "Git repository cloned successfully.")
 
-            # --- (中文註解) 核心金鑰注入邏輯（終極簡化版） ---
-            # 根據使用者的最終要求，此版本啟動器將始終以「自動」模式運行。
-            # 它會讀取使用者在 UI 上設定的 `KEY_LOAD_COUNT_LIMIT` 數量，
-            # 並將其作為參數傳遞給金鑰注入腳本。
-            self._log_manager.log("INFO", "正在準備執行金鑰自動注入...")
+            # --- (中文註解) 核心金鑰注入邏輯（v2 修正版） ---
+            # 根本原因：在子程序中呼叫 google.colab.userdata.get() 會因缺少前端上下文而失敗。
+            # 解決方案：在擁有完整上下文的主程序中獲取所有金鑰，
+            # 然後將金鑰內容透過 `--mode manual` 安全地傳遞給子程序。
+            self._log_manager.log("INFO", "正在準備執行金鑰注入...")
             key_injector_script = project_path / "scripts" / "colab_key_injector.py"
             if key_injector_script.is_file():
-                # (中文註解) 固定使用 --mode auto，並傳入使用者指定的數量
-                command = [
-                    sys.executable,
-                    str(key_injector_script.resolve()),
-                    "--mode", "auto",
-                    "--count", str(KEY_LOAD_COUNT_LIMIT)
-                ]
-                
                 try:
-                    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8')
-                    for line in iter(process.stdout.readline, ''):
-                        self._log_manager.log("INFO", line.strip(), "KeyInjector")
-                    process.wait()
-                    if process.returncode == 0:
-                        self._log_manager.log("SUCCESS", "✅ 金鑰注入腳本執行完畢。")
+                    from google.colab import userdata
+                    self._log_manager.log("INFO", "正在從 Colab Secrets 獲取金鑰...")
+
+                    base_key_name = "GOOGLE_API_KEY"
+                    target_key_names = [base_key_name]
+                    if KEY_LOAD_COUNT_LIMIT > 0:
+                        # KEY_LOAD_COUNT_LIMIT = 2 會產生 _1, _2
+                        target_key_names.extend([f"{base_key_name}_{i}" for i in range(1, KEY_LOAD_COUNT_LIMIT + 1)])
+
+                    keys_to_inject = []
+                    for key_name in target_key_names:
+                        key_value = userdata.get(key_name)
+                        if key_value and key_value.strip():
+                            keys_to_inject.append(key_value)
+                            self._log_manager.log("INFO", f"✅ 已成功獲取金鑰 '{key_name}'。")
+                        else:
+                            self._log_manager.log("INFO", f"🟡 未在 Colab Secrets 中找到金鑰 '{key_name}'，跳過。")
+
+                    if not keys_to_inject:
+                         self._log_manager.log("WARN", "未從 Colab Secrets 中獲取到任何金鑰，跳過注入。")
                     else:
-                        self._log_manager.log("WARN", f"金鑰注入腳本執行結束，但返回碼為 {process.returncode}。")
+                        # 將金鑰列表轉換為以換行符分隔的單一字串
+                        keys_string = "\n".join(keys_to_inject)
+
+                        # 使用 manual 模式將金鑰傳遞給子程序
+                        command = [
+                            sys.executable,
+                            str(key_injector_script.resolve()),
+                            "--mode", "manual",
+                            "--manual-keys", keys_string
+                        ]
+
+                        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8')
+                        for line in iter(process.stdout.readline, ''):
+                            self._log_manager.log("INFO", line.strip(), "KeyInjector")
+                        process.wait()
+
+                        if process.returncode == 0:
+                            self._log_manager.log("SUCCESS", "✅ 金鑰注入腳本執行完畢。")
+                        else:
+                            self._log_manager.log("WARN", f"金鑰注入腳本執行結束，但返回碼為 {process.returncode}。")
+
+                except ImportError:
+                    self._log_manager.log("WARN", "無法匯入 google.colab.userdata，可能並非在 Colab 環境。跳過金鑰注入。")
                 except Exception as e:
-                    self._log_manager.log("ERROR", f"執行金鑰注入腳本時發生錯誤: {e}")
+                    self._log_manager.log("ERROR", f"執行金鑰注入時發生未預期的錯誤: {e}")
             else:
                 self._log_manager.log("WARN", f"未找到金鑰注入腳本 '{key_injector_script}'，跳過金鑰載入。")
             # --- 金鑰注入邏輯結束 ---
