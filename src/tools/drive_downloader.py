@@ -58,7 +58,21 @@ def download_file(
             downloaded_path_str = gdown.download(url, output=str(temp_output_dir), quiet=False, fuzzy=True, use_cookies=True)
             if not downloaded_path_str:
                  raise Exception("gdown.download 未返回有效的檔案路徑。")
-            final_artifact_path = Path(downloaded_path_str)
+
+            # --- 新增的防禦性邏輯 v2 ---
+            # 處理 gdown 可能返回目錄路徑而非檔案路徑的情況
+            returned_path = Path(downloaded_path_str)
+            if returned_path.is_dir():
+                logging.warning(f"gdown 返回了一個目錄路徑 ({returned_path})，將嘗試在其中尋找唯一的檔案。")
+                items_in_dir = list(returned_path.iterdir())
+                if len(items_in_dir) == 1:
+                    final_artifact_path = items_in_dir[0]
+                    logging.info(f"在目錄中找到唯一的檔案：{final_artifact_path}")
+                else:
+                    raise Exception(f"gdown 返回了一個目錄，但其中包含 {len(items_in_dir)} 個項目，無法確定下載的檔案。")
+            else:
+                final_artifact_path = returned_path
+            # --- 防禦性邏輯結束 ---
 
         if not final_artifact_path.exists() or not final_artifact_path.is_file() or final_artifact_path.stat().st_size == 0:
             raise Exception(f"下載產生的成品 {final_artifact_path} 不是一個有效的檔案。")
