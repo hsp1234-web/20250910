@@ -118,6 +118,18 @@ def extract_content(file_path_str: str, image_output_dir_str: str) -> dict | Non
         log.warning(f"不支援的檔案類型: {ext}。跳過內容提取。")
         return {"text": "", "image_paths": []}
 
+    # JULES (2025-09-14): 增加文字清理步驟以防止 JSON 序列化錯誤
+    # 這是為了解決一個根本問題：從檔案中提取的文字可能包含無效的 Unicode 逸出字元，
+    # 這會導致後續在 db_manager 中進行 JSON 序列化時拋出 JSONDecodeError。
+    # 透過在回傳前清理文字，我們確保只有合法的字串被傳遞到系統的其他部分。
+    if content_data and content_data.get("text"):
+        original_text = content_data["text"]
+        # 使用 'replace' 策略，將任何無法在 UTF-8 中編碼的字元替換為 '?'
+        sanitized_text = original_text.encode('utf-8', 'replace').decode('utf-8')
+        if original_text != sanitized_text:
+            log.warning(f"檔案 '{file_path.name}' 的文字內容中偵測到並修正了無效字元。")
+        content_data["text"] = sanitized_text
+
     # 確保圖片路徑是字串格式
     content_data["image_paths"] = [str(p) for p in content_data["image_paths"]]
     return content_data
