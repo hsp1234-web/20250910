@@ -32,7 +32,7 @@ class TestGeminiManager(unittest.TestCase):
         manager = GeminiManager(api_keys=self.api_keys_data)
 
         # 執行
-        result, error, used_key_name = manager._api_call_wrapper(
+        result, error, used_key_name, _ = manager._api_call_wrapper(
             "test_task", "test_model", ["prompt"], "json"
         )
 
@@ -71,7 +71,7 @@ class TestGeminiManager(unittest.TestCase):
         manager = GeminiManager(api_keys=self.api_keys_data)
 
         # 執行
-        result, error, used_key_name = manager._api_call_wrapper(
+        result, error, used_key_name, _ = manager._api_call_wrapper(
             "test_task", "test_model", ["prompt"], "json"
         )
 
@@ -108,7 +108,7 @@ class TestGeminiManager(unittest.TestCase):
         manager = GeminiManager(api_keys=self.api_keys_data, max_retries=3)
 
         # 執行
-        result, error, used_key_name = manager._api_call_wrapper(
+        result, error, used_key_name, _ = manager._api_call_wrapper(
             "test_task", "test_model", ["prompt"], "json"
         )
 
@@ -138,7 +138,7 @@ class TestGeminiManager(unittest.TestCase):
         manager = GeminiManager(api_keys=self.api_keys_data)
 
         # 執行
-        result, error, used_key_name = manager._api_call_wrapper(
+        result, error, used_key_name, _ = manager._api_call_wrapper(
             "test_task", "test_model", ["prompt"], "json"
         )
 

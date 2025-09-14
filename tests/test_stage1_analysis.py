@@ -12,9 +12,10 @@ if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
 # --- 匯入被測試的模組 ---
+import asyncio
 from core import key_manager
-from db.client import get_client
-from api.routes.page4_analyzer import run_stage1_task
+# from db.client import get_client # JULES: Replaced with direct db_conn access
+from api.routes.page4_analyzer import _run_stage1_blocking_task
 
 # --- 常數 ---
 # 使用者提供的 API 金鑰
@@ -49,11 +50,42 @@ def setup_api_key():
         pytest.fail(f"新增 API 金鑰時發生未預期錯誤，請檢查網路連線與金鑰有效性: {e}")
 
 
-def test_stage1_analysis_produces_correct_json(db_conn, tmp_path):
+def test_stage1_analysis_produces_correct_json(db_conn, tmp_path, monkeypatch):
     """
     整合測試：驗證 run_stage1_task 是否能根據給定的文字和新的提示詞，
     成功生成一個包含 title, sentiment, 和 symbol 的結構化 JSON。
     """
+    # JULES (2025-09-14): 建立一個 FakeDBClient 並使用 monkeypatch 替換
+    # page4_analyzer 中的全域 DB_CLIENT，以解決 ConnectionRefusedError。
+    class FakeDBClient:
+        def __init__(self, conn):
+            self._conn = conn
+
+        def get_analysis_task(self, task_id):
+            cursor = self._conn.cursor()
+            # JULES (2025-09-14): 修正 - AI分析器直接讀取 analysis_tasks 表，無需 JOIN
+            sql = "SELECT * FROM analysis_tasks WHERE id = ?"
+            cursor.execute(sql, (task_id,))
+            return cursor.fetchone()
+
+        def update_analysis_task(self, task_id, updates):
+            set_clause = ", ".join([f"{key} = ?" for key in updates.keys()])
+            values = list(updates.values()) + [task_id]
+            sql = f"UPDATE analysis_tasks SET {set_clause} WHERE id = ?"
+            cursor = self._conn.cursor()
+            cursor.execute(sql, values)
+            self._conn.commit()
+            return True
+
+    monkeypatch.setattr(
+        "api.routes.page4_analyzer.DB_CLIENT",
+        FakeDBClient(db_conn)
+    )
+    monkeypatch.setattr(
+        "api.routes.page4_analyzer.key_manager",
+        key_manager
+    )
+
     # 1. 準備測試資料
     mock_article_text = """
     標題：台積電(TSM)前景看好，長期投資價值浮現
@@ -78,23 +110,35 @@ def test_stage1_analysis_produces_correct_json(db_conn, tmp_path):
     )
     db_conn.commit()
 
-    # 使用 DBClient 來建立分析任務 (這是應用程式的正常流程)
-    # 注意：在測試中，DBClient 會自動使用被 monkeypatch 的測試資料庫路徑
-    db_client = get_client()
-    task = db_client.create_or_get_analysis_task(file_id=mock_file_id, filename=mock_filename)
-    assert task is not None, "無法建立分析任務"
-    task_id = task['id']
+        # JULES (2025-09-14): 修正 - 將待分析的文字直接插入 analysis_tasks 表，以模擬真實流程
+    cursor.execute(
+            "INSERT INTO analysis_tasks (file_id, filename, stage1_status, file_content_for_analysis) VALUES (?, ?, ?, ?)",
+            (mock_file_id, mock_filename, 'pending', mock_article_text)
+    )
+    db_conn.commit()
+    task_id = cursor.lastrowid
+    assert task_id is not None, "無法建立分析任務"
 
     # 3. 執行被測試的函式
-    # 我們需要一個假的 server_port
-    mock_server_port = 50000
-    run_stage1_task(task_id=task_id, file_id=mock_file_id, model_name=MODEL_NAME, server_port=mock_server_port)
+    # JULES (2025-09-14): 為了適應重構後的架構，我們現在直接測試核心的阻塞函式。
+    # 為此，我們需要建立一個模擬的佇列和一個事件迴圈來滿足函式的簽章需求。
+    mock_queue = asyncio.Queue()
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:  # 'RuntimeError: There is no current event loop...'
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+    # 呼叫重構後的核心邏輯函式
+    _run_stage1_blocking_task(task_id=task_id, file_id=mock_file_id, model_name=MODEL_NAME, queue=mock_queue, loop=loop)
+
 
     # 4. 驗證結果
     # 從資料庫中獲取任務的最終狀態和 JSON 檔案路徑
     # 等待一小段時間確保檔案系統操作完成
     time.sleep(1)
-    updated_task = db_client.get_analysis_task(task_id)
+    cursor.execute("SELECT * FROM analysis_tasks WHERE id = ?", (task_id,))
+    updated_task = cursor.fetchone()
 
     assert updated_task is not None, "在資料庫中找不到更新後的任務"
     assert updated_task['stage1_status'] == 'completed', f"第一階段任務失敗: {updated_task['stage1_error_log']}"

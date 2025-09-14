@@ -69,7 +69,7 @@ def _run_stage1_blocking_task(task_id: int, file_id: int, model_name: str, queue
 
         # 2. 從資料庫獲取檔案內容
         analysis_task_data = DB_CLIENT.get_analysis_task(task_id=task_id)
-        if not analysis_task_data or not analysis_task_data.get('file_content_for_analysis'):
+        if not analysis_task_data or not analysis_task_data['file_content_for_analysis']:
             raise ValueError(f"分析任務 {task_id} 中找不到可供分析的檔案內容 (file_content_for_analysis)。")
         text_content = analysis_task_data['file_content_for_analysis']
 

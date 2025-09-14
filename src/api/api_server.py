@@ -168,8 +168,12 @@ async def lifespan(app: FastAPI):
 # --- FastAPI 應用實例 ---
 app = FastAPI(title="鳳凰音訊轉錄儀 API (v3 - 重構)", version="3.0", lifespan=lifespan)
 app.state.manager = manager
-# 建立一個全域信號量，限制同時執行的 AI 分析任務數量為 3
-app.state.analysis_semaphore = asyncio.Semaphore(3)
+# --- 全域信號量設定 ---
+# 建立全域信號量，以控制各類背景任務的併發數量
+app.state.analysis_semaphore = asyncio.Semaphore(3)   # AI 分析任務，較耗資源，限制為 3
+app.state.download_semaphore = asyncio.Semaphore(5)   # 下載任務，主要為 I/O 密集型，可設高一點
+app.state.processing_semaphore = asyncio.Semaphore(2) # 檔案處理任務，可能涉及 CPU 和 I/O，限制為 2
+
 
 # --- 中介軟體 (Middleware) ---
 # JULES: 新增 CORS 中介軟體以允許來自瀏覽器腳本的跨來源請求

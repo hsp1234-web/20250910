@@ -2,7 +2,9 @@ import logging
 import sys
 from pathlib import Path
 import json
-import requests
+import asyncio
+import functools
+import time
 
 from fastapi import APIRouter, HTTPException, Request, BackgroundTasks
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -15,6 +17,7 @@ SRC_DIR = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(SRC_DIR))
 
 from db.database import get_db_connection
+from db.client import get_client
 from tools.file_hasher import calculate_sha256
 from tools.image_compressor import compress_image
 
@@ -22,6 +25,7 @@ from tools.image_compressor import compress_image
 log = logging.getLogger(__name__)
 templates = Jinja2Templates(directory=str(SRC_DIR / "static"))
 router = APIRouter()
+DB_CLIENT = get_client()
 
 # --- Pydantic 模型 ---
 class ProcessRequest(BaseModel):
@@ -73,25 +77,24 @@ async def reset_files(payload: ResetRequest):
         raise HTTPException(status_code=400, detail="未提供要重設的檔案 ID。")
 
     log.info(f"API: 收到將 {len(payload.ids)} 個檔案狀態重設為 'completed' 的請求。")
-    conn = None
     try:
-        conn = get_db_connection()
-        with conn:
-            placeholders = ','.join('?' for _ in payload.ids)
-            sql = f"UPDATE extracted_urls SET status = 'completed', status_message = '等待重新處理' WHERE id IN ({placeholders})"
-            cursor = conn.cursor()
-            cursor.execute(sql, payload.ids)
-            if cursor.rowcount == 0:
-                log.warning(f"API: 重設檔案狀態時，沒有任何 ID ({payload.ids}) 被更新。")
-                raise HTTPException(status_code=404, detail="提供的 ID 在資料庫中不存在或無法被重設。")
-            log.info(f"API: 已成功將 {cursor.rowcount} 個檔案的狀態更新為 'completed'。")
-        return JSONResponse(content={"message": f"成功重設 {cursor.rowcount} 個檔案。", "reset_ids": payload.ids})
+        # JULES (2025-09-14): 修正錯誤。DBClient 沒有 execute_query 方法。
+        # 改為使用迴圈和高階的 update_url 方法。
+        updated_count = 0
+        for url_id in payload.ids:
+            success = DB_CLIENT.update_url(url_id, {"status": "completed", "status_message": "等待重新處理"})
+            if success:
+                updated_count += 1
+
+        if updated_count == 0:
+            log.warning(f"API: 重設檔案狀態時，沒有任何 ID ({payload.ids}) 被更新。")
+            raise HTTPException(status_code=404, detail="提供的 ID 在資料庫中不存在或無法被重設。")
+
+        log.info(f"API: 已成功將 {updated_count} 個檔案的狀態更新為 'completed'。")
+        return JSONResponse(content={"message": f"成功重設 {updated_count} 個檔案。", "reset_ids": payload.ids})
     except Exception as e:
         log.error(f"API: 重設檔案狀態時發生錯誤: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="重設檔案狀態時發生伺服器內部錯誤。")
-    finally:
-        if conn:
-            conn.close()
 
 
 @router.get("/completed_files")
@@ -194,28 +197,22 @@ async def get_report_content(file_id: int):
             conn.close()
 
 
-# --- 背景任務函式 ---
-import time
+# --- 背景任務函式 (重構後) ---
 
-def run_processing_task(url_id: int, port: int):
-    """這是在背景執行的單一檔案處理任務。"""
+def _run_processing_blocking_task(url_id: int, queue: asyncio.Queue, loop: asyncio.AbstractEventLoop):
+    """這是在背景執行的單一檔案處理的同步阻塞部分。"""
     # --- 延遲導入 (Lazy Import) ---
     from tools.content_extractor import extract_content
-    from db.client import get_client
 
-    # 為解決檔案系統競爭條件，在開始時增加一個短暫的延遲
-    time.sleep(1)
+    time.sleep(1) # 為解決檔案系統競爭條件，在開始時增加一個短暫的延遲
 
     log.info(f"背景任務：開始處理檔案 URL ID: {url_id}")
-    db_client = get_client()
     final_status = 'processing_failed' # 預設為失敗
-    result_payload = {}
     file_path = None  # 初始化 file_path 以確保在 finally 區塊中可用
 
     try:
-        # 使用 DBClient 而非直接的 conn
-        url_record = db_client.get_url_by_id(url_id)
-        if not url_record or not url_record.get('local_path'):
+        url_record = DB_CLIENT.get_url_by_id(url_id)
+        if not url_record or not url_record['local_path']:
              raise ValueError(f"在資料庫中找不到 ID {url_id} 的有效本地檔案路徑。")
 
         file_path = Path(url_record['local_path'])
@@ -225,24 +222,19 @@ def run_processing_task(url_id: int, port: int):
         log.info(f"背景任務：準備處理檔案: {file_path}")
 
         file_hash = calculate_sha256(file_path)
-
         image_output_dir = file_path.parent / "extracted_images"
         content_data = extract_content(str(file_path), str(image_output_dir))
 
-        # 從提取結果中獲取文字和圖片路徑
         text_content = content_data.get("text", "") if content_data else ""
         image_paths_json = json.dumps(content_data.get("image_paths", [])) if content_data else "[]"
 
-        # 檢查內容提取是否成功，並設定對應的狀態
         if not text_content and not json.loads(image_paths_json):
-            # 如果文字和圖片都為空，標記為不支援或空檔案
             status = 'processed_unsupported'
             status_message = '不支援的檔案類型或檔案為空，無法提取任何內容。'
         else:
             status = 'processed'
             status_message = '處理成功'
 
-        # 更新 extracted_urls 表
         update_payload = {
             "status": status,
             "status_message": status_message,
@@ -250,81 +242,81 @@ def run_processing_task(url_id: int, port: int):
             "extracted_image_paths": image_paths_json,
             "extracted_text": text_content
         }
-        db_client.update_url(url_id, update_payload)
+        DB_CLIENT.update_url(url_id, update_payload)
 
-        # *** 核心邏輯修改：將提取的文字儲存到 analysis_tasks 表 ***
-        analysis_task = db_client.create_or_get_analysis_task(file_id=url_id, filename=file_path.name)
+        analysis_task = DB_CLIENT.create_or_get_analysis_task(file_id=url_id, filename=file_path.name)
         if analysis_task:
             analysis_task_id = analysis_task['id']
-            update_result = db_client.update_analysis_task(
-                analysis_task_id,
-                {'file_content_for_analysis': text_content}
-            )
-            if update_result:
-                log.info(f"成功將提取的文字內容儲存至分析任務 ID: {analysis_task_id}")
-            else:
-                log.error(f"無法將提取的文字內容儲存至分析任務 ID: {analysis_task_id}")
+            DB_CLIENT.update_analysis_task(analysis_task_id, {'file_content_for_analysis': text_content})
+            log.info(f"成功將提取的文字內容儲存至分析任務 ID: {analysis_task_id}")
         else:
             log.error(f"無法為 file_id {url_id} 建立或取得分析任務，無法儲存提取文字。")
-        # *** 結束核心修改 ***
 
-        final_status = 'processed'
-        result_payload = {"file_hash": file_hash, "image_paths": image_paths_json, "text_length": len(text_content)}
+        final_status = status
         log.info(f"背景任務：URL ID {url_id} 處理成功。")
 
     except Exception as e:
         log.error(f"背景任務：處理 URL ID {url_id} 時發生嚴重錯誤: {e}", exc_info=True)
         final_status = 'processing_failed'
-        result_payload = {"error": str(e)}
-        # 使用 DBClient 更新錯誤狀態
-        db_client.update_url(url_id, {"status": final_status, "status_message": str(e)})
+        DB_CLIENT.update_url(url_id, {"status": final_status, "status_message": str(e)})
     finally:
-        # 步驟 4: 無論成功或失敗，都呼叫內部 API 來觸發 WebSocket 通知
-        try:
-            notification_payload = {
-                "task_id": str(url_id),
-                "status": final_status,
-                "result": json.dumps(result_payload),
-                "task_type": "processing"
-            }
-            # 將檔名加入 payload，以便前端顯示更清晰的日誌
-            if file_path:
-                notification_payload["filename"] = file_path.name
+        final_record = DB_CLIENT.get_url_by_id(url_id)
+        notification_msg = {
+            "type": "task_update",
+            "task_type": "processing",
+            "task_id": str(url_id),
+            "status": final_status,
+            "result": final_record
+        }
+        asyncio.run_coroutine_threadsafe(queue.put(notification_msg), loop)
+        log.info(f"背景任務：已為 URL ID {url_id} 發送處理完成通知至佇列。")
 
-            requests.post(
-                f"http://127.0.0.1:{port}/api/internal/notify_task_update",
-                json=notification_payload,
-                timeout=5
-            )
-            log.info(f"背景任務：已為 URL ID {url_id} 發送處理完成通知。")
-        except requests.exceptions.RequestException as e:
-            log.error(f"背景任務：為 URL ID {url_id} 發送處理完成通知時失敗: {e}")
+
+async def run_task_wrapper(task_id: int, semaphore: asyncio.Semaphore, blocking_func, queue: asyncio.Queue, loop: asyncio.AbstractEventLoop, **kwargs):
+    """一個通用的非同步包裝函式，用於控制併發並執行阻塞的任務。"""
+    async with semaphore:
+        log.info(f"任務 {task_id} 已取得信號量，準備執行...")
+        try:
+            partial_func = functools.partial(blocking_func, url_id=task_id, queue=queue, loop=loop, **kwargs)
+            await loop.run_in_executor(None, partial_func)
+        except Exception as e:
+            log.error(f"包裝函式捕獲到未預期的錯誤 (任務 {task_id}): {e}", exc_info=True)
+        finally:
+            log.info(f"任務 {task_id} 執行完畢，釋放信號量。")
+
 
 @router.post("/start_processing")
 async def start_processing(payload: ProcessRequest, background_tasks: BackgroundTasks, request: Request):
-    """接收要處理的檔案 ID 列表，並為每一個 ID 建立一個背景處理任務。"""
+    """(重構後) 接收要處理的檔案 ID 列表，並為每一個 ID 建立一個使用佇列通知的背景處理任務。"""
     url_ids = payload.ids
     if not url_ids:
         raise HTTPException(status_code=400, detail="未提供要處理的檔案 ID。")
 
     log.info(f"API: 收到 {len(url_ids)} 個項目的處理請求。")
 
-    # 從 app.state 獲取在應用程式啟動時捕獲的、可靠的伺服器埠號，
-    # 而不是使用 request.url.port，因為後者在反向代理後可能不正確。
-    port = request.app.state.server_port
+    semaphore = request.app.state.processing_semaphore
+    queue = request.app.state.notification_queue
+    loop = asyncio.get_running_loop()
 
-    conn = None
+    if not semaphore or not queue:
+        raise HTTPException(status_code=500, detail="伺服器狀態未完全初始化（缺少佇列或信號量）。")
+
     try:
-        conn = get_db_connection()
-        with conn:
-            placeholders = ','.join('?' for _ in url_ids)
-            sql = f"UPDATE extracted_urls SET status = 'processing', status_message = '已加入處理佇列' WHERE id IN ({placeholders})"
-            cursor = conn.cursor()
-            cursor.execute(sql, url_ids)
-            log.info(f"API: 已將 {cursor.rowcount} 個檔案的狀態更新為 'processing'。")
+        # JULES (2025-09-14): 修正錯誤。DBClient 沒有 execute_query 方法。
+        # 改為使用迴圈和高階的 update_url 方法。
+        for url_id in url_ids:
+            DB_CLIENT.update_url(url_id, {"status": "processing", "status_message": "已加入處理佇列"})
+        log.info(f"API: 已將 {len(url_ids)} 個檔案的狀態更新為 'processing'。")
 
         for url_id in url_ids:
-            background_tasks.add_task(run_processing_task, url_id, port)
+            background_tasks.add_task(
+                run_task_wrapper,
+                task_id=url_id,
+                semaphore=semaphore,
+                blocking_func=_run_processing_blocking_task,
+                queue=queue,
+                loop=loop
+            )
 
         return JSONResponse(
             content={"message": f"已成功為 {len(url_ids)} 個項目建立背景處理任務。"}
@@ -332,6 +324,3 @@ async def start_processing(payload: ProcessRequest, background_tasks: Background
     except Exception as e:
         log.error(f"API: 啟動處理任務時發生錯誤: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="啟動處理任務時發生伺服器內部錯誤。")
-    finally:
-        if conn:
-            conn.close()

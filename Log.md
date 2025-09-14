@@ -1,3 +1,26 @@
+## 1051號 - 2025-09-14T15:54:10.015285+08:00
+
+### fix(core): 全面重構頁面二與三的後端通訊及前端更新機制
+
+- **動機**: 在先前的重構中，僅有頁面四 (AI 分析) 的背景任務從不穩定的「內部 HTTP 回呼」模式升級為可靠的「非同步佇列」模式。這導致頁面二 (批次下載) 和頁面三 (檔案處理) 在舊的 HTTP 端點被移除後，完全無法回報任務狀態，引發了大量的 404 錯誤，且前端 UI 無法即時更新。
+- **核心變更**:
+    - **後端重構 (`page2_downloader.py`, `page3_processor.py`)**:
+        - 徹底重寫了這兩個檔案的背景任務邏輯，使其與 `page4_analyzer.py` 的架構完全對齊。
+        - 廢除了舊的、接收 `port` 參數的背景函式，改為拆分成一個**同步阻塞函式** (負責核心業務) 和一個**非同步包裝函式** (負責控制併發與通知)。
+        - 所有的狀態通知不再透過 `requests.post` 發送，而是改為安全地、非阻塞地將通知訊息放入一個從 `request.app.state` 獲取來的全域 `asyncio.Queue` 中。
+    - **伺服器狀態擴充 (`api_server.py`)**:
+        - 在應用程式啟動時，為 `app.state` 新增了 `download_semaphore` 和 `processing_semaphore`，為新的背景任務提供了獨立的併發控制。
+    - **前端即時化改造 (`page2_downloader.html`, `page3_processor.html`)**:
+        - **重寫 WebSocket 處理邏輯**: 完全廢棄了舊的、僅能觸發全頁刷新的 `onmessage` 處理方式。
+        - **精準 DOM 操作**: 新的邏輯會監聽正確的 `task_update` 訊息，並根據 `task_id` 精準地找到頁面中對應的項目。
+        - **即時狀態反饋**: 根據收到的任務狀態 (`downloading`, `processing`, `completed`, `failed` 等)，直接在前端動態地、即時地修改該項目的樣式和狀態文字，全程無需重新載入頁面，提供了更流暢、更現代的使用者體驗。
+    - **測試案例修復 (`tests/`)**:
+        - 迭代修復了 `test_stage1_analysis.py`, `test_integration.py`, 和 `test_gemini_manager.py` 中的多個因後端重構而導致的 `ImportError`, `ValueError`, 和 `ConnectionRefusedError`。
+        - 修復手段包括更新函式呼叫、使用 `monkeypatch` 模擬 `DBClient`，以及修正測試資料的準備邏輯。
+- **測試與成果**:
+    - **自動化測試**: 在多次迭代修復後，最終成功執行了 `pytest` 測試套件，結果為 **24 個測試通過，1 個跳過**。
+    - **預期成果**: 本次提交從後端到前端，完整地修復了頁面二和三的功能，並通過了自動化測試的驗證。預計先前日誌中的 404 錯誤將完全消失，且這兩個頁面的狀態更新將恢復正常，並擁有與頁面四同等級的即時性和穩定性。
+
 ## 1050號 - 2025-09-14T14:33:56.338524+08:00
 
 ### fix(core): 重構後端內部通訊以解決 WebSocket 通知逾時問題
@@ -615,7 +638,7 @@
         - 在 `page4_analyzer.html` 的介面上，為 `pending_retry` 狀態的任務新增了橘色的狀態標籤，並提供了一個「重試」按鈕，讓使用者可以手動觸發重新分析。
     - **`pytest` 測試**:
         - **單元測試**: 新增了 `tests/test_gemini_manager.py`，專門測試 `GeminiManager` 新的故障轉移與重試邏輯。
-        - **整合測試**: 在 `tests/test_integration.py` 中新增了 `test_ai_analysis_retry_queue_logic`，完整地驗證了從「首次失敗」到「進入重試佇列」再到「手動重試成功」的整個端到端流程。
+        - **整合測試**: 在 `tests/test_integration.py` 中新增了 `test_ai_analysis_retry_queue_logic`，完整地驗證了從「首次失敗」到「進入重試佇列」再到「手動重試成功」的整個端對端流程。
 - **成果**: 本次更新成功地為 AI 分析流程建立了一套「安全網」。系統現在不僅能從金鑰配額問題中自動恢復，還為所有未知的失敗提供了一個可手動管理的重試佇列，大幅提升了整個分析功能的穩定性與可靠性。
 
 ---
