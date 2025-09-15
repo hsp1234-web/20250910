@@ -7,6 +7,30 @@ import plotly.graph_objects as go
 
 log = logging.getLogger(__name__)
 
+def is_ticker_valid(symbol: str) -> bool:
+    """
+    使用 yfinance 檢查一個股票代號是否有效且可獲取資料。
+    一個"有效"的代號是 Ticker 物件有 `info` 且 `info` 內有價格資訊。
+    """
+    if not symbol or not isinstance(symbol, str):
+        return False
+    try:
+        log.info(f"正在驗證代號: {symbol}")
+        ticker = yf.Ticker(symbol)
+        # 檢查 .info 字典是否為空或缺少關鍵價格鍵
+        if not ticker.info or ticker.info.get('regularMarketPrice') is None:
+            # 作為後備，快速檢查是否有任何歷史資料
+            history = ticker.history(period="7d")
+            if history.empty:
+                log.warning(f"代號 '{symbol}' 的 .info 和歷史資料均為空。標記為無效。")
+                return False
+        log.info(f"代號 '{symbol}' 驗證成功。")
+        return True
+    except Exception as e:
+        # 捕獲可能發生的任何網路或 API 錯誤
+        log.error(f"驗證代號 '{symbol}' 時發生例外: {e}")
+        return False
+
 def to_float(value: any) -> float | None:
     """
     Safely convert a value that should be a scalar into a standard Python float.
@@ -73,12 +97,17 @@ def calculate_performance_stats(symbol: str, start_date: str, end_date: str = No
     log.info(f"開始為代號 {symbol} 計算從 {start_date} 到 {end_date} 的績效...")
 
     try:
-        stock_data = yf.download(symbol, start=start_date, end=end_date, progress=False)
-        benchmark_data = yf.download('^TWII', start=start_date, end=end_date, progress=False)
+        # --- 資料下載 ---
+        try:
+            stock_data = yf.download(symbol, start=start_date, end=end_date, progress=False)
+            if stock_data.empty:
+                # yfinance might not raise an exception for invalid tickers, just return an empty df.
+                raise ValueError(f"下載的資料為空，代號 '{symbol}' 可能無效或在該期間無資料。")
+        except Exception as e:
+            log.error(f"下載代號 {symbol} 的資料時失敗: {e}")
+            return {"error": f"無法下載代號 '{symbol}' 的股價資料。該代號可能已下市、不存在或在此期間無交易資料。"}
 
-        if stock_data.empty:
-            log.error(f"找不到代號 {symbol} 在指定期間的股價資料。")
-            return {"error": f"找不到代號 {symbol} 的股價資料。"}
+        benchmark_data = yf.download('^TWII', start=start_date, end=end_date, progress=False)
         if benchmark_data.empty:
             log.warning("找不到大盤 (^TWII) 的資料，部分指標 (Alpha, Beta) 將無法計算。")
 

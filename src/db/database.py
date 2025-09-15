@@ -288,6 +288,24 @@ def initialize_database(conn: sqlite3.Connection = None):
                         raise
             # --- 結束 ---
 
+            # --- 為 analysis_tasks 新增更多分析欄位 (2025-09-15) ---
+            more_analysis_migrations = {
+                "date_inference_model": "TEXT",
+                "date_inference_token_usage": "INTEGER",
+                "performance_model": "TEXT",
+                "performance_token_usage": "INTEGER"
+            }
+            for col, col_type in more_analysis_migrations.items():
+                try:
+                    cursor.execute(f"ALTER TABLE analysis_tasks ADD COLUMN {col} {col_type}")
+                    log.info(f"欄位 '{col}' 已成功新增至 'analysis_tasks' 資料表。")
+                except sqlite3.OperationalError as e:
+                    if "duplicate column name" in str(e):
+                        pass
+                    else:
+                        raise
+            # --- 結束 ---
+
         log.info("✅ 資料庫初始化完成。`tasks`, `system_logs`, `app_state`, `extracted_urls`, `reports`, `analysis_tasks` 資料表已存在。")
     except sqlite3.Error as e:
         log.error(f"初始化資料庫時發生錯誤: {e}")

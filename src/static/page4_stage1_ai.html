@@ -106,7 +106,8 @@
                     'processing': '佇列中...',
                     'gemini_processing': 'AI 分析中...',
                     'completed': '✅ 分析完成',
-                    'failed': '❌ 分析失敗'
+                    'failed': '❌ 分析失敗',
+                    'validation_failed': '❌ 代號無效'
                 };
 
                 let cardsHtml = '';
@@ -114,7 +115,7 @@
                     const statusText = statusMap[task.stage1_status] || task.stage1_status;
                     const isPending = task.stage1_status === 'pending';
                     const isCompleted = task.stage1_status === 'completed';
-                    const isFailed = task.stage1_status === 'failed';
+                    const isFailed = task.stage1_status === 'failed' || task.stage1_status === 'validation_failed';
                     const fileId = task.source_document_id;
                     const taskId = task.id;
 
