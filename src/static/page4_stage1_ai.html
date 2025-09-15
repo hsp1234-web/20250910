@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="zh-Hant">
 <head>
+    <!-- 版本同步：2025-09-15，確保前端與後端 API 一致 -->
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AI 分析 - 階段一</title>
@@ -130,7 +131,7 @@
                             </div>
                             <div class="card-footer">
                                 <button class="action-btn btn-json" data-task-id="${taskId}" ${!isCompleted ? 'disabled' : ''}>查看 JSON</button>
-                                <a href="/page8?file_id=${fileId}" class="action-btn btn-details">詳細資料</a>
+                                <a href="/page8?hash=${task.file_hash}" class="action-btn btn-details" ${!task.file_hash ? 'style="display:none;"' : ''}>詳細資料</a>
                                 <button class="action-btn btn-retry" data-file-id="${fileId}" style="display: ${isFailed ? 'inline-block' : 'none'};">重試分析</button>
                             </div>
                             <div class="json-viewer-container" style="display: none;"></div>

@@ -372,31 +372,29 @@ async def get_files_for_stage1():
     conn = get_db_connection()
     cursor = conn.cursor()
 
-    # 步驟 1: 從 `extracted_urls` 表中獲取所有已完成前置處理 (status='processed') 的檔案。
-    # 這些是所有可能出現在「階段一」列表中的候選檔案。
-    cursor.execute("SELECT id, local_path FROM extracted_urls WHERE status = 'processed' ORDER BY created_at DESC")
+    # 步驟 1: 從 `extracted_urls` 表中獲取所有已完成前置處理 (status='processed') 的檔案，
+    # 並且一併取得前端所需的 file_hash。
+    cursor.execute("SELECT id, local_path, file_hash FROM extracted_urls WHERE status = 'processed' ORDER BY created_at DESC")
     processed_files = cursor.fetchall()
     conn.close()
 
     if not processed_files:
         return []
 
-    # 步驟 2: 為每一個已處理的檔案，去 `analysis_tasks` 表中查找其對應的分析任務。
-    # `create_or_get_analysis_task` 是一個關鍵輔助函式：
-    # - 如果已存在該檔案的任務，就直接返回任務資料。
-    # - 如果不存在，就為它創建一個新的、預設狀態為 'pending' 的任務記錄。
-    # 這樣可以確保前端拿到的每個項目都一定有一個狀態可供顯示。
     results = []
     for file_row in processed_files:
         file_id = file_row['id']
-        # 從完整路徑中提取檔案名稱
         filename = Path(file_row['local_path']).name if file_row['local_path'] else f"未知檔案_{file_id}"
+        file_hash = file_row['file_hash']
 
+        # 步驟 2: 為每個檔案獲取或建立其對應的分析任務。
         task_data = DB_CLIENT.create_or_get_analysis_task(file_id=file_id, filename=filename)
 
-        # `task_data` 是一個字典，包含了前端卡片所需的所有欄位
-        # (如 id, stage1_status, stage1_token_usage 等)
         if task_data:
+            # 步驟 3: 將前端所需的額外欄位 (source_document_id 和 file_hash) 加入到回傳的物件中。
+            # 這樣可以避免修改 DBClient 或資料庫 schema，是侵入性最小的作法。
+            task_data['source_document_id'] = file_id
+            task_data['file_hash'] = file_hash
             results.append(task_data)
 
     return results
