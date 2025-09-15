@@ -133,12 +133,19 @@ def _run_performance_analysis_blocking_task(task_id: int, queue: asyncio.Queue, 
             stage1_data = json.load(f)
 
         # 2. 執行量化分析
+        # --- 防呆機制 (JULES, 2025-09-15) ---
+        if not isinstance(stage1_data, dict):
+            raise TypeError(f"第一階段產出的 JSON 不是預期的字典格式，而是 {type(stage1_data)}。")
+
         symbol = stage1_data.get("symbol")
-        url_record = DB_CLIENT.get_url_by_id(task_data['source_document_id'])
+        if not symbol:
+            raise ValueError("第一階段產出的 JSON 中缺少 'symbol' 資訊。")
+        # --- 修正 KeyError (JULES, 2025-09-15) ---
+        url_record = DB_CLIENT.get_url_by_id(task_data['file_id'])
         start_date = url_record.get("message_date") if url_record else None
 
-        if not (symbol and start_date):
-            raise ValueError(f"任務 {task_id}: 缺少 symbol 或 start_date，無法執行量化分析。")
+        if not start_date:
+            raise ValueError(f"任務 {task_id}: 在 extracted_urls 中找不到 message_date，無法執行量化分析。")
 
         log.info(f"任務 {task_id}: 正在為代號 {symbol} (起始日: {start_date}) 執行量化分析...")
         performance_results = calculate_performance_stats(symbol, start_date)
