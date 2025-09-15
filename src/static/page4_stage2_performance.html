@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI 分析 - 階段二</title>
+    <link rel="stylesheet" href="/static/css/nav.css">
+    <link rel="stylesheet" href="/static/css/common.css">
+    <link rel="stylesheet" href="/static/css/page4_common.css">
+</head>
+<body>
+    <!-- 主導覽列 -->
+    <nav class="top-nav">
+        <ul>
+            <li><a href="/">鳳凰主頁</a></li>
+            <li><a href="/page1">資料擷取</a></li>
+            <li><a href="/page2">批次下載</a></li>
+            <li><a href="/page3">檔案處理</a></li>
+            <li><a href="/page4_1" class="active">AI 分析</a></li>
+            <li><a href="/page5">備份管理</a></li>
+            <li><a href="/page6">金鑰管理</a></li>
+            <li><a href="/page7">提示詞管理</a></li>
+            <li><a href="/page9">績效儀表板</a></li>
+        </ul>
+    </nav>
+
+    <div class="content">
+        <!-- 副導覽列 -->
+        <nav class="sub-nav">
+            <a href="/page4_1" class="sub-nav-button">第一階段：AI 資料提取</a>
+            <a href="/page4_2" class="sub-nav-button active">第二階段：績效分析</a>
+            <a href="/page4_3" class="sub-nav-button">第三階段：報告生成</a>
+        </nav>
+
+        <div class="panel">
+            <h1>第二階段：績效分析</h1>
+            <p>此處列出所有已完成第一階段 AI 分析的任務。請勾選您想進行回測的項目，系統將會使用 `yfinance` 計算相關的績效指標。</p>
+
+            <div style="margin: 20px 0 10px 0;">
+                <button id="select-all-button">全選</button>
+                <button id="deselect-all-button">取消全選</button>
+            </div>
+
+            <div id="task-list-container" class="table-container">
+                <p>正在載入可進行績效分析的任務...</p>
+            </div>
+
+            <div style="margin-top: 20px;">
+                <button id="start-perf-btn" class="action-button" disabled>📈 開始績效分析</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    document.addEventListener('DOMContentLoaded', () => {
+        const taskListContainer = document.getElementById('task-list-container');
+        const selectAllButton = document.getElementById('select-all-button');
+        const deselectAllButton = document.getElementById('deselect-all-button');
+        const startPerfBtn = document.getElementById('start-perf-btn');
+
+        const fetchAndRenderTasks = async () => {
+            try {
+                const response = await fetch('/api/analyzer/files_for_performance_analysis');
+                if (!response.ok) throw new Error('無法獲取待處理任務列表');
+                const tasks = await response.json();
+
+                if (tasks.length === 0) {
+                    taskListContainer.innerHTML = '<p>目前沒有可進行績效分析的任務。</p>';
+                    startPerfBtn.disabled = true;
+                    return;
+                }
+
+                let tableHtml = `<table class="results-table"><thead><tr><th><input type="checkbox" id="header-checkbox"></th><th>檔案名稱</th><th>第一階段完成時間</th></tr></thead><tbody>`;
+                tasks.forEach(task => {
+                    const completedDate = new Date(task.updated_at).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei', hour12: false });
+                    tableHtml += `<tr><td><input type="checkbox" class="task-checkbox" value="${task.id}"></td><td>${task.filename}</td><td>${completedDate}</td></tr>`;
+                });
+                tableHtml += `</tbody></table>`;
+                taskListContainer.innerHTML = tableHtml;
+                startPerfBtn.disabled = false;
+
+            } catch (error) {
+                taskListContainer.innerHTML = `<p style="color:red;">載入任務列表失敗: ${error.message}</p>`;
+            }
+        };
+
+        selectAllButton.addEventListener('click', () => document.querySelectorAll('.task-checkbox:not(:disabled)').forEach(cb => cb.checked = true));
+        deselectAllButton.addEventListener('click', () => document.querySelectorAll('.task-checkbox').forEach(cb => cb.checked = false));
+        taskListContainer.addEventListener('change', (e) => {
+            if (e.target.id === 'header-checkbox') {
+                 document.querySelectorAll('.task-checkbox:not(:disabled)').forEach(cb => cb.checked = e.target.checked);
+            }
+        });
+
+        startPerfBtn.addEventListener('click', async () => {
+            const selectedIds = Array.from(document.querySelectorAll('.task-checkbox:checked')).map(cb => parseInt(cb.value));
+            if (selectedIds.length === 0) {
+                alert('請至少選擇一個任務進行績效分析。');
+                return;
+            }
+
+            startPerfBtn.disabled = true;
+            startPerfBtn.textContent = '正在發送請求...';
+
+            try {
+                const response = await fetch('/api/analyzer/start_performance_analysis', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ task_ids: selectedIds })
+                });
+                const result = await response.json();
+                if (!response.ok) throw new Error(result.detail || '啟動分析失敗');
+
+                alert('績效分析任務已成功啟動！您可以在稍後前往第三階段頁面查看結果。');
+                fetchAndRenderTasks();
+            } catch (error) {
+                alert(`錯誤: ${error.message}`);
+            } finally {
+                startPerfBtn.disabled = false;
+                startPerfBtn.textContent = '📈 開始績效分析';
+            }
+        });
+
+        fetchAndRenderTasks();
+    });
+    </script>
+</body>
+</html>

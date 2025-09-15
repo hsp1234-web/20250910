@@ -159,6 +159,10 @@ class DBClient:
         """根據 file_id 獲取單一分析任務。"""
         return self._send_request("get_analysis_task_by_file_id", {"file_id": file_id})
 
+    def get_tasks_by_status(self, **kwargs) -> list[dict]:
+        """根據多個狀態條件動態查詢分析任務。"""
+        return self._send_request("get_tasks_by_status", kwargs)
+
     # --- extracted_urls methods (2025-09-13) ---
     def get_url_by_id(self, url_id: int) -> dict | None:
         """根據 ID 獲取單一 URL 紀錄。"""

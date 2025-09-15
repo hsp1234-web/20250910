@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI 分析 - 階段一</title>
+    <link rel="stylesheet" href="/static/css/nav.css">
+    <link rel="stylesheet" href="/static/css/common.css">
+    <link rel="stylesheet" href="/static/css/page4_common.css"> <!-- 新的共用樣式 -->
+</head>
+<body>
+    <!-- 主導覽列 -->
+    <nav class="top-nav">
+        <ul>
+            <li><a href="/">鳳凰主頁</a></li>
+            <li><a href="/page1">資料擷取</a></li>
+            <li><a href="/page2">批次下載</a></li>
+            <li><a href="/page3">檔案處理</a></li>
+            <li><a href="/page4_1" class="active">AI 分析</a></li>
+            <li><a href="/page5">備份管理</a></li>
+            <li><a href="/page6">金鑰管理</a></li>
+            <li><a href="/page7">提示詞管理</a></li>
+            <li><a href="/page9">績效儀表板</a></li>
+        </ul>
+    </nav>
+
+    <div class="content">
+        <!-- 副導覽列 -->
+        <nav class="sub-nav">
+            <a href="/page4_1" class="sub-nav-button active">第一階段：AI 資料提取</a>
+            <a href="/page4_2" class="sub-nav-button">第二階段：績效分析</a>
+            <a href="/page4_3" class="sub-nav-button">第三階段：報告生成</a>
+        </nav>
+
+        <!-- Panel 1: 檔案選擇與第一階段分析 -->
+        <div class="panel">
+            <h1>第一階段：AI 資料提取</h1>
+            <p>請從下方列表中勾選您想進行初次 AI 分析的檔案，選擇模型後啟動分析。系統將會從檔案內容中提取關鍵的結構化資訊（如股票代號、多空方向等）。</p>
+
+            <div class="form-group" style="margin-top: 20px;">
+                <label for="model-select">選擇分析模型:</label>
+                <select id="model-select" disabled>
+                    <option value="">請先在「金鑰管理」頁面新增有效的 API 金鑰</option>
+                </select>
+            </div>
+
+            <div style="margin: 20px 0 10px 0;">
+                <button id="select-all-button">全選</button>
+                <button id="deselect-all-button">取消全選</button>
+            </div>
+
+            <div id="file-list-container" class="table-container">
+                <p>正在載入可分析的檔案...</p>
+            </div>
+
+            <div style="margin-top: 20px;">
+                <button id="start-stage1-btn" class="action-button" disabled>🚀 開始第一階段分析</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    document.addEventListener('DOMContentLoaded', () => {
+        // --- 元素快取 ---
+        const fileListContainer = document.getElementById('file-list-container');
+        const selectAllButton = document.getElementById('select-all-button');
+        const deselectAllButton = document.getElementById('deselect-all-button');
+        const startStage1Btn = document.getElementById('start-stage1-btn');
+        const modelSelect = document.getElementById('model-select');
+
+        // --- 核心函式 ---
+        const fetchAndRenderFiles = async () => {
+            try {
+                const response = await fetch('/api/analyzer/files_for_stage1');
+                if (!response.ok) throw new Error('無法獲取待分析檔案列表');
+                const files = await response.json();
+
+                if (files.length === 0) {
+                    fileListContainer.innerHTML = '<p>目前沒有可供分析的檔案。請先完成「檔案處理」步驟。</p>';
+                    startStage1Btn.disabled = true;
+                    return;
+                }
+
+                let tableHtml = `<table class="results-table"><thead><tr><th><input type="checkbox" id="header-checkbox"></th><th>檔案名稱</th></tr></thead><tbody>`;
+                files.forEach(file => {
+                    tableHtml += `<tr><td><input type="checkbox" class="file-checkbox" value="${file.id}"></td><td>${file.filename}</td></tr>`;
+                });
+                tableHtml += `</tbody></table>`;
+                fileListContainer.innerHTML = tableHtml;
+                startStage1Btn.disabled = false;
+
+            } catch (error) {
+                fileListContainer.innerHTML = `<p style="color:red;">載入檔案列表失敗: ${error.message}</p>`;
+            }
+        };
+
+        const checkKeysAndLoadModels = async () => {
+            try {
+                const response = await fetch('/api/keys');
+                if (!response.ok) throw new Error('無法獲取金鑰狀態');
+                const keys = await response.json();
+                const hasValidKeys = keys.some(k => k.is_valid);
+
+                if (hasValidKeys) {
+                    const modelsResponse = await fetch('/api/keys/models');
+                    if (!modelsResponse.ok) throw new Error('無法載入模型列表');
+                    const models = await modelsResponse.json();
+
+                    modelSelect.innerHTML = '';
+                    models.forEach(modelName => {
+                        const option = document.createElement('option');
+                        option.value = modelName;
+                        option.textContent = modelName.replace('models/', '');
+                        modelSelect.appendChild(option);
+                    });
+                    modelSelect.disabled = false;
+                } else {
+                    modelSelect.disabled = true;
+                }
+            } catch (error) {
+                console.error("檢查金鑰或載入模型時出錯:", error);
+                modelSelect.disabled = true;
+                modelSelect.innerHTML = `<option value="">${error.message}</option>`;
+            }
+        };
+
+        // --- 事件監聽 ---
+        selectAllButton.addEventListener('click', () => document.querySelectorAll('.file-checkbox:not(:disabled)').forEach(cb => cb.checked = true));
+        deselectAllButton.addEventListener('click', () => document.querySelectorAll('.file-checkbox').forEach(cb => cb.checked = false));
+        fileListContainer.addEventListener('change', (e) => {
+            if (e.target.id === 'header-checkbox') {
+                 document.querySelectorAll('.file-checkbox:not(:disabled)').forEach(cb => cb.checked = e.target.checked);
+            }
+        });
+
+        startStage1Btn.addEventListener('click', async () => {
+            const selectedIds = Array.from(document.querySelectorAll('.file-checkbox:checked')).map(cb => parseInt(cb.value));
+            if (selectedIds.length === 0) {
+                alert('請至少選擇一個檔案進行分析。');
+                return;
+            }
+            if (modelSelect.disabled || !modelSelect.value) {
+                alert('請選擇一個有效的分析模型。');
+                return;
+            }
+
+            startStage1Btn.disabled = true;
+            startStage1Btn.textContent = '正在發送請求...';
+
+            try {
+                const response = await fetch('/api/analyzer/start_stage1_analysis', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ file_ids: selectedIds, model_name: modelSelect.value })
+                });
+                const result = await response.json();
+                if (!response.ok) throw new Error(result.detail || '啟動分析失敗');
+
+                alert('第一階段分析任務已成功啟動！您可以在稍後前往第二階段頁面查看結果。');
+                fetchAndRenderFiles(); // 刷新列表，移除已送出的項目
+            } catch (error) {
+                alert(`錯誤: ${error.message}`);
+            } finally {
+                startStage1Btn.disabled = false;
+                startStage1Btn.textContent = '🚀 開始第一階段分析';
+            }
+        });
+
+        // --- 初始化 ---
+        checkKeysAndLoadModels();
+        fetchAndRenderFiles();
+    });
+    </script>
+</body>
+</html>

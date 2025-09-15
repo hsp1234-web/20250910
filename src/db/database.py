@@ -172,6 +172,7 @@ def initialize_database(conn: sqlite3.Connection = None):
                 stage1_json_path TEXT,
                 stage1_error_log TEXT,
                 stage1_token_usage INTEGER,
+                performance_analysis_status VARCHAR(20) DEFAULT 'pending',
                 stage2_status VARCHAR(20) DEFAULT 'pending',
                 stage2_model_used TEXT,
                 stage2_report_path TEXT,
@@ -254,6 +255,17 @@ def initialize_database(conn: sqlite3.Connection = None):
                         pass
                     else:
                         raise
+            # --- 結束 ---
+
+            # --- 為 analysis_tasks 表格新增 performance_analysis_status 欄位 (2025-09-15) ---
+            try:
+                cursor.execute("ALTER TABLE analysis_tasks ADD COLUMN performance_analysis_status VARCHAR(20) DEFAULT 'pending'")
+                log.info("欄位 'performance_analysis_status' 已成功新增至 'analysis_tasks' 資料表。")
+            except sqlite3.OperationalError as e:
+                if "duplicate column name" in str(e):
+                    pass # 欄位已存在，是正常情況
+                else:
+                    raise # 其他錯誤則需拋出
             # --- 結束 ---
 
         log.info("✅ 資料庫初始化完成。`tasks`, `system_logs`, `app_state`, `extracted_urls`, `reports`, `analysis_tasks` 資料表已存在。")
@@ -643,6 +655,39 @@ def get_analysis_task(task_id: int) -> dict | None:
     except sqlite3.Error as e:
         log.error(f"❌ 查詢分析任務 {task_id} 時發生錯誤: {e}", exc_info=True)
         return None
+    finally:
+        if conn:
+            conn.close()
+
+def get_tasks_by_status(**kwargs) -> list[dict]:
+    """
+    根據多個狀態條件動態查詢分析任務。
+    :param kwargs: 鍵值對，例如 stage1_status='completed'。
+    :return: 符合條件的任務列表。
+    """
+    if not kwargs:
+        return []
+
+    conn = get_db_connection()
+    if not conn: return []
+
+    try:
+        base_sql = "SELECT * FROM analysis_tasks"
+        conditions = []
+        params = []
+        for key, value in kwargs.items():
+            conditions.append(f"{key} = ?")
+            params.append(value)
+
+        sql = f"{base_sql} WHERE {' AND '.join(conditions)} ORDER BY created_at DESC"
+
+        cursor = conn.cursor()
+        cursor.execute(sql, params)
+        tasks = cursor.fetchall()
+        return [dict(task) for task in tasks]
+    except sqlite3.Error as e:
+        log.error(f"❌ 根據狀態查詢任務時發生錯誤: {e}", exc_info=True)
+        return []
     finally:
         if conn:
             conn.close()

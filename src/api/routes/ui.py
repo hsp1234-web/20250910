@@ -27,9 +27,17 @@ async def serve_page2(request: Request):
 async def serve_page3(request: Request):
     return templates.TemplateResponse("page3_processor.html", {"request": request})
 
-@router.get("/page4", response_class=HTMLResponse)
-async def serve_page4(request: Request):
-    return templates.TemplateResponse("page4_analyzer.html", {"request": request})
+@router.get("/page4_1", response_class=HTMLResponse)
+async def serve_page4_stage1(request: Request):
+    return templates.TemplateResponse("page4_stage1_ai.html", {"request": request})
+
+@router.get("/page4_2", response_class=HTMLResponse)
+async def serve_page4_stage2(request: Request):
+    return templates.TemplateResponse("page4_stage2_performance.html", {"request": request})
+
+@router.get("/page4_3", response_class=HTMLResponse)
+async def serve_page4_stage3(request: Request):
+    return templates.TemplateResponse("page4_stage3_report.html", {"request": request})
 
 @router.get("/page5", response_class=HTMLResponse)
 async def serve_page5(request: Request):
@@ -60,3 +68,11 @@ async def serve_report_viewer(request: Request, file_id: int):
     但前端的 JavaScript 可以從 URL 中讀取它。
     """
     return templates.TemplateResponse("report_viewer.html", {"request": request, "file_id": file_id})
+
+@router.get("/page8", response_class=HTMLResponse)
+async def serve_page8(request: Request):
+    return templates.TemplateResponse("page8_file_details.html", {"request": request})
+
+@router.get("/page9", response_class=HTMLResponse)
+async def serve_page9(request: Request):
+    return templates.TemplateResponse("page9_dashboard.html", {"request": request})

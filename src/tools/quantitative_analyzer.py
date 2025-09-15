@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 import logging
 from datetime import datetime
+import plotly.graph_objects as go
 
 log = logging.getLogger(__name__)
 
@@ -14,12 +15,10 @@ def to_float(value: any) -> float | None:
     """
     if value is None:
         return None
-    # If it's a pandas Series/DataFrame, take the first element.
     if isinstance(value, (pd.Series, pd.DataFrame)):
         if value.empty:
             return None
         value = value.iloc[0]
-    # Check for NaN or infinity
     if isinstance(value, (int, float, np.number)) and (np.isnan(value) or np.isinf(value)):
         return None
     try:
@@ -27,9 +26,46 @@ def to_float(value: any) -> float | None:
     except (ValueError, TypeError):
         return None
 
+def _generate_performance_chart_html(stock_df: pd.DataFrame, benchmark_df: pd.DataFrame) -> str:
+    """
+    使用 Plotly 產生權益曲線圖的 HTML 字串。
+    """
+    log.info("正在生成績效圖表...")
+    fig = go.Figure()
+
+    fig.add_trace(go.Scatter(
+        x=stock_df.index,
+        y=(1 + stock_df['daily_return']).cumprod(),
+        mode='lines',
+        name='策略權益曲線',
+        line=dict(color='royalblue', width=2)
+    ))
+
+    if not benchmark_df.empty:
+        fig.add_trace(go.Scatter(
+            x=benchmark_df.index,
+            y=(1 + benchmark_df['daily_return']).cumprod(),
+            mode='lines',
+            name='大盤指數 (^TWII)',
+            line=dict(color='grey', width=2, dash='dash')
+        ))
+
+    fig.update_layout(
+        title_text='<b>策略權益曲線 vs. 大盤指數</b>',
+        xaxis_title='日期',
+        yaxis_title='累積報酬',
+        legend_title_text='圖例',
+        template='plotly_white',
+        font=dict(family="Arial, sans-serif", size=12),
+        height=400,
+        margin=dict(l=40, r=40, t=60, b=40)
+    )
+    # 返回不含<html><body>標籤的圖表div，並使用CDN的JS，以方便嵌入
+    return fig.to_html(full_html=False, include_plotlyjs='cdn')
+
 def calculate_performance_stats(symbol: str, start_date: str, end_date: str = None) -> dict:
     """
-    計算給定股票代號在指定期間內的績效指標。
+    計算給定股票代號在指定期間內的績效指標，並生成圖表。
     """
     if not end_date:
         end_date = datetime.now().strftime('%Y-%m-%d')
@@ -46,10 +82,10 @@ def calculate_performance_stats(symbol: str, start_date: str, end_date: str = No
         if benchmark_data.empty:
             log.warning("找不到大盤 (^TWII) 的資料，部分指標 (Alpha, Beta) 將無法計算。")
 
-        stock_price_col = 'Adj Close' if 'Adj Close' in stock_data.columns else 'Close'
+        price_col = 'Adj Close' if 'Adj Close' in stock_data.columns else 'Close'
         benchmark_price_col = 'Adj Close' if 'Adj Close' in benchmark_data.columns else 'Close'
 
-        stock_data['daily_return'] = stock_data[stock_price_col].pct_change()
+        stock_data['daily_return'] = stock_data[price_col].pct_change()
         if not benchmark_data.empty:
             benchmark_data['daily_return'] = benchmark_data[benchmark_price_col].pct_change()
 
@@ -59,7 +95,8 @@ def calculate_performance_stats(symbol: str, start_date: str, end_date: str = No
         if len(stock_returns) < 2:
              return {"error": "股價數據不足，無法計算績效。"}
 
-        total_return = (stock_data[stock_price_col].iloc[-1] / stock_data[stock_price_col].iloc[0]) - 1
+        # --- 指標計算 ---
+        total_return = (stock_data[price_col].iloc[-1] / stock_data[price_col].iloc[0]) - 1
         days = (stock_data.index[-1] - stock_data.index[0]).days
         annualized_return = (1 + total_return) ** (365.25 / days) - 1 if days > 0 else 0
         annualized_volatility = stock_returns.std() * np.sqrt(252)
@@ -86,16 +123,23 @@ def calculate_performance_stats(symbol: str, start_date: str, end_date: str = No
 
         log.info(f"代號 {symbol} 的績效計算完成。")
 
-        final_stats = {
-            "total_return": to_float(total_return),
-            "annualized_return": to_float(annualized_return),
-            "annualized_volatility": to_float(annualized_volatility),
-            "max_drawdown": to_float(max_drawdown),
-            "sharpe_ratio": to_float(sharpe_ratio),
-            "alpha": to_float(alpha),
-            "beta": to_float(beta)
+        # --- 圖表生成 ---
+        chart_html = _generate_performance_chart_html(stock_data, benchmark_data)
+
+        # --- 彙整結果 ---
+        final_results = {
+            "stats": {
+                "total_return": to_float(total_return),
+                "annualized_return": to_float(annualized_return),
+                "annualized_volatility": to_float(annualized_volatility),
+                "max_drawdown": to_float(max_drawdown),
+                "sharpe_ratio": to_float(sharpe_ratio),
+                "alpha": to_float(alpha),
+                "beta": to_float(beta)
+            },
+            "chart_html": chart_html
         }
-        return final_stats
+        return final_results
 
     except Exception as e:
         log.error(f"為代號 {symbol} 計算績效時發生錯誤: {e}", exc_info=True)
@@ -104,14 +148,19 @@ def calculate_performance_stats(symbol: str, start_date: str, end_date: str = No
 if __name__ == '__main__':
     test_symbol = '2330.TW'
     test_start_date = '2023-01-01'
-    stats = calculate_performance_stats(test_symbol, test_start_date)
+    results = calculate_performance_stats(test_symbol, test_start_date)
 
-    if "error" in stats:
-        print(f"計算失敗: {stats['error']}")
+    if "error" in results:
+        print(f"計算失敗: {results['error']}")
     else:
         print(f"--- {test_symbol} 從 {test_start_date} 以來的績效 ---")
-        for key, value in stats.items():
+        for key, value in results['stats'].items():
             if value is not None:
                 print(f"{key.replace('_', ' ').title():<25}: {value:.4f}")
             else:
                 print(f"{key.replace('_', ' ').title():<25}: N/A")
+
+        # 為了測試，將圖表HTML寫入檔案
+        with open("temp_chart.html", "w", encoding="utf-8") as f:
+            f.write(results['chart_html'])
+        print("\n圖表已暫存至 temp_chart.html")

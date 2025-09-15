@@ -1,0 +1,94 @@
+/* src/static/css/page4_common.css */
+
+/* --- 副導覽列樣式 (Sub-navigation) --- */
+.sub-nav {
+    display: flex;
+    gap: 10px;
+    background-color: #e9ecef; /* A light grey background */
+    padding: 10px;
+    border-radius: 8px;
+    margin-bottom: 20px;
+    overflow-x: auto; /* Allow horizontal scrolling on small screens */
+    scrollbar-width: thin;
+}
+
+.sub-nav-button {
+    text-decoration: none;
+    padding: 8px 16px;
+    border-radius: 6px;
+    color: #495057; /* Darker grey text */
+    font-weight: 500;
+    transition: all 0.2s ease-in-out;
+    white-space: nowrap; /* Prevent button text from wrapping */
+}
+
+.sub-nav-button:hover {
+    background-color: #dee2e6; /* A slightly darker grey on hover */
+    color: #212529;
+}
+
+.sub-nav-button.active {
+    background-color: #007bff; /* Blue for active */
+    color: white;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+/* --- 通用面板和表單樣式 --- */
+.panel {
+    background-color: #ffffff;
+    border: 1px solid #dee2e6;
+    border-radius: 8px;
+    padding: 20px;
+    margin-bottom: 20px;
+}
+
+.form-group {
+    margin-bottom: 15px;
+}
+
+.form-group label {
+    display: block;
+    margin-bottom: 5px;
+    font-weight: 500;
+    color: #495057;
+}
+
+.form-group select {
+    width: 100%;
+    padding: 8px 12px;
+    border-radius: 4px;
+    border: 1px solid #ced4da;
+}
+
+.action-button {
+    font-size: 1.1em;
+    padding: 10px 20px;
+}
+
+.table-container {
+    max-height: 400px;
+    overflow-y: auto;
+    border: 1px solid #dee2e6;
+    border-radius: 4px;
+}
+
+.results-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.results-table th, .results-table td {
+    padding: 12px;
+    text-align: left;
+    border-bottom: 1px solid #dee2e6;
+}
+
+.results-table thead th {
+    background-color: #f8f9fa;
+    position: sticky;
+    top: 0;
+}
+
+.results-table tbody tr:hover {
+    background-color: #f1f3f5;
+}

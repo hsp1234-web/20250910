@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>策略績效儀表板</title>
+    <link rel="stylesheet" href="/static/css/common.css">
+    <link rel="stylesheet" href="/static/css/nav.css">
+    <link rel="stylesheet" href="/static/css/page9.css">
+</head>
+<body>
+    <nav class="top-nav">
+        <ul>
+            <li><a href="/">鳳凰主頁</a></li>
+            <li><a href="/page1">網址提取</a></li>
+            <li><a href="/page2">批次下載</a></li>
+            <li><a href="/page3">檔案處理</a></li>
+            <li><a href="/page4_1">AI 分析</a></li>
+            <li><a href="/page5">備份管理</a></li>
+            <li><a href="/page6">金鑰管理</a></li>
+            <li><a href="/page7">提示詞管理</a></li>
+            <li><a href="/page9" class="active">績效儀表板</a></li>
+        </ul>
+    </nav>
+
+    <div class="container">
+        <h1>策略績效儀表板</h1>
+        <p>此頁面彙總所有已完成的量化分析報告，方便進行比較與檢視。</p>
+
+        <div id="loading-indicator">正在載入報告...</div>
+
+        <div id="dashboard-container">
+            <!-- 報表將會動態插入到這裡 -->
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const container = document.getElementById('dashboard-container');
+            const loadingIndicator = document.getElementById('loading-indicator');
+
+            const translations = {
+                "total_return": "總報酬率",
+                "annualized_return": "年化報酬率",
+                "annualized_volatility": "年化波動率",
+                "max_drawdown": "最大回撤 (MDD)",
+                "sharpe_ratio": "夏普比率",
+                "alpha": "Alpha (α)",
+                "beta": "Beta (β)"
+            };
+
+            const createReportElement = (report) => {
+                const element = document.createElement('div');
+                element.className = 'report-item';
+
+                // --- 標題區 ---
+                const header = document.createElement('div');
+                header.className = 'report-header';
+                header.innerHTML = `
+                    <span class="report-title">${report.title} (Symbol: ${report.symbol})</span>
+                    <span class="report-meta">分析於: ${new Date(report.source_date).toLocaleDateString()} by ${report.source_author}</span>
+                `;
+                header.addEventListener('click', () => {
+                    const content = element.querySelector('.report-content');
+                    content.style.display = content.style.display === 'none' ? 'block' : 'none';
+                    header.classList.toggle('active');
+                });
+
+                // --- 內容區 (預設隱藏) ---
+                const content = document.createElement('div');
+                content.className = 'report-content';
+                content.style.display = 'none';
+
+                const contentGrid = document.createElement('div');
+                contentGrid.className = 'report-grid';
+
+                // 圖表區
+                const chartDiv = document.createElement('div');
+                chartDiv.className = 'chart-container';
+                if (report.chart_html) {
+                    chartDiv.innerHTML = report.chart_html;
+                } else {
+                    chartDiv.innerHTML = '<p>無可用圖表。</p>';
+                }
+
+                // KPI 表格區
+                const kpiDiv = document.createElement('div');
+                kpiDiv.className = 'kpi-container';
+                let tableHtml = '<table><thead><tr><th>指標</th><th>數值</th></tr></thead><tbody>';
+                if (report.backtest_kpis) {
+                    for (const [key, value] of Object.entries(report.backtest_kpis)) {
+                        const displayName = translations[key] || key;
+                        const formattedValue = typeof value === 'number' ? value.toFixed(4) : String(value);
+                        tableHtml += `<tr><td>${displayName}</td><td>${formattedValue}</td></tr>`;
+                    }
+                }
+                tableHtml += '</tbody></table>';
+                kpiDiv.innerHTML = tableHtml;
+
+                contentGrid.appendChild(chartDiv);
+                contentGrid.appendChild(kpiDiv);
+
+                // AI 分析摘要區
+                const summaryDiv = document.createElement('div');
+                summaryDiv.className = 'ai-summary-container';
+                summaryDiv.innerHTML = `
+                    <h3>AI 分析摘要</h3>
+                    <table>
+                        <tr><th>標題</th><td>${report.ai_summary.title || 'N/A'}</td></tr>
+                        <tr><th>情緒</th><td>${report.ai_summary.sentiment || 'N/A'}</td></tr>
+                        <tr><th>摘要</th><td>${report.ai_summary.summary || 'N/A'}</td></tr>
+                    </table>
+                    <button class="view-json-btn">查看完整 JSON</button>
+                `;
+
+                const jsonButton = summaryDiv.querySelector('.view-json-btn');
+                jsonButton.addEventListener('click', () => {
+                    const jsonContent = JSON.stringify(report.ai_summary, null, 2);
+                    const newWindow = window.open();
+                    newWindow.document.write('<pre>' + jsonContent + '</pre>');
+                    newWindow.document.close();
+                });
+
+
+                content.appendChild(contentGrid);
+                content.appendChild(summaryDiv);
+
+                element.appendChild(header);
+                element.appendChild(content);
+
+                return element;
+            };
+
+            const fetchAndRenderReports = async () => {
+                try {
+                    const response = await fetch('/api/dashboard/performance_reports');
+                    if (!response.ok) {
+                        throw new Error(`獲取報告失敗: ${response.statusText}`);
+                    }
+                    const reports = await response.json();
+
+                    loadingIndicator.style.display = 'none';
+
+                    if (reports.length === 0) {
+                        container.innerHTML = '<p>目前沒有已完成的績效報告。</p>';
+                        return;
+                    }
+
+                    reports.forEach(report => {
+                        const reportElement = createReportElement(report);
+                        container.appendChild(reportElement);
+                    });
+
+                } catch (error) {
+                    loadingIndicator.textContent = `載入報告時發生錯誤: ${error.message}`;
+                    loadingIndicator.style.color = 'red';
+                    console.error(error);
+                }
+            };
+
+            fetchAndRenderReports();
+        });
+    </script>
+</body>
+</html>
