@@ -3,7 +3,12 @@ import pandas as pd
 import numpy as np
 import logging
 from datetime import datetime
-import plotly.graph_objects as go
+import matplotlib
+matplotlib.use('Agg')  # Use non-interactive backend
+import matplotlib.pyplot as plt
+import matplotlib.font_manager as fm
+import io
+import base64
 
 log = logging.getLogger(__name__)
 
@@ -52,40 +57,73 @@ def to_float(value: any) -> float | None:
 
 def _generate_performance_chart_html(stock_df: pd.DataFrame, benchmark_df: pd.DataFrame) -> str:
     """
-    使用 Plotly 產生權益曲線圖的 HTML 字串。
+    【JULES修改】使用 Matplotlib 產生權益曲線圖的 HTML 字串。
     """
-    log.info("正在生成績效圖表...")
-    fig = go.Figure()
+    log.info("正在使用 Matplotlib 生成績效圖表...")
+    try:
+        # --- 字體設定 ---
+        font_path = '/tmp/fonts/NotoSansTC-Regular.otf'
+        import os
+        if not os.path.exists(font_path):
+            log.error(f"字體文件不存在於: {font_path}")
+            return "<p>錯誤: 關鍵字體文件缺失，無法生成圖表。</p>"
 
-    fig.add_trace(go.Scatter(
-        x=stock_df.index,
-        y=(1 + stock_df['daily_return']).cumprod(),
-        mode='lines',
-        name='策略權益曲線',
-        line=dict(color='royalblue', width=2)
-    ))
+        font_properties = fm.FontProperties(fname=font_path, size=12)
+        title_font_properties = fm.FontProperties(fname=font_path, size=16)
 
-    if not benchmark_df.empty:
-        fig.add_trace(go.Scatter(
-            x=benchmark_df.index,
-            y=(1 + benchmark_df['daily_return']).cumprod(),
-            mode='lines',
-            name='大盤指數 (^TWII)',
-            line=dict(color='grey', width=2, dash='dash')
-        ))
+        # --- 圖表繪製 ---
+        fig, ax = plt.subplots(figsize=(10, 5)) # 調整尺寸以更好地配合頁面
 
-    fig.update_layout(
-        title_text='<b>策略權益曲線 vs. 大盤指數</b>',
-        xaxis_title='日期',
-        yaxis_title='累積報酬',
-        legend_title_text='圖例',
-        template='plotly_white',
-        font=dict(family="Arial, sans-serif", size=12),
-        height=400,
-        margin=dict(l=40, r=40, t=60, b=40)
-    )
-    # 返回不含<html><body>標籤的圖表div，並使用CDN的JS，以方便嵌入
-    return fig.to_html(full_html=False, include_plotlyjs='cdn')
+        # 繪製策略權益曲線
+        ax.plot(
+            stock_df.index,
+            (1 + stock_df['daily_return']).cumprod(),
+            color='royalblue',
+            linewidth=2,
+            label='策略權益曲線'
+        )
+
+        # 繪製大盤指數權益曲線
+        if not benchmark_df.empty:
+            ax.plot(
+                benchmark_df.index,
+                (1 + benchmark_df['daily_return']).cumprod(),
+                color='grey',
+                linewidth=2,
+                linestyle='--',
+                label='大盤指數 (^TWII)'
+            )
+
+        # --- 圖表美化與標籤設定 ---
+        ax.set_title('策略權益曲線 vs. 大盤指數', fontproperties=title_font_properties)
+        ax.set_xlabel('日期', fontproperties=font_properties)
+        ax.set_ylabel('累積報酬', fontproperties=font_properties)
+
+        # 設定圖例
+        legend = ax.legend(prop=font_properties)
+
+        # 設定坐標軸刻度的字體
+        for label in ax.get_xticklabels() + ax.get_yticklabels():
+            label.set_fontproperties(font_properties)
+
+        ax.grid(True, linestyle='--', alpha=0.6)
+        fig.autofmt_xdate() # 自動旋轉日期標籤
+
+        # --- 轉換為 Base64 HTML ---
+        buf = io.BytesIO()
+        plt.savefig(buf, format='png', bbox_inches='tight')
+        buf.seek(0)
+        img_base64 = base64.b64encode(buf.read()).decode('utf-8')
+        plt.close(fig)
+
+        chart_html = f'<img src="data:image/png;base64,{img_base64}" alt="策略績效分析圖表" style="max-width: 100%; height: auto;" />'
+        log.info("Matplotlib 圖表生成並編碼成功。")
+
+        return chart_html
+
+    except Exception as e:
+        log.error(f"使用 Matplotlib 生成圖表時發生錯誤: {e}", exc_info=True)
+        return f"<p>生成圖表時發生預期外的錯誤: {e}</p>"
 
 def calculate_performance_stats(symbol: str, start_date: str, end_date: str = None, timeout: int = 30) -> dict:
     """
