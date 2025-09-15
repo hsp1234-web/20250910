@@ -338,8 +338,8 @@ select {
 /* --- JSON and Error Log Viewer --- */
 .json-viewer-container, .error-log-container {
     padding: 15px;
-    background-color: #2b303b;
-    color: #c0c5ce;
+    background-color: #f8f9fa; /* Changed to light background */
+    color: #212529;             /* Changed to dark text */
     border-top: 1px solid var(--border-color);
     max-height: 400px;
     overflow-y: auto;

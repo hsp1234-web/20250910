@@ -5,6 +5,7 @@ import logging
 import sys
 import json
 import uuid
+import datetime
 from pathlib import Path
 from typing import List, Dict, Any
 
@@ -19,6 +20,7 @@ sys.path.insert(0, str(SRC_DIR))
 from db.client import get_client
 from db.database import get_db_connection
 from core import key_manager, prompt_manager
+from core.time_utils import get_current_taipei_date_str
 from tools.gemini_manager import GeminiManager
 
 # --- 常數與設定 ---
@@ -42,6 +44,10 @@ class Stage1Request(BaseModel):
 
 class PerformanceAnalysisRequest(BaseModel):
     task_ids: List[int]
+
+class DateInferenceRequest(BaseModel):
+    task_ids: List[int]
+    model_name: str
 
 class Stage2Request(BaseModel):
     task_ids: List[int]
@@ -107,10 +113,73 @@ def _run_stage1_blocking_task(task_id: int, file_id: int, model_name: str, queue
         )
         log.info(f"第一階段任務成功：task_id={task_id}，JSON 已儲存至 {json_path}")
 
+        # JULES (2025-09-15): 日期推斷已拆分為獨立階段，此處移除。
+
     except Exception as e:
         error_message = f"錯誤: {type(e).__name__}: {str(e)}"
         log.error(f"第一階段任務失敗：task_id={task_id}，{error_message}", exc_info=True)
         DB_CLIENT.update_analysis_task(task_id=task_id, updates={"stage1_status": "failed", "stage1_error_log": error_message})
+
+def _run_date_inference_blocking_task(task_id: int, model_name: str, queue: asyncio.Queue, loop: asyncio.AbstractEventLoop):
+    """
+    【新增】執行 AI 日期推斷的同步阻塞部分。
+    """
+    log.info(f"AI 日期推斷任務實際執行開始：task_id={task_id}")
+    try:
+        # 1. 獲取任務資料和必要的提示詞
+        all_prompts = prompt_manager.get_all_prompts()
+        date_prompt_template = all_prompts.get("stage_1_5_date_inference_prompt")
+        if not date_prompt_template:
+            raise ValueError("在提示詞庫中找不到 'stage_1_5_date_inference_prompt'。")
+
+        task_data = DB_CLIENT.get_analysis_task(task_id=task_id)
+        if not task_data or not task_data.get("file_content_for_analysis"):
+             raise ValueError(f"任務 {task_id} 中找不到可供分析的檔案內容。")
+
+        # 2. 初始化 Gemini Manager
+        valid_keys = key_manager.get_all_valid_keys_for_manager()
+        if not valid_keys:
+            raise ValueError("在金鑰池中找不到任何有效的 API 金鑰。")
+        gemini = GeminiManager(api_keys=valid_keys)
+
+        # 3. 準備並執行提示
+        text_content = task_data['file_content_for_analysis']
+        url_record = DB_CLIENT.get_url_by_id(task_data['file_id'])
+        message_date = url_record.get("message_date", get_current_taipei_date_str())
+
+        date_prompt = date_prompt_template.format(
+            document_text=text_content,
+            message_date=message_date,
+            today_date=get_current_taipei_date_str()
+        )
+
+        inferred_date_str, error, _, token_usage = gemini.prompt_for_text(prompt=date_prompt, model_name=model_name)
+        if error:
+            raise error
+
+        # 4. 驗證並儲存結果
+        try:
+            datetime.datetime.strptime(inferred_date_str.strip(), '%Y-%m-%d')
+            inferred_date_to_save = inferred_date_str.strip()
+            log.info(f"任務 {task_id}: AI 成功推斷出日期: {inferred_date_to_save}")
+        except ValueError:
+            log.warning(f"任務 {task_id}: AI 回傳的日期格式無效 ('{inferred_date_str}')。將使用訊息日期作為後備。")
+            inferred_date_to_save = message_date
+
+        DB_CLIENT.update_analysis_task(
+            task_id=task_id,
+            updates={
+                "inferred_publish_date": inferred_date_to_save,
+                "date_inference_status": "completed",
+                "stage1_token_usage": task_data.get('stage1_token_usage', 0) + (token_usage or 0) # 累加 token
+            }
+        )
+
+    except Exception as e:
+        error_message = f"錯誤: {type(e).__name__}: {str(e)}"
+        log.error(f"AI 日期推斷任務失敗：task_id={task_id}，{error_message}", exc_info=True)
+        DB_CLIENT.update_analysis_task(task_id=task_id, updates={"date_inference_status": "failed", "performance_error_log": error_message})
+
 
 def _run_performance_analysis_blocking_task(task_id: int, queue: asyncio.Queue, loop: asyncio.AbstractEventLoop):
     """
@@ -133,12 +202,25 @@ def _run_performance_analysis_blocking_task(task_id: int, queue: asyncio.Queue, 
             stage1_data = json.load(f)
 
         # 2. 執行量化分析
-        symbol = stage1_data.get("symbol")
-        url_record = DB_CLIENT.get_url_by_id(task_data['source_document_id'])
-        start_date = url_record.get("message_date") if url_record else None
+        # --- 防呆機制 (JULES, 2025-09-15) ---
+        if not isinstance(stage1_data, dict):
+            raise TypeError(f"第一階段產出的 JSON 不是預期的字典格式，而是 {type(stage1_data)}。")
 
-        if not (symbol and start_date):
-            raise ValueError(f"任務 {task_id}: 缺少 symbol 或 start_date，無法執行量化分析。")
+        symbol = stage1_data.get("symbol")
+        if not symbol:
+            raise ValueError("第一階段產出的 JSON 中缺少 'symbol' 資訊。")
+        # --- 修正 KeyError (JULES, 2025-09-15) ---
+        # --- 更新為使用推斷日期 (JULES, 2025-09-15) ---
+        if task_data.get("inferred_publish_date"):
+            start_date = task_data["inferred_publish_date"]
+            log.info(f"任務 {task_id}: 使用 AI 推斷的發布日期: {start_date}")
+        else:
+            url_record = DB_CLIENT.get_url_by_id(task_data['file_id'])
+            start_date = url_record.get("message_date") if url_record else None
+            log.warning(f"任務 {task_id}: 未找到 AI 推斷日期，回退使用訊息日期: {start_date}")
+
+        if not start_date:
+            raise ValueError(f"任務 {task_id}: 缺少可用的起始日期 (推斷或訊息日期)，無法執行量化分析。")
 
         log.info(f"任務 {task_id}: 正在為代號 {symbol} (起始日: {start_date}) 執行量化分析...")
         performance_results = calculate_performance_stats(symbol, start_date)
@@ -240,6 +322,9 @@ async def run_analysis_task_wrapper(task_id: int, semaphore: asyncio.Semaphore, 
         if stage == "performance":
             status_field = "performance_status"
             update_payload = {status_field: "processing"}
+        elif stage == 'date_inference':
+            status_field = "date_inference_status"
+            update_payload = {status_field: "processing"}
         elif stage in [1, 2]:
             status_field = f"stage{stage}_status"
             update_payload = {status_field: "processing", f"stage{stage}_model": kwargs.get("model_name")}
@@ -311,6 +396,31 @@ async def start_stage1_analysis(request: Request, payload: Stage1Request, backgr
     conn.close()
 
     return {"message": f"已成功為 {len(tasks_created)} 個檔案排入第一階段分析佇列。"}
+
+@router.post("/start_date_inference")
+async def start_date_inference(request: Request, payload: DateInferenceRequest, background_tasks: BackgroundTasks):
+    """【新增】啟動 AI 日期推斷"""
+    if not payload.task_ids:
+        raise HTTPException(status_code=400, detail="任務 ID 列表不可為空。")
+
+    semaphore = request.app.state.analysis_semaphore
+    queue = request.app.state.notification_queue
+    loop = asyncio.get_running_loop()
+
+    for task_id in payload.task_ids:
+        background_tasks.add_task(
+            run_analysis_task_wrapper,
+            task_id=task_id,
+            semaphore=semaphore,
+            blocking_func=_run_date_inference_blocking_task,
+            queue=queue,
+            loop=loop,
+            model_name=payload.model_name,
+            stage="date_inference"
+        )
+
+    return {"message": f"已成功為 {len(payload.task_ids)} 個任務排入日期推斷佇列。"}
+
 
 @router.post("/start_performance_analysis")
 async def start_performance_analysis(request: Request, payload: PerformanceAnalysisRequest, background_tasks: BackgroundTasks):
@@ -399,12 +509,19 @@ async def get_files_for_stage1():
 
     return results
 
+@router.get("/files_for_date_inference")
+async def get_files_for_date_inference():
+    """【新增】獲取已完成第一階段，可供進行日期推斷的任務列表。"""
+    tasks = DB_CLIENT.get_all_analysis_tasks()
+    # 篩選條件：第一階段已完成，且日期推斷不是 'completed'
+    return [t for t in tasks if t.get('stage1_status') == 'completed' and t.get('date_inference_status') != 'completed']
+
 @router.get("/files_for_performance_analysis")
 async def get_files_for_performance_analysis():
-    """【新增】獲取已完成第一階段分析，但尚未進行績效分析的任務列表。"""
+    """【修改】獲取已完成日期推斷，但尚未進行績效分析的任務列表。"""
     tasks = DB_CLIENT.get_all_analysis_tasks()
-    # 篩選條件：第一階段已完成，且績效分析狀態不是 'completed'
-    return [t for t in tasks if t.get('stage1_status') == 'completed' and t.get('performance_status') != 'completed']
+    # 篩選條件：日期推斷已完成，且績效分析狀態不是 'completed'
+    return [t for t in tasks if t.get('date_inference_status') == 'completed' and t.get('performance_status') != 'completed']
 
 @router.get("/files_for_stage2")
 async def get_files_for_stage2():

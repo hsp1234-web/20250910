@@ -28,6 +28,7 @@
 
         <div class="sub-nav">
             <a href="/page4_stage1_ai" class="sub-nav-button">1. AI 分析</a>
+            <a href="/page4_stage1_5_date" class="sub-nav-button">1.5. 日期推斷</a>
             <a href="/page4_stage2_performance" class="sub-nav-button active">2. 績效分析</a>
             <a href="/page4_stage3_report" class="sub-nav-button">3. 報告生成</a>
         </div>
@@ -41,7 +42,8 @@
                 <button id="deselect-all-button">取消全選</button>
             </div>
 
-            <div id="task-list-container">
+            <!-- 卡片容器 -->
+            <div id="task-cards-container">
                 <p>正在載入待分析任務...</p>
             </div>
 
@@ -61,42 +63,63 @@
 
     <script>
         document.addEventListener('DOMContentLoaded', () => {
-            const taskListContainer = document.getElementById('task-list-container');
+            // --- DOM Element Cache ---
+            const taskCardsContainer = document.getElementById('task-cards-container');
             const selectAllButton = document.getElementById('select-all-button');
             const deselectAllButton = document.getElementById('deselect-all-button');
             const startPerformanceBtn = document.getElementById('start-performance-btn');
             const statusArea = document.getElementById('status-area');
             const copyLogButton = document.getElementById('copy-log-button');
 
+            // --- Utility Functions ---
             const logStatus = (message, color = 'black') => {
                 const timestamp = new Date().toLocaleTimeString('zh-TW', { hour12: false });
                 statusArea.insertAdjacentHTML('afterbegin', `<p style="color: ${color};">[${timestamp}] ${message}</p>`);
             };
 
+            // --- Core Render Functions ---
             const renderTaskList = async () => {
                 try {
+                    logStatus('正在從後端獲取待分析任務...');
                     const response = await fetch('/api/analyzer/files_for_performance_analysis');
-                    if (!response.ok) throw new Error('無法獲取待處理任務');
+                    if (!response.ok) throw new Error(`無法獲取待處理任務 (HTTP ${response.status})`);
                     const tasks = await response.json();
+                    logStatus(`成功獲取 ${tasks.length} 個任務。`, 'green');
+
                     if (tasks.length === 0) {
-                        taskListContainer.innerHTML = '<p>目前沒有可進行績效分析的任務。</p>';
+                        taskCardsContainer.innerHTML = '<p>目前沒有可進行績效分析的任務。請先完成第一階段 AI 分析。</p>';
                         return;
                     }
-                    let html = `<table class="results-table"><thead><tr><th><input type="checkbox" id="select-all-header-checkbox"></th><th>檔案名稱</th><th>第一階段狀態</th></tr></thead><tbody>`;
+
+                    let cardsHtml = '';
                     tasks.forEach(task => {
-                        html += `<tr>
-                                     <td><input type="checkbox" class="task-checkbox" value="${task.id}"></td>
-                                     <td title="${task.filename}">${task.filename}</td>
-                                     <td><span class="status-completed">✅ 完成</span></td>
-                                 </tr>`;
+                        cardsHtml += `
+                            <div class="file-card status-completed" data-task-id="${task.id}">
+                                <div class="card-header">
+                                    <input type="checkbox" class="task-checkbox" value="${task.id}">
+                                    <h3 class="filename" title="${task.filename}">${task.filename}</h3>
+                                </div>
+                                <div class="card-body">
+                                    <div class="info-grid">
+                                        <div class="info-item"><strong>第一階段狀態:</strong> <span class="status-badge">✅ 分析完成</span></div>
+                                        <div class="info-item"><strong>模型:</strong> <span class="model-name">${task.stage1_model || 'N/A'}</span></div>
+                                    </div>
+                                </div>
+                                <div class="card-footer">
+                                   <a href="/page8?hash=${task.file_hash}" class="action-btn btn-details" ${!task.file_hash ? 'style="display:none;"' : ''}>詳細資料</a>
+                                </div>
+                            </div>
+                        `;
                     });
-                    html += '</tbody></table>';
-                    taskListContainer.innerHTML = html;
+                    taskCardsContainer.innerHTML = cardsHtml;
+
                 } catch (error) {
-                    taskListContainer.innerHTML = `<p style="color:red;">載入任務列表失敗: ${error.message}</p>`;
+                    logStatus(`載入任務列表失敗: ${error.message}`, 'red');
+                    taskCardsContainer.innerHTML = `<p style="color:red;">載入任務列表失敗: ${error.message}</p>`;
                 }
             };
 
+            // --- Event Listeners ---
             startPerformanceBtn.addEventListener('click', async () => {
                 const selectedIds = Array.from(document.querySelectorAll('.task-checkbox:checked')).map(cb => parseInt(cb.value, 10));
                 if (selectedIds.length === 0) return alert('請至少選擇一個任務。');
@@ -121,13 +144,8 @@
                 }
             });
 
-            taskListContainer.addEventListener('change', e => {
-                if (e.target.id === 'select-all-header-checkbox') {
-                    document.querySelectorAll('.task-checkbox').forEach(cb => e.target.checked ? cb.checked = true : cb.checked = false);
-                }
-            });
-            selectAllButton.addEventListener('click', () => document.querySelectorAll('.task-checkbox').forEach(cb => cb.checked = true));
-            deselectAllButton.addEventListener('click', () => document.querySelectorAll('.task-checkbox').forEach(cb => cb.checked = false));
+            selectAllButton.addEventListener('click', () => document.querySelectorAll('.task-checkbox:not(:disabled)').forEach(cb => cb.checked = true));
+            deselectAllButton.addEventListener('click', () => document.querySelectorAll('.task-checkbox:checked').forEach(cb => cb.checked = false));
 
             copyLogButton.addEventListener('click', () => {
                 navigator.clipboard.writeText(statusArea.innerText).then(() => {
@@ -137,6 +155,7 @@
                 });
             });
 
+            // --- WebSocket Setup ---
             const setupWebSocket = () => {
                 const ws = new WebSocket(`${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/api/ws`);
                 ws.onopen = () => logStatus('WebSocket 連線成功。', 'blue');
@@ -145,17 +164,21 @@
                     setTimeout(setupWebSocket, 5000);
                 };
                 ws.onmessage = (event) => {
-                    const data = JSON.parse(event.data);
-                    if (data.task_type === 'analysis_stage_performance' && (data.status === 'completed' || data.status === 'failed')) {
-                         logStatus(`收到績效分析任務 #${data.task_id} 完成通知，正在刷新列表...`, 'purple');
-                         renderTaskList();
-                    } else if (data.task_type === 'analysis_stage_1' && data.status === 'completed') {
-                         logStatus(`收到第一階段任務 #${data.task_id} 完成通知，正在刷新列表...`, 'purple');
-                         renderTaskList();
+                    try {
+                        const data = JSON.parse(event.data);
+                        // 監聽第一階段或第二階段完成的事件，並刷新列表
+                        if ((data.task_type === 'analysis_stage_1' && data.status === 'completed') ||
+                            (data.task_type === 'analysis_stage_performance' && (data.status === 'completed' || data.status === 'failed'))) {
+                            logStatus(`收到任務 #${data.task_id} 狀態更新: ${data.status}。正在刷新列表...`, 'purple');
+                            renderTaskList();
+                        }
+                    } catch (err) {
+                        logStatus(`處理 WebSocket 訊息時發生錯誤: ${err}`, 'red');
                     }
                 };
             };
 
+            // --- Initialization ---
             (async () => {
                 logStatus('頁面載入完成，正在初始化...');
                 await renderTaskList();

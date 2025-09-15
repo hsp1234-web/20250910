@@ -56,3 +56,10 @@ def format_iso_for_filename(iso_string: str) -> str:
         print(f"警告：無法解析時間字串 '{iso_string}' ({e})。回退到使用當前時間。")
         # 如果解析失敗，回退到使用當前時間，以確保功能不中斷
         return get_current_taipei_time().strftime('%Y-%m-%dT%H-%M-%S')
+
+def get_current_taipei_date_str() -> str:
+    """
+    獲取當前台北時區的日期字串，格式為 YYYY-MM-DD。
+    專門用於提供給 AI 提示詞作為上下文。
+    """
+    return get_current_taipei_time().strftime('%Y-%m-%d')
