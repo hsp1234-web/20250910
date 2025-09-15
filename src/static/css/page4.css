@@ -377,3 +377,38 @@ select {
 .action-btn.btn-details {
     background-color: #6c757d;
 }
+
+/* --- 新增的 Action Bar 樣式 (2025-09-15) --- */
+.action-bar {
+    position: sticky;
+    top: 0;
+    background-color: rgba(248, 249, 250, 0.95); /* 帶有透明度的背景，提升質感 */
+    padding: 15px;
+    border-bottom: 1px solid #dee2e6;
+    z-index: 10;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    backdrop-filter: blur(5px); /* 毛玻璃效果 */
+    -webkit-backdrop-filter: blur(5px);
+    margin: 20px -20px; /* 上下左右邊距調整 */
+    padding-left: 20px;
+    padding-right: 20px;
+}
+
+.action-group {
+    display: flex;
+    gap: 10px;
+}
+
+button.primary-action {
+    background-color: #007bff;
+    color: white;
+    font-weight: bold;
+    border: 1px solid #007bff;
+}
+
+button.primary-action:hover {
+    background-color: #0056b3;
+    border-color: #0056b3;
+}

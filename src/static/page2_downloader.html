@@ -28,17 +28,18 @@
             <h1>頁面二：批次下載</h1>
             <p>此頁面會列出所有已提取但尚未處理的網址。請勾選您想下載的項目，然後點擊按鈕開始下載。</p>
 
-            <div style="margin-bottom: 10px;">
-                <button id="select-all-button">全選</button>
-                <button id="deselect-all-button">取消全選</button>
+            <div class="action-bar">
+                <div class="action-group">
+                    <button id="select-all-button">全選</button>
+                    <button id="deselect-all-button">取消全選</button>
+                </div>
+                <div class="action-group">
+                    <button id="download-button" class="primary-action">開始下載選中項目</button>
+                </div>
             </div>
 
             <div id="url-list-container">
                 <p>正在載入待處理的網址...</p>
-            </div>
-
-            <div style="margin-top: 20px;">
-                <button id="download-button">開始下載選中項目</button>
             </div>
         </div>
 
