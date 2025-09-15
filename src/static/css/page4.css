@@ -92,7 +92,7 @@ select {
 }
 
 /* --- Responsive Table Container --- */
-#file-list-container, #analysis-dashboard-container {
+#file-list-container, #task-list-container {
     overflow-x: auto; /* Key for mobile responsiveness */
 }
 
