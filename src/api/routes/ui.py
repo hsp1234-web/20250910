@@ -27,9 +27,17 @@ async def serve_page2(request: Request):
 async def serve_page3(request: Request):
     return templates.TemplateResponse("page3_processor.html", {"request": request})
 
-@router.get("/page4", response_class=HTMLResponse)
-async def serve_page4(request: Request):
-    return templates.TemplateResponse("page4_analyzer.html", {"request": request})
+@router.get("/page4_stage1_ai", response_class=HTMLResponse)
+async def serve_page4_stage1(request: Request):
+    return templates.TemplateResponse("page4_stage1_ai.html", {"request": request})
+
+@router.get("/page4_stage2_performance", response_class=HTMLResponse)
+async def serve_page4_stage2(request: Request):
+    return templates.TemplateResponse("page4_stage2_performance.html", {"request": request})
+
+@router.get("/page4_stage3_report", response_class=HTMLResponse)
+async def serve_page4_stage3(request: Request):
+    return templates.TemplateResponse("page4_stage3_report.html", {"request": request})
 
 @router.get("/page5", response_class=HTMLResponse)
 async def serve_page5(request: Request):

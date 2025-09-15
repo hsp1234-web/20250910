@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI 分析 - 階段一</title>
+    <link rel="stylesheet" href="/static/css/nav.css">
+    <link rel="stylesheet" href="/static/css/common.css">
+    <link rel="stylesheet" href="/static/css/page4.css">
+</head>
+<body>
+    <nav class="top-nav">
+        <ul>
+            <li><a href="/">鳳凰主頁</a></li>
+            <li><a href="/page1">網址提取</a></li>
+            <li><a href="/page2">批次下載</a></li>
+            <li><a href="/page3">檔案處理</a></li>
+            <li><a href="/page4_stage1_ai" class="active">AI 分析</a></li>
+            <li><a href="/page5">備份管理</a></li>
+            <li><a href="/page6">金鑰管理</a></li>
+            <li><a href="/page7">提示詞管理</a></li>
+            <li><a href="/page9">績效儀表板</a></li>
+        </ul>
+    </nav>
+
+    <div class="content">
+        <h1>AI 分析流程</h1>
+
+        <div class="sub-nav">
+            <a href="/page4_stage1_ai" class="sub-nav-button active">1. AI 分析</a>
+            <a href="/page4_stage2_performance" class="sub-nav-button">2. 績效分析</a>
+            <a href="/page4_stage3_report" class="sub-nav-button">3. 報告生成</a>
+        </div>
+
+        <!-- Panel 1: 檔案選擇與第一階段分析 -->
+        <div class="panel">
+            <h2>階段一：AI 文字擷取</h2>
+            <p>請從下方列表中勾選您想分析的檔案，選擇模型後啟動第一階段分析。完成後，項目將會出現在「績效分析」頁面。</p>
+
+            <div class="form-group" style="margin-top: 20px;">
+                <label for="stage1-model-select">選擇分析模型:</label>
+                <select id="stage1-model-select" disabled>
+                    <option value="">正在檢查 API 金鑰...</option>
+                </select>
+            </div>
+
+            <div style="margin-bottom: 10px; margin-top: 20px;">
+                <button id="select-all-button">全選</button>
+                <button id="deselect-all-button">取消全選</button>
+            </div>
+
+            <div id="file-list-container">
+                <p>正在載入已處理的檔案...</p>
+            </div>
+
+            <div style="margin-top: 20px;">
+                <button id="start-stage1-btn">🚀 開始第一階段分析</button>
+            </div>
+        </div>
+
+        <!-- Panel 2: 狀態日誌 -->
+        <div class="panel">
+            <div class="panel-header">
+                <h2>狀態日誌</h2>
+                <button id="copy-log-button" class="copy-button" title="複製日誌">複製</button>
+            </div>
+            <div id="status-area"></div>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // --- DOM Element Cache ---
+            const fileListContainer = document.getElementById('file-list-container');
+            const selectAllButton = document.getElementById('select-all-button');
+            const deselectAllButton = document.getElementById('deselect-all-button');
+            const startStage1Btn = document.getElementById('start-stage1-btn');
+            const statusArea = document.getElementById('status-area');
+            const copyLogButton = document.getElementById('copy-log-button');
+            const modelSelect = document.getElementById('stage1-model-select');
+
+            // --- Utility Functions ---
+            const logStatus = (message, color = 'black') => {
+                const timestamp = new Date().toLocaleTimeString('zh-TW', { hour12: false });
+                statusArea.insertAdjacentHTML('afterbegin', `<p style="color: ${color};">[${timestamp}] ${message}</p>`);
+            };
+
+            // --- Core Render Functions ---
+            const renderFileList = async () => {
+                try {
+                    const response = await fetch('/api/analyzer/files_for_stage1');
+                    if (!response.ok) throw new Error('無法獲取待分析檔案');
+                    const files = await response.json();
+                    if (files.length === 0) {
+                        fileListContainer.innerHTML = '<p>目前沒有可供分析的檔案。請至「檔案處理」頁面處理新檔案。</p>';
+                        return;
+                    }
+                    let html = `<table class="results-table"><thead><tr><th><input type="checkbox" id="select-all-header-checkbox"></th><th>檔案名稱</th></tr></thead><tbody>`;
+                    files.forEach(file => {
+                        html += `<tr>
+                                     <td><input type="checkbox" class="file-checkbox" value="${file.id}"></td>
+                                     <td title="${file.filename}">${file.filename}</td>
+                                 </tr>`;
+                    });
+                    html += '</tbody></table>';
+                    fileListContainer.innerHTML = html;
+                } catch (error) {
+                    fileListContainer.innerHTML = `<p style="color:red;">載入檔案列表失敗: ${error.message}</p>`;
+                }
+            };
+
+            // --- API Call Functions ---
+            const populateModelSelector = (models) => {
+                modelSelect.innerHTML = ''; // 清空舊選項
+                const priorityOrder = ["models/gemini-2.0-flash-lite", "models/gemini-2.0-flash", "models/gemini-2.5-flash-lite", "models/gemini-2.5-flash"];
+                const sortedModels = [...models].sort((a, b) => {
+                    let aPriority = priorityOrder.indexOf(a);
+                    let bPriority = priorityOrder.indexOf(b);
+                    if (aPriority === -1) aPriority = priorityOrder.length + 1;
+                    if (bPriority === -1) bPriority = priorityOrder.length + 1;
+                    if (aPriority !== bPriority) return aPriority - bPriority;
+                    return a.localeCompare(b);
+                });
+                sortedModels.forEach((modelName, index) => {
+                    const option = document.createElement('option');
+                    option.value = modelName;
+                    option.textContent = modelName.replace('models/', '');
+                    if (index === 0) option.selected = true;
+                    modelSelect.appendChild(option);
+                });
+            };
+
+            const checkKeysAndLoadModels = async () => {
+                try {
+                    const response = await fetch('/api/keys');
+                    const keys = await response.json();
+                    const validKeys = keys.filter(k => k.is_valid);
+                    if (validKeys.length > 0) {
+                        const modelResponse = await fetch('/api/keys/models');
+                        const models = await modelResponse.json();
+                        populateModelSelector(models);
+                        modelSelect.disabled = false;
+                    } else {
+                        modelSelect.innerHTML = '<option value="">請先在「金鑰管理」頁面新增有效的 API 金鑰</option>';
+                        modelSelect.disabled = true;
+                        logStatus('偵測到無有效 API 金鑰，模型選單已禁用。', 'orange');
+                    }
+                } catch (error) {
+                    logStatus(`檢查 API 金鑰或載入模型時發生錯誤: ${error.message}`, 'red');
+                    modelSelect.disabled = true;
+                }
+            };
+
+            // --- Event Listeners ---
+            startStage1Btn.addEventListener('click', async () => {
+                const selectedIds = Array.from(document.querySelectorAll('.file-checkbox:checked')).map(cb => parseInt(cb.value, 10));
+                if (selectedIds.length === 0) return alert('請至少選擇一個檔案。');
+                if (modelSelect.disabled) return alert('請先新增有效的 API 金鑰才能開始分析。');
+                const modelName = modelSelect.value;
+                if (!modelName) return alert('請選擇分析模型。');
+
+                logStatus(`啟動第一階段分析，共 ${selectedIds.length} 個檔案...`, 'blue');
+                try {
+                    const response = await fetch('/api/analyzer/start_stage1_analysis', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({ file_ids: selectedIds, model_name: modelName })
+                    });
+                    const result = await response.json();
+                    if (response.ok) {
+                        logStatus(`分析請求已成功發送: ${result.message}`, 'green');
+                        logStatus('請稍後至「績效分析」頁面查看結果。正在重新整理列表...', 'purple');
+                        setTimeout(renderFileList, 1000); // 等待一秒後刷新
+                    } else {
+                        throw new Error(result.detail || '未知錯誤');
+                    }
+                } catch (error) {
+                    logStatus(`啟動分析失敗: ${error.message}`, 'red');
+                }
+            });
+
+            fileListContainer.addEventListener('change', e => {
+                if (e.target.id === 'select-all-header-checkbox') {
+                    document.querySelectorAll('.file-checkbox').forEach(cb => e.target.checked ? cb.checked = true : cb.checked = false);
+                }
+            });
+            selectAllButton.addEventListener('click', () => document.querySelectorAll('.file-checkbox').forEach(cb => cb.checked = true));
+            deselectAllButton.addEventListener('click', () => document.querySelectorAll('.file-checkbox').forEach(cb => cb.checked = false));
+
+            copyLogButton.addEventListener('click', () => {
+                navigator.clipboard.writeText(statusArea.innerText).then(() => {
+                    const originalText = copyLogButton.innerText;
+                    copyLogButton.innerText = '已複製 ✅';
+                    setTimeout(() => { copyLogButton.innerText = originalText; }, 2000);
+                });
+            });
+
+            const setupWebSocket = () => {
+                const ws = new WebSocket(`${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/api/ws`);
+                ws.onopen = () => logStatus('WebSocket 連線成功。', 'blue');
+                ws.onclose = () => {
+                    logStatus('WebSocket 連線已中斷。5 秒後嘗試重新連線...', 'orange');
+                    setTimeout(setupWebSocket, 5000);
+                };
+                ws.onmessage = (event) => {
+                    const data = JSON.parse(event.data);
+                    if (data.task_type === 'analysis_stage_1' && (data.status === 'completed' || data.status === 'failed')) {
+                         logStatus(`收到第一階段任務 #${data.task_id} 完成通知，建議刷新列表。`, 'purple');
+                         renderFileList();
+                    }
+                };
+            };
+
+            (async () => {
+                logStatus('頁面載入完成，正在初始化...');
+                await Promise.all([
+                    checkKeysAndLoadModels(),
+                    renderFileList()
+                ]);
+                setupWebSocket();
+                logStatus('初始化完成。', 'green');
+            })();
+        });
+    </script>
+</body>
+</html>

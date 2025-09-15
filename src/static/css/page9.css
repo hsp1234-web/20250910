@@ -83,14 +83,21 @@ h1 {
 
 .report-grid {
     display: grid;
-    grid-template-columns: 2fr 1fr; /* 2/3 for chart, 1/3 for KPIs */
+    /* 調整為三欄，給圖表較多空間，KPI 和 AI 摘要各佔一欄 */
+    grid-template-columns: 1.5fr 1fr 1fr;
     gap: 20px;
     align-items: flex-start;
 }
 
-@media (max-width: 992px) {
+@media (max-width: 1200px) {
     .report-grid {
-        grid-template-columns: 1fr; /* Stack on smaller screens */
+        grid-template-columns: 1fr 1fr; /* 中等螢幕變為兩欄 */
+    }
+}
+
+@media (max-width: 768px) {
+    .report-grid {
+        grid-template-columns: 1fr; /* 小螢幕變為堆疊 */
     }
 }
 
@@ -118,4 +125,57 @@ h1 {
     text-align: right;
     font-family: monospace;
     font-weight: 500;
+}
+
+/* --- 新增的 AI 摘要和 JSON 檢視器樣式 --- */
+.ai-summary-container, .kpi-container {
+    background-color: #fdfdfd;
+    padding: 15px;
+    border: 1px solid #e9ecef;
+    border-radius: 5px;
+}
+
+.ai-summary-container h4, .kpi-container h4 {
+    margin-top: 0;
+    margin-bottom: 15px;
+    color: #343a40;
+    border-bottom: 2px solid #e0e0e0;
+    padding-bottom: 5px;
+}
+
+.ai-summary-container p {
+    margin: 5px 0;
+    line-height: 1.6;
+}
+
+.view-json-btn {
+    display: inline-block;
+    margin-top: 15px;
+    padding: 8px 12px;
+    background-color: #6c757d;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+
+.view-json-btn:hover {
+    background-color: #5a6268;
+}
+
+.json-viewer {
+    margin-top: 20px;
+    padding: 15px;
+    background-color: #212529; /* 深色背景 */
+    color: #f8f9fa; /* 亮色文字 */
+    border-radius: 5px;
+    overflow-x: auto;
+    max-height: 400px;
+}
+
+.json-viewer pre {
+    margin: 0;
+    white-space: pre-wrap;
+    word-wrap: break-word;
 }

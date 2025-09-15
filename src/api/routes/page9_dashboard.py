@@ -62,6 +62,10 @@ async def get_performance_reports():
                 source_info = cursor.fetchone()
                 conn.close()
 
+                # 移除量化分析的部分，因為我們要把整個 stage1_data 都傳給前端
+                ai_summary_data = stage1_data.copy()
+                ai_summary_data.pop("quantitative_analysis", None)
+
                 report_item = {
                     "task_id": task_id,
                     "title": stage1_data.get("title", "無標題"),
@@ -70,6 +74,7 @@ async def get_performance_reports():
                     "source_date": source_info['message_date'] if source_info else '未知',
                     "backtest_kpis": quant_data.get("stats"),
                     "chart_html": quant_data.get("chart_html"),
+                    "stage1_result_json": ai_summary_data, # 傳遞不包含績效分析的 AI 結果
                     "health_score": 0 # 暫時預留，未來可計算
                 }
                 reports.append(report_item)

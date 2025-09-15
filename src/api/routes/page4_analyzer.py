@@ -40,6 +40,9 @@ class Stage1Request(BaseModel):
     file_ids: List[int]
     model_name: str
 
+class PerformanceAnalysisRequest(BaseModel):
+    task_ids: List[int]
+
 class Stage2Request(BaseModel):
     task_ids: List[int]
     model_name: str
@@ -53,6 +56,7 @@ def _run_stage1_blocking_task(task_id: int, file_id: int, model_name: str, queue
     """
     執行第一階段 AI 分析的同步阻塞部分。
     現在透過 queue 和 loop 來發送非同步通知。
+    【修改】: 已移除自動執行的量化分析。
     """
     log.info(f"第一階段任務實際執行開始：task_id={task_id}, file_id={file_id}, model={model_name}")
     try:
@@ -78,46 +82,15 @@ def _run_stage1_blocking_task(task_id: int, file_id: int, model_name: str, queue
 
         # 新增：在呼叫 API 前發送一個更細緻的狀態更新
         DB_CLIENT.update_analysis_task(task_id=task_id, updates={"stage1_status": "gemini_processing"})
-        # JULES (2025-09-13): 改用佇列發送通知
         notification_msg = {"type": "analysis_update", "task_id": task_id, "status": "gemini_processing", "stage": 1, "result": DB_CLIENT.get_analysis_task(task_id)}
         asyncio.run_coroutine_threadsafe(queue.put(notification_msg), loop)
 
-        # 現在 structured_data, error, used_key, token_usage 都能正確接收到值
         structured_data, error, used_key, token_usage = gemini.prompt_for_json(prompt=prompt, model_name=model_name)
 
-        # 檢查 error 物件是否存在。如果存在，它是一個例外物件，應該被 raise。
         if error:
-            # 直接 raise 這個例外物件，而不是 raise error 字串或變數
             raise error
 
-        # --- JULES: 新增 yfinance 績效分析整合 ---
-        from tools.quantitative_analyzer import calculate_performance_stats
-
-        symbol = structured_data.get("symbol")
-        # 透過 file_id 獲取原始的 URL 紀錄，以取得發布日期
-        url_record = DB_CLIENT.get_url_by_id(file_id)
-        start_date = url_record.get("message_date") if url_record else None
-
-        if symbol and start_date:
-            log.info(f"任務 {task_id}: 正在為代號 {symbol} (起始日: {start_date}) 執行量化分析...")
-            try:
-                # 現在 performance_results 是一個包含 'stats' 和 'chart_html' 的字典
-                performance_results = calculate_performance_stats(symbol, start_date)
-                structured_data["quantitative_analysis"] = performance_results
-                if "error" in performance_results:
-                    log.warning(f"任務 {task_id}: 量化分析回傳錯誤: {performance_results['error']}")
-                else:
-                    log.info(f"任務 {task_id}: 量化分析成功。")
-            except Exception as q_e:
-                log.error(f"任務 {task_id}: 量化分析執行期間發生例外: {q_e}", exc_info=True)
-                # 即使量化分析失敗，我們仍然可以繼續儲存 AI 的結果
-                structured_data["quantitative_analysis"] = {"error": f"執行量化分析時發生例外: {str(q_e)}"}
-        else:
-            log.warning(f"任務 {task_id}: 缺少 symbol 或 start_date，跳過量化分析。")
-            structured_data["quantitative_analysis"] = {"error": "缺少 symbol 或 start_date，無法計算。"}
-        # --- yfinance 整合結束 ---
-
-        # 4. 儲存包含量化分析的 JSON 結果到檔案
+        # 4. 儲存 JSON 結果到檔案
         json_filename = f"stage1_{task_id}_{uuid.uuid4().hex[:8]}.json"
         json_path = TEMP_JSON_DIR / json_filename
         with open(json_path, "w", encoding="utf-8") as f:
@@ -138,6 +111,52 @@ def _run_stage1_blocking_task(task_id: int, file_id: int, model_name: str, queue
         error_message = f"錯誤: {type(e).__name__}: {str(e)}"
         log.error(f"第一階段任務失敗：task_id={task_id}，{error_message}", exc_info=True)
         DB_CLIENT.update_analysis_task(task_id=task_id, updates={"stage1_status": "failed", "stage1_error_log": error_message})
+
+def _run_performance_analysis_blocking_task(task_id: int, queue: asyncio.Queue, loop: asyncio.AbstractEventLoop):
+    """
+    【新增】執行績效分析的同步阻塞部分。
+    """
+    log.info(f"績效分析任務實際執行開始：task_id={task_id}")
+    try:
+        from tools.quantitative_analyzer import calculate_performance_stats
+
+        # 1. 獲取第一階段的 JSON
+        task_data = DB_CLIENT.get_analysis_task(task_id=task_id)
+        if not task_data or not task_data.get("stage1_json_path"):
+            raise ValueError(f"找不到任務 {task_id} 或其第一階段的 JSON 產出路徑。")
+
+        json_path = Path(task_data["stage1_json_path"])
+        if not json_path.exists():
+            raise FileNotFoundError(f"第一階段的 JSON 檔案不存在於路徑：{json_path}")
+
+        with open(json_path, "r", encoding="utf-8") as f:
+            stage1_data = json.load(f)
+
+        # 2. 執行量化分析
+        symbol = stage1_data.get("symbol")
+        url_record = DB_CLIENT.get_url_by_id(task_data['source_document_id'])
+        start_date = url_record.get("message_date") if url_record else None
+
+        if not (symbol and start_date):
+            raise ValueError(f"任務 {task_id}: 缺少 symbol 或 start_date，無法執行量化分析。")
+
+        log.info(f"任務 {task_id}: 正在為代號 {symbol} (起始日: {start_date}) 執行量化分析...")
+        performance_results = calculate_performance_stats(symbol, start_date)
+        stage1_data["quantitative_analysis"] = performance_results
+
+        # 3. 將包含績效分析的結果寫回同一個 JSON 檔案
+        with open(json_path, "w", encoding="utf-8") as f:
+            json.dump(stage1_data, f, ensure_ascii=False, indent=2)
+
+        # 4. 更新資料庫狀態 (可選，這裡我們用 JSON 內容作為狀態)
+        DB_CLIENT.update_analysis_task(task_id=task_id, updates={"performance_status": "completed"}) # 假設我們新增一個欄位
+        log.info(f"績效分析任務成功：task_id={task_id}")
+
+    except Exception as e:
+        error_message = f"錯誤: {type(e).__name__}: {str(e)}"
+        log.error(f"績效分析任務失敗：task_id={task_id}，{error_message}", exc_info=True)
+        DB_CLIENT.update_analysis_task(task_id=task_id, updates={"performance_status": "failed", "performance_error_log": error_message})
+
 
 def _run_stage2_blocking_task(task_id: int, model_name: str, queue: asyncio.Queue, loop: asyncio.AbstractEventLoop):
     """
@@ -214,37 +233,37 @@ async def run_analysis_task_wrapper(task_id: int, semaphore: asyncio.Semaphore, 
     """
     async with semaphore:
         log.info(f"任務 {task_id} 已取得信號量，準備執行...")
-        # 更新任務狀態為「處理中」
-        stage = kwargs.get("stage", 1)
-        DB_CLIENT.update_analysis_task(task_id=task_id, updates={f"stage{stage}_status": "processing", f"stage{stage}_model": kwargs.get("model_name")})
 
-        # JULES (2025-09-13): 直接將通知放入佇列
+        # 根據 kwargs 決定更新哪個狀態欄位
+        stage = kwargs.get("stage")
+        status_field = "status" # 預設
+        if stage == "performance":
+            status_field = "performance_status"
+            update_payload = {status_field: "processing"}
+        elif stage in [1, 2]:
+            status_field = f"stage{stage}_status"
+            update_payload = {status_field: "processing", f"stage{stage}_model": kwargs.get("model_name")}
+        else: # for performance analysis
+             update_payload = {"performance_status": "processing"}
+
+        DB_CLIENT.update_analysis_task(task_id=task_id, updates=update_payload)
+
         notification_msg = {"type": "analysis_update", "task_id": task_id, "status": "processing", "stage": stage, "result": DB_CLIENT.get_analysis_task(task_id)}
         await queue.put(notification_msg)
 
         try:
-            # 在執行器中運行阻塞函式
-            # 說明：loop.run_in_executor 不接受關鍵字參數來傳遞給目標函式。
-            # 正確的作法是使用 functools.partial 將函式與其所有參數（包括關鍵字參數）綁定在一起，
-            # 產生一個無參數的可呼叫物件，再交給 run_in_executor 執行。
-
-            # 準備傳遞給 blocking_func 的參數，移除 wrapper 自身使用的 'stage' 參數
             func_kwargs = kwargs.copy()
             func_kwargs.pop('stage', None)
 
-            # 建立 partial 函式，現在包含 queue 和 loop
             partial_func = functools.partial(blocking_func, task_id=task_id, queue=queue, loop=loop, **func_kwargs)
-
             await loop.run_in_executor(None, partial_func)
         except Exception as e:
-             # 這裡的錯誤應該已經在阻塞函式內部處理過了，但為了保險起見
             log.error(f"包裝函式捕獲到未預期的錯誤 (任務 {task_id}): {e}", exc_info=True)
         finally:
             log.info(f"任務 {task_id} 執行完畢，釋放信號量。")
-            # 總是在最後發送最終狀態的通知
             final_task_state = DB_CLIENT.get_analysis_task(task_id)
-            final_notification_msg = {"type": "analysis_update", "task_type": f"analysis_stage_{stage}", "task_id": task_id, "status": final_task_state.get(f'stage{stage}_status'), "result": final_task_state}
-            # JULES (2025-09-13): 即使在 finally 區塊，也從非同步函式直接放入佇列
+            final_status = final_task_state.get(status_field, 'unknown')
+            final_notification_msg = {"type": "analysis_update", "task_type": f"analysis_stage_{stage}", "task_id": task_id, "status": final_status, "result": final_task_state}
             await queue.put(final_notification_msg)
 
 # --- 新的 API 端點 ---
@@ -255,7 +274,6 @@ async def start_stage1_analysis(request: Request, payload: Stage1Request, backgr
     if not payload.file_ids:
         raise HTTPException(status_code=400, detail="檔案 ID 列表不可為空。")
 
-    # JULES (2025-09-13): 從 app.state 獲取佇列和信號量，並獲取當前的事件迴圈
     semaphore = request.app.state.analysis_semaphore
     queue = request.app.state.notification_queue
     loop = asyncio.get_running_loop()
@@ -275,6 +293,7 @@ async def start_stage1_analysis(request: Request, payload: Stage1Request, backgr
         if task:
             DB_CLIENT.update_analysis_task(task_id=task['id'], updates={
                 "stage1_status": "pending", "stage1_error_log": None, "stage1_json_path": None,
+                "performance_status": "pending", "performance_error_log": None,
                 "stage2_status": "pending", "stage2_error_log": None, "stage2_report_path": None
             })
             background_tasks.add_task(
@@ -293,13 +312,35 @@ async def start_stage1_analysis(request: Request, payload: Stage1Request, backgr
 
     return {"message": f"已成功為 {len(tasks_created)} 個檔案排入第一階段分析佇列。"}
 
+@router.post("/start_performance_analysis")
+async def start_performance_analysis(request: Request, payload: PerformanceAnalysisRequest, background_tasks: BackgroundTasks):
+    """【新增】啟動績效分析"""
+    if not payload.task_ids:
+        raise HTTPException(status_code=400, detail="任務 ID 列表不可為空。")
+
+    semaphore = request.app.state.analysis_semaphore
+    queue = request.app.state.notification_queue
+    loop = asyncio.get_running_loop()
+
+    for task_id in payload.task_ids:
+        background_tasks.add_task(
+            run_analysis_task_wrapper,
+            task_id=task_id,
+            semaphore=semaphore,
+            blocking_func=_run_performance_analysis_blocking_task,
+            queue=queue,
+            loop=loop,
+            stage="performance"
+        )
+
+    return {"message": f"已成功為 {len(payload.task_ids)} 個任務排入績效分析佇列。"}
+
 @router.post("/start_stage2_analysis")
 async def start_stage2_analysis(request: Request, payload: Stage2Request, background_tasks: BackgroundTasks):
     """啟動第二階段：報告生成"""
     if not payload.task_ids:
         raise HTTPException(status_code=400, detail="任務 ID 列表不可為空。")
 
-    # JULES (2025-09-13): 從 app.state 獲取佇列和信號量，並獲取當前的事件迴圈
     semaphore = request.app.state.analysis_semaphore
     queue = request.app.state.notification_queue
     loop = asyncio.get_running_loop()
@@ -309,7 +350,7 @@ async def start_stage2_analysis(request: Request, payload: Stage2Request, backgr
 
     for task_id in payload.task_ids:
         task_data = DB_CLIENT.get_analysis_task(task_id=task_id)
-        if task_data and task_data['stage1_status'] == 'completed':
+        if task_data and task_data.get('performance_status') == 'completed':
             background_tasks.add_task(
                 run_analysis_task_wrapper,
                 task_id=task_id,
@@ -321,15 +362,34 @@ async def start_stage2_analysis(request: Request, payload: Stage2Request, backgr
                 stage=2
             )
         else:
-            log.warning(f"跳過任務 ID {task_id} 的第二階段分析，因為其第一階段未完成。")
+            log.warning(f"跳過任務 ID {task_id} 的第二階段分析，因為其績效分析未完成。")
 
     return {"message": f"已為 {len(payload.task_ids)} 個符合條件的任務啟動第二階段分析。"}
 
-@router.get("/analysis_status")
-async def get_analysis_status():
-    """獲取所有分析任務的最新狀態"""
+@router.get("/files_for_stage1")
+async def get_files_for_stage1():
+    """【新增】獲取所有已處理、可供第一階段分析的檔案列表。"""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, local_path, status FROM extracted_urls WHERE status = 'processed' ORDER BY created_at DESC")
+    rows = cursor.fetchall()
+    conn.close()
+    return [{"id": row['id'], "filename": Path(row['local_path']).name} for row in rows if row['local_path']]
+
+@router.get("/files_for_performance_analysis")
+async def get_files_for_performance_analysis():
+    """【新增】獲取已完成第一階段分析，但尚未進行績效分析的任務列表。"""
     tasks = DB_CLIENT.get_all_analysis_tasks()
-    return tasks
+    # 篩選條件：第一階段已完成，且績效分析狀態不是 'completed'
+    return [t for t in tasks if t.get('stage1_status') == 'completed' and t.get('performance_status') != 'completed']
+
+@router.get("/files_for_stage2")
+async def get_files_for_stage2():
+    """【新增】獲取已完成績效分析，可供生成報告的任務列表。"""
+    tasks = DB_CLIENT.get_all_analysis_tasks()
+    # 篩選條件：績效分析狀態為 'completed'
+    return [t for t in tasks if t.get('performance_status') == 'completed']
+
 
 @router.get("/stage1_result/{task_id}")
 async def get_stage1_result(task_id: int):
@@ -345,40 +405,5 @@ async def get_stage1_result(task_id: int):
     with open(json_path, "r", encoding="utf-8") as f:
         return json.load(f)
 
-# --- 保留但可選用的端點 ---
-
-@router.get("/processed_files")
-async def get_processed_files():
-    """
-    獲取所有已處理、可供分析的檔案列表。
-    現在會回傳狀態，以便前端可以禁用不合格的檔案。
-    """
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    # 選擇性地獲取所有相關狀態的檔案
-    cursor.execute("SELECT id, local_path, status, status_message FROM extracted_urls WHERE status LIKE 'processed%' OR status = 'analyzed' ORDER BY created_at DESC")
-    rows = cursor.fetchall()
-    conn.close()
-    results = []
-    for row in rows:
-        if row['local_path']:
-            results.append({
-                "id": row['id'],
-                "filename": Path(row['local_path']).name,
-                "status": row['status'],
-                "status_message": row['status_message']
-            })
-    return results
-
 # --- 已棄用的舊版分析流程 ---
-
-# @router.post("/start_analysis")
-# async def start_analysis(request: Request, payload: AnalysisRequest, background_tasks: BackgroundTasks):
-#     """(已棄用) 接收多個檔案 ID 和一個模型名稱，為其建立背景分析任務。"""
-#     # ... 舊的實作 ...
-#     pass
-
-# def run_ai_analysis_task(file_ids: List[int], server_port: int, model_name: str):
-#     """(已棄用) 對多個檔案執行新的兩階段 AI 分析流程。"""
-#     # ... 舊的實作 ...
-#     pass
+# 移除了 /analysis_status 和 /processed_files 端點，由新的專用端點取代

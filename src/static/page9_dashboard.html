@@ -10,15 +10,17 @@
 </head>
 <body>
     <nav class="top-nav">
-        <a href="/" class="nav-button">鳳凰主頁</a>
-        <a href="/page1" class="nav-button">資料擷取</a>
-        <a href="/page2" class="nav-button">批次下載</a>
-        <a href="/page3" class="nav-button">檔案處理</a>
-        <a href="/page4" class="nav-button">AI 分析</a>
-        <a href="/page5" class="nav-button">系統備份</a>
-        <a href="/page6" class="nav-button">金鑰管理</a>
-        <a href="/page7" class="nav-button">提示詞管理</a>
-        <a href="/page9" class="nav-button active">績效儀表板</a>
+        <ul>
+            <li><a href="/">鳳凰主頁</a></li>
+            <li><a href="/page1">網址提取</a></li>
+            <li><a href="/page2">批次下載</a></li>
+            <li><a href="/page3">檔案處理</a></li>
+            <li><a href="/page4_stage1_ai">AI 分析</a></li>
+            <li><a href="/page5">備份管理</a></li>
+            <li><a href="/page6">金鑰管理</a></li>
+            <li><a href="/page7">提示詞管理</a></li>
+            <li><a href="/page9" class="active">績效儀表板</a></li>
+        </ul>
     </nav>
 
     <div class="container">
@@ -84,20 +86,45 @@
                 // KPI 表格區
                 const kpiDiv = document.createElement('div');
                 kpiDiv.className = 'kpi-container';
-                let tableHtml = '<table><thead><tr><th>指標</th><th>數值</th></tr></thead><tbody>';
+                let kpiTableHtml = '<h4>量化指標</h4><table><thead><tr><th>指標</th><th>數值</th></tr></thead><tbody>';
                 if (report.backtest_kpis) {
                     for (const [key, value] of Object.entries(report.backtest_kpis)) {
                         const displayName = translations[key] || key;
                         const formattedValue = typeof value === 'number' ? value.toFixed(4) : String(value);
-                        tableHtml += `<tr><td>${displayName}</td><td>${formattedValue}</td></tr>`;
+                        kpiTableHtml += `<tr><td>${displayName}</td><td>${formattedValue}</td></tr>`;
                     }
                 }
-                tableHtml += '</tbody></table>';
-                kpiDiv.innerHTML = tableHtml;
+                kpiTableHtml += '</tbody></table>';
+                kpiDiv.innerHTML = kpiTableHtml;
+
+                // --- 【新增】AI 分析摘要區 ---
+                const aiSummaryDiv = document.createElement('div');
+                aiSummaryDiv.className = 'ai-summary-container';
+                let summaryHtml = '<h4>AI 分析摘要</h4>';
+                if (report.stage1_result_json) {
+                    const summaryData = report.stage1_result_json;
+                    summaryHtml += `<p><strong>標題:</strong> ${summaryData.title || 'N/A'}</p>`;
+                    summaryHtml += `<p><strong>情緒:</strong> ${summaryData.sentiment || 'N/A'}</p>`;
+                    summaryHtml += `<p><strong>摘要:</strong> ${summaryData.summary || 'N/A'}</p>`;
+                    summaryHtml += `<button class="view-json-btn" data-task-id="${report.task_id}">查看完整 JSON</button>`;
+                } else {
+                    summaryHtml += '<p>無 AI 分析資料。</p>';
+                }
+                aiSummaryDiv.innerHTML = summaryHtml;
+                // --- 結束 ---
 
                 contentGrid.appendChild(chartDiv);
                 contentGrid.appendChild(kpiDiv);
+                contentGrid.appendChild(aiSummaryDiv); // 新增到網格中
                 content.appendChild(contentGrid);
+
+                // --- 【新增】JSON 檢視區 ---
+                const jsonViewer = document.createElement('div');
+                jsonViewer.className = 'json-viewer';
+                jsonViewer.id = `json-viewer-${report.task_id}`;
+                jsonViewer.style.display = 'none';
+                content.appendChild(jsonViewer);
+                // --- 結束 ---
 
                 element.appendChild(header);
                 element.appendChild(content);
@@ -105,22 +132,42 @@
                 return element;
             };
 
+            container.addEventListener('click', (e) => {
+                if (e.target.classList.contains('view-json-btn')) {
+                    const taskId = e.target.dataset.taskId;
+                    const viewer = document.getElementById(`json-viewer-${taskId}`);
+                    if (!viewer) return;
+
+                    if (viewer.style.display === 'none') {
+                        const reportData = window.reportsData.find(r => r.task_id == taskId);
+                        if (reportData && reportData.stage1_result_json) {
+                            viewer.innerHTML = `<pre>${JSON.stringify(reportData.stage1_result_json, null, 2)}</pre>`;
+                            viewer.style.display = 'block';
+                            e.target.textContent = '隱藏 JSON';
+                        }
+                    } else {
+                        viewer.style.display = 'none';
+                        e.target.textContent = '查看完整 JSON';
+                    }
+                }
+            });
+
             const fetchAndRenderReports = async () => {
                 try {
                     const response = await fetch('/api/dashboard/performance_reports');
                     if (!response.ok) {
                         throw new Error(`獲取報告失敗: ${response.statusText}`);
                     }
-                    const reports = await response.json();
+                    window.reportsData = await response.json(); // 將報告儲存在 window 以供事件監聽器使用
 
                     loadingIndicator.style.display = 'none';
 
-                    if (reports.length === 0) {
+                    if (window.reportsData.length === 0) {
                         container.innerHTML = '<p>目前沒有已完成的績效報告。</p>';
                         return;
                     }
 
-                    reports.forEach(report => {
+                    window.reportsData.forEach(report => {
                         const reportElement = createReportElement(report);
                         container.appendChild(reportElement);
                     });

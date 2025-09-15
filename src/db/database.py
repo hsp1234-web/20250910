@@ -256,6 +256,22 @@ def initialize_database(conn: sqlite3.Connection = None):
                         raise
             # --- 結束 ---
 
+            # --- 為 analysis_tasks 新增績效分析相關欄位 (2025-09-15) ---
+            performance_migrations = {
+                "performance_status": "VARCHAR(20) DEFAULT 'pending'",
+                "performance_error_log": "TEXT"
+            }
+            for col, col_type in performance_migrations.items():
+                try:
+                    cursor.execute(f"ALTER TABLE analysis_tasks ADD COLUMN {col} {col_type}")
+                    log.info(f"欄位 '{col}' 已成功新增至 'analysis_tasks' 資料表。")
+                except sqlite3.OperationalError as e:
+                    if "duplicate column name" in str(e):
+                        pass
+                    else:
+                        raise
+            # --- 結束 ---
+
         log.info("✅ 資料庫初始化完成。`tasks`, `system_logs`, `app_state`, `extracted_urls`, `reports`, `analysis_tasks` 資料表已存在。")
     except sqlite3.Error as e:
         log.error(f"初始化資料庫時發生錯誤: {e}")
