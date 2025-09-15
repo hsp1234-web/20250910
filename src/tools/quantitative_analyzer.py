@@ -73,12 +73,17 @@ def calculate_performance_stats(symbol: str, start_date: str, end_date: str = No
     log.info(f"開始為代號 {symbol} 計算從 {start_date} 到 {end_date} 的績效...")
 
     try:
-        stock_data = yf.download(symbol, start=start_date, end=end_date, progress=False)
-        benchmark_data = yf.download('^TWII', start=start_date, end=end_date, progress=False)
+        # --- 資料下載 ---
+        try:
+            stock_data = yf.download(symbol, start=start_date, end=end_date, progress=False)
+            if stock_data.empty:
+                # yfinance might not raise an exception for invalid tickers, just return an empty df.
+                raise ValueError(f"下載的資料為空，代號 '{symbol}' 可能無效或在該期間無資料。")
+        except Exception as e:
+            log.error(f"下載代號 {symbol} 的資料時失敗: {e}")
+            return {"error": f"無法下載代號 '{symbol}' 的股價資料。該代號可能已下市、不存在或在此期間無交易資料。"}
 
-        if stock_data.empty:
-            log.error(f"找不到代號 {symbol} 在指定期間的股價資料。")
-            return {"error": f"找不到代號 {symbol} 的股價資料。"}
+        benchmark_data = yf.download('^TWII', start=start_date, end=end_date, progress=False)
         if benchmark_data.empty:
             log.warning("找不到大盤 (^TWII) 的資料，部分指標 (Alpha, Beta) 將無法計算。")
 
