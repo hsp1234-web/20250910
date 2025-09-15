@@ -70,3 +70,6 @@ circus.ini
 
 # Custom test report directories
 ai_test_reports/
+
+# Generated analysis reports
+/reports/
