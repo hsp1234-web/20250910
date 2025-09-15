@@ -63,10 +63,17 @@ def test_stage1_analysis_produces_correct_json(db_conn, tmp_path, monkeypatch):
 
         def get_analysis_task(self, task_id):
             cursor = self._conn.cursor()
-            # JULES (2025-09-14): 修正 - AI分析器直接讀取 analysis_tasks 表，無需 JOIN
             sql = "SELECT * FROM analysis_tasks WHERE id = ?"
             cursor.execute(sql, (task_id,))
-            return cursor.fetchone()
+            row = cursor.fetchone()
+            return dict(row) if row else None
+
+        def get_url_by_id(self, url_id):
+            cursor = self._conn.cursor()
+            sql = "SELECT * FROM extracted_urls WHERE id = ?"
+            cursor.execute(sql, (url_id,))
+            row = cursor.fetchone()
+            return dict(row) if row else None
 
         def update_analysis_task(self, task_id, updates):
             set_clause = ", ".join([f"{key} = ?" for key in updates.keys()])
@@ -85,6 +92,16 @@ def test_stage1_analysis_produces_correct_json(db_conn, tmp_path, monkeypatch):
         "api.routes.page4_analyzer.key_manager",
         key_manager
     )
+
+    # JULES (2025-09-14): 修正 - 注入一個有效的 API 金鑰以進行測試
+    # 為了避免真實的網路呼叫，我們模擬驗證函式使其永遠成功
+    monkeypatch.setattr("core.key_manager._validate_single_key", lambda key: True)
+    # 使用者提供的金鑰
+    USER_API_KEY = "AIzaSyBdw0gY2oh2W_r1eN3ALzK9RCAAcedgF3E"
+    try:
+        key_manager.add_key(USER_API_KEY, "test_key_for_analysis")
+    except ValueError:
+        pass # 金鑰可能已在先前的測試中被加入，忽略重複錯誤
 
     # 1. 準備測試資料
     mock_article_text = """

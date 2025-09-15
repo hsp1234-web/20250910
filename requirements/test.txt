@@ -13,3 +13,4 @@ gdown
 filetype
 freezegun
 python-dateutil
+pytest-xdist

@@ -199,7 +199,7 @@ async def get_report_content(file_id: int):
 
 # --- 背景任務函式 (重構後) ---
 
-def _run_processing_blocking_task(url_id: int, queue: asyncio.Queue, loop: asyncio.AbstractEventLoop):
+def _run_processing_blocking_task(url_id: int, db_client, queue: asyncio.Queue, loop: asyncio.AbstractEventLoop):
     """這是在背景執行的單一檔案處理的同步阻塞部分。"""
     # --- 延遲導入 (Lazy Import) ---
     from tools.content_extractor import extract_content
@@ -211,7 +211,7 @@ def _run_processing_blocking_task(url_id: int, queue: asyncio.Queue, loop: async
     file_path = None  # 初始化 file_path 以確保在 finally 區塊中可用
 
     try:
-        url_record = DB_CLIENT.get_url_by_id(url_id)
+        url_record = db_client.get_url_by_id(url_id)
         if not url_record or not url_record['local_path']:
              raise ValueError(f"在資料庫中找不到 ID {url_id} 的有效本地檔案路徑。")
 
@@ -242,12 +242,12 @@ def _run_processing_blocking_task(url_id: int, queue: asyncio.Queue, loop: async
             "extracted_image_paths": image_paths_json,
             "extracted_text": text_content
         }
-        DB_CLIENT.update_url(url_id, update_payload)
+        db_client.update_url(url_id, update_payload)
 
-        analysis_task = DB_CLIENT.create_or_get_analysis_task(file_id=url_id, filename=file_path.name)
+        analysis_task = db_client.create_or_get_analysis_task(file_id=url_id, filename=file_path.name)
         if analysis_task:
             analysis_task_id = analysis_task['id']
-            DB_CLIENT.update_analysis_task(analysis_task_id, {'file_content_for_analysis': text_content})
+            db_client.update_analysis_task(analysis_task_id, {'file_content_for_analysis': text_content})
             log.info(f"成功將提取的文字內容儲存至分析任務 ID: {analysis_task_id}")
         else:
             log.error(f"無法為 file_id {url_id} 建立或取得分析任務，無法儲存提取文字。")
@@ -258,9 +258,9 @@ def _run_processing_blocking_task(url_id: int, queue: asyncio.Queue, loop: async
     except Exception as e:
         log.error(f"背景任務：處理 URL ID {url_id} 時發生嚴重錯誤: {e}", exc_info=True)
         final_status = 'processing_failed'
-        DB_CLIENT.update_url(url_id, {"status": final_status, "status_message": str(e)})
+        db_client.update_url(url_id, {"status": final_status, "status_message": str(e)})
     finally:
-        final_record = DB_CLIENT.get_url_by_id(url_id)
+        final_record = db_client.get_url_by_id(url_id)
         notification_msg = {
             "type": "task_update",
             "task_type": "processing",
@@ -315,7 +315,8 @@ async def start_processing(payload: ProcessRequest, background_tasks: Background
                 semaphore=semaphore,
                 blocking_func=_run_processing_blocking_task,
                 queue=queue,
-                loop=loop
+                loop=loop,
+                db_client=DB_CLIENT  # 傳遞 client 進去
             )
 
         return JSONResponse(

@@ -97,7 +97,7 @@ class DownloadRequest(BaseModel):
 
 # --- 背景任務函式 (重構後) ---
 
-def _run_download_blocking_task(url_id: int, queue: asyncio.Queue, loop: asyncio.AbstractEventLoop):
+def _run_download_blocking_task(url_id: int, db_client, queue: asyncio.Queue, loop: asyncio.AbstractEventLoop):
     """
     執行單一檔案下載的同步阻塞部分。
     現在透過 queue 和 loop 來發送非同步通知。
@@ -109,7 +109,7 @@ def _run_download_blocking_task(url_id: int, queue: asyncio.Queue, loop: asyncio
 
     try:
         # 步驟 1: 獲取所有命名所需的資訊
-        url_record = DB_CLIENT.get_url_by_id(url_id)
+        url_record = db_client.get_url_by_id(url_id)
         if not url_record:
             raise ValueError(f"在資料庫中找不到 ID 為 {url_id} 的 URL。")
 
@@ -137,13 +137,13 @@ def _run_download_blocking_task(url_id: int, queue: asyncio.Queue, loop: asyncio
             final_status = 'completed'
             status_message = '下載成功'
             result_payload = {"local_path": downloaded_path}
-            DB_CLIENT.update_url(url_id, {"status": final_status, "local_path": downloaded_path, "status_message": status_message})
+            db_client.update_url(url_id, {"status": final_status, "local_path": downloaded_path, "status_message": status_message})
             log.info(f"背景任務：URL ID {url_id} 下載成功，路徑: {downloaded_path}")
         else:
             final_status = 'download_failed'
             status_message = '下載失敗，請檢查日誌'
             result_payload = {"error": status_message}
-            DB_CLIENT.update_url(url_id, {"status": final_status, "status_message": status_message})
+            db_client.update_url(url_id, {"status": final_status, "status_message": status_message})
             log.error(f"背景任務：URL ID {url_id} 下載失敗。")
 
     except Exception as e:
@@ -151,11 +151,11 @@ def _run_download_blocking_task(url_id: int, queue: asyncio.Queue, loop: asyncio
         final_status = 'failed'
         status_message = f"發生未預期錯誤: {e}"
         result_payload = {"error": str(e)}
-        DB_CLIENT.update_url(url_id, {"status": final_status, "status_message": status_message})
+        db_client.update_url(url_id, {"status": final_status, "status_message": status_message})
     finally:
         # 步驟 4: 無論成功或失敗，都將通知放入佇列
         # 確保我們有最新的資料
-        final_record = DB_CLIENT.get_url_by_id(url_id)
+        final_record = db_client.get_url_by_id(url_id)
         notification_msg = {
             "type": "task_update",
             "task_type": "download",
@@ -217,7 +217,8 @@ async def start_downloads(payload: DownloadRequest, background_tasks: Background
                 semaphore=semaphore,
                 blocking_func=_run_download_blocking_task,
                 queue=queue,
-                loop=loop
+                loop=loop,
+                db_client=DB_CLIENT  # 傳遞 client 進去
             )
 
         return JSONResponse(

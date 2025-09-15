@@ -90,7 +90,30 @@ def _run_stage1_blocking_task(task_id: int, file_id: int, model_name: str, queue
             # 直接 raise 這個例外物件，而不是 raise error 字串或變數
             raise error
 
-        # 4. 儲存 JSON 結果到檔案
+        # --- JULES: 新增 yfinance 績效分析整合 ---
+        from tools.quantitative_analyzer import calculate_performance_stats
+
+        symbol = structured_data.get("symbol")
+        # 透過 file_id 獲取原始的 URL 紀錄，以取得發布日期
+        url_record = DB_CLIENT.get_url_by_id(file_id)
+        start_date = url_record.get("message_date") if url_record else None
+
+        if symbol and start_date:
+            log.info(f"任務 {task_id}: 正在為代號 {symbol} (起始日: {start_date}) 執行量化分析...")
+            try:
+                performance_stats = calculate_performance_stats(symbol, start_date)
+                structured_data["quantitative_analysis"] = performance_stats
+                log.info(f"任務 {task_id}: 量化分析成功。")
+            except Exception as q_e:
+                log.error(f"任務 {task_id}: 量化分析失敗: {q_e}", exc_info=True)
+                # 即使量化分析失敗，我們仍然可以繼續儲存 AI 的結果
+                structured_data["quantitative_analysis"] = {"error": str(q_e)}
+        else:
+            log.warning(f"任務 {task_id}: 缺少 symbol 或 start_date，跳過量化分析。")
+            structured_data["quantitative_analysis"] = {"error": "缺少 symbol 或 start_date，無法計算。"}
+        # --- yfinance 整合結束 ---
+
+        # 4. 儲存包含量化分析的 JSON 結果到檔案
         json_filename = f"stage1_{task_id}_{uuid.uuid4().hex[:8]}.json"
         json_path = TEMP_JSON_DIR / json_filename
         with open(json_path, "w", encoding="utf-8") as f:

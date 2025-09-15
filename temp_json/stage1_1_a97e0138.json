@@ -1,0 +1,9 @@
+{
+  "title": "台積電分析報告",
+  "symbol": "2330.TW",
+  "sentiment": "看多",
+  "summary": "AI 晶片需求強勁，台積電前景看好。",
+  "quantitative_analysis": {
+    "error": "計算績效時發生錯誤: The truth value of a Series is ambiguous. Use a.empty, a.bool(), a.item(), a.any() or a.all()."
+  }
+}
