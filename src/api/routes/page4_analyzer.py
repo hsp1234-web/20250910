@@ -5,6 +5,7 @@ import logging
 import sys
 import json
 import uuid
+import datetime
 from pathlib import Path
 from typing import List, Dict, Any
 
@@ -19,6 +20,7 @@ sys.path.insert(0, str(SRC_DIR))
 from db.client import get_client
 from db.database import get_db_connection
 from core import key_manager, prompt_manager
+from core.time_utils import get_current_taipei_date_str
 from tools.gemini_manager import GeminiManager
 
 # --- 常數與設定 ---
@@ -107,6 +109,45 @@ def _run_stage1_blocking_task(task_id: int, file_id: int, model_name: str, queue
         )
         log.info(f"第一階段任務成功：task_id={task_id}，JSON 已儲存至 {json_path}")
 
+        # --- 新增：AI 日期推斷 (JULES, 2025-09-15) ---
+        log.info(f"任務 {task_id}: 開始進行 AI 日期推斷...")
+        date_prompt_template = all_prompts.get("stage_1_5_date_inference_prompt")
+        if not date_prompt_template:
+            raise ValueError("在提示詞庫中找不到 'stage_1_5_date_inference_prompt'。")
+
+        url_record = DB_CLIENT.get_url_by_id(file_id)
+        message_date = url_record.get("message_date", get_current_taipei_date_str())
+
+        date_prompt = date_prompt_template.format(
+            document_text=text_content,
+            message_date=message_date,
+            today_date=get_current_taipei_date_str()
+        )
+
+        inferred_date_str, date_error, _, date_token_usage = gemini.prompt_for_text(prompt=date_prompt, model_name=model_name)
+
+        if date_error:
+            log.warning(f"任務 {task_id}: AI 日期推斷失敗: {date_error}。將使用訊息日期作為後備。")
+            inferred_date_to_save = message_date
+        else:
+            # 簡單驗證格式
+            try:
+                datetime.datetime.strptime(inferred_date_str.strip(), '%Y-%m-%d')
+                inferred_date_to_save = inferred_date_str.strip()
+                log.info(f"任務 {task_id}: AI 成功推斷出日期: {inferred_date_to_save}")
+            except ValueError:
+                log.warning(f"任務 {task_id}: AI 回傳的日期格式無效 ('{inferred_date_str}')。將使用訊息日期作為後備。")
+                inferred_date_to_save = message_date
+
+        DB_CLIENT.update_analysis_task(
+            task_id=task_id,
+            updates={
+                "inferred_publish_date": inferred_date_to_save,
+                "stage1_token_usage": token_usage + (date_token_usage or 0) # 累加 token
+            }
+        )
+        # --- 日期推斷結束 ---
+
     except Exception as e:
         error_message = f"錯誤: {type(e).__name__}: {str(e)}"
         log.error(f"第一階段任務失敗：task_id={task_id}，{error_message}", exc_info=True)
@@ -133,12 +174,25 @@ def _run_performance_analysis_blocking_task(task_id: int, queue: asyncio.Queue, 
             stage1_data = json.load(f)
 
         # 2. 執行量化分析
-        symbol = stage1_data.get("symbol")
-        url_record = DB_CLIENT.get_url_by_id(task_data['source_document_id'])
-        start_date = url_record.get("message_date") if url_record else None
+        # --- 防呆機制 (JULES, 2025-09-15) ---
+        if not isinstance(stage1_data, dict):
+            raise TypeError(f"第一階段產出的 JSON 不是預期的字典格式，而是 {type(stage1_data)}。")
 
-        if not (symbol and start_date):
-            raise ValueError(f"任務 {task_id}: 缺少 symbol 或 start_date，無法執行量化分析。")
+        symbol = stage1_data.get("symbol")
+        if not symbol:
+            raise ValueError("第一階段產出的 JSON 中缺少 'symbol' 資訊。")
+        # --- 修正 KeyError (JULES, 2025-09-15) ---
+        # --- 更新為使用推斷日期 (JULES, 2025-09-15) ---
+        if task_data.get("inferred_publish_date"):
+            start_date = task_data["inferred_publish_date"]
+            log.info(f"任務 {task_id}: 使用 AI 推斷的發布日期: {start_date}")
+        else:
+            url_record = DB_CLIENT.get_url_by_id(task_data['file_id'])
+            start_date = url_record.get("message_date") if url_record else None
+            log.warning(f"任務 {task_id}: 未找到 AI 推斷日期，回退使用訊息日期: {start_date}")
+
+        if not start_date:
+            raise ValueError(f"任務 {task_id}: 缺少可用的起始日期 (推斷或訊息日期)，無法執行量化分析。")
 
         log.info(f"任務 {task_id}: 正在為代號 {symbol} (起始日: {start_date}) 執行量化分析...")
         performance_results = calculate_performance_stats(symbol, start_date)
