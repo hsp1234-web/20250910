@@ -44,6 +44,7 @@ class Stage1Request(BaseModel):
 
 class PerformanceAnalysisRequest(BaseModel):
     task_ids: List[int]
+    model_name: str
 
 class DateInferenceRequest(BaseModel):
     task_ids: List[int]
@@ -181,15 +182,19 @@ def _run_date_inference_blocking_task(task_id: int, model_name: str, queue: asyn
         DB_CLIENT.update_analysis_task(task_id=task_id, updates={"date_inference_status": "failed", "performance_error_log": error_message})
 
 
-def _run_performance_analysis_blocking_task(task_id: int, queue: asyncio.Queue, loop: asyncio.AbstractEventLoop):
+def _run_performance_analysis_blocking_task(task_id: int, model_name: str, queue: asyncio.Queue, loop: asyncio.AbstractEventLoop):
     """
-    【新增】執行績效分析的同步阻塞部分。
+    【重構】執行 AI 績效分析的同步阻塞部分。
+    現在這是一個由 Gemini 驅動的質化分析，而非本地量化計算。
     """
-    log.info(f"績效分析任務實際執行開始：task_id={task_id}")
+    log.info(f"AI 績效分析任務實際執行開始：task_id={task_id}, model={model_name}")
     try:
-        from tools.quantitative_analyzer import calculate_performance_stats
+        # 1. 獲取任務資料和必要的提示詞
+        all_prompts = prompt_manager.get_all_prompts()
+        prompt_template = all_prompts.get("stage_2_performance_prompt")
+        if not prompt_template:
+            raise ValueError("在提示詞庫中找不到 'stage_2_performance_prompt'。")
 
-        # 1. 獲取第一階段的 JSON
         task_data = DB_CLIENT.get_analysis_task(task_id=task_id)
         if not task_data or not task_data.get("stage1_json_path"):
             raise ValueError(f"找不到任務 {task_id} 或其第一階段的 JSON 產出路徑。")
@@ -201,42 +206,45 @@ def _run_performance_analysis_blocking_task(task_id: int, queue: asyncio.Queue, 
         with open(json_path, "r", encoding="utf-8") as f:
             stage1_data = json.load(f)
 
-        # 2. 執行量化分析
-        # --- 防呆機制 (JULES, 2025-09-15) ---
-        if not isinstance(stage1_data, dict):
-            raise TypeError(f"第一階段產出的 JSON 不是預期的字典格式，而是 {type(stage1_data)}。")
+        # 2. 初始化 Gemini Manager
+        valid_keys = key_manager.get_all_valid_keys_for_manager()
+        if not valid_keys:
+            raise ValueError("在金鑰池中找不到任何有效的 API 金鑰。")
+        gemini = GeminiManager(api_keys=valid_keys)
 
-        symbol = stage1_data.get("symbol")
-        if not symbol:
-            raise ValueError("第一階段產出的 JSON 中缺少 'symbol' 資訊。")
-        # --- 修正 KeyError (JULES, 2025-09-15) ---
-        # --- 更新為使用推斷日期 (JULES, 2025-09-15) ---
-        if task_data.get("inferred_publish_date"):
-            start_date = task_data["inferred_publish_date"]
-            log.info(f"任務 {task_id}: 使用 AI 推斷的發布日期: {start_date}")
-        else:
-            url_record = DB_CLIENT.get_url_by_id(task_data['file_id'])
-            start_date = url_record.get("message_date") if url_record else None
-            log.warning(f"任務 {task_id}: 未找到 AI 推斷日期，回退使用訊息日期: {start_date}")
+        # 3. 準備並執行提示
+        prompt = prompt_template.format(data_package=json.dumps(stage1_data, ensure_ascii=False, indent=2))
 
-        if not start_date:
-            raise ValueError(f"任務 {task_id}: 缺少可用的起始日期 (推斷或訊息日期)，無法執行量化分析。")
+        # 新增：在呼叫 API 前發送一個更細緻的狀態更新
+        DB_CLIENT.update_analysis_task(task_id=task_id, updates={"performance_status": "gemini_processing"})
+        notification_msg = {"type": "analysis_update", "task_id": task_id, "status": "gemini_processing", "stage": "performance", "result": DB_CLIENT.get_analysis_task(task_id)}
+        asyncio.run_coroutine_threadsafe(queue.put(notification_msg), loop)
 
-        log.info(f"任務 {task_id}: 正在為代號 {symbol} (起始日: {start_date}) 執行量化分析...")
-        performance_results = calculate_performance_stats(symbol, start_date)
-        stage1_data["quantitative_analysis"] = performance_results
+        performance_json, error, _, token_usage = gemini.prompt_for_json(prompt=prompt, model_name=model_name)
+        if error:
+            raise error
 
-        # 3. 將包含績效分析的結果寫回同一個 JSON 檔案
+        # 4. 將績效分析結果（一個新的 JSON 物件）合併回主 JSON 中
+        stage1_data["performance_analysis"] = performance_json # 假設返回的是一個 JSON 物件
+
+        # 5. 將包含績效分析的結果寫回同一個 JSON 檔案
         with open(json_path, "w", encoding="utf-8") as f:
             json.dump(stage1_data, f, ensure_ascii=False, indent=2)
 
-        # 4. 更新資料庫狀態 (可選，這裡我們用 JSON 內容作為狀態)
-        DB_CLIENT.update_analysis_task(task_id=task_id, updates={"performance_status": "completed"}) # 假設我們新增一個欄位
-        log.info(f"績效分析任務成功：task_id={task_id}")
+        # 6. 更新資料庫狀態
+        DB_CLIENT.update_analysis_task(
+            task_id=task_id,
+            updates={
+                "performance_status": "completed",
+                "performance_model": model_name, # 新增欄位
+                "performance_token_usage": token_usage # 新增欄位
+            }
+        )
+        log.info(f"AI 績效分析任務成功：task_id={task_id}")
 
     except Exception as e:
         error_message = f"錯誤: {type(e).__name__}: {str(e)}"
-        log.error(f"績效分析任務失敗：task_id={task_id}，{error_message}", exc_info=True)
+        log.error(f"AI 績效分析任務失敗：task_id={task_id}，{error_message}", exc_info=True)
         DB_CLIENT.update_analysis_task(task_id=task_id, updates={"performance_status": "failed", "performance_error_log": error_message})
 
 
@@ -321,7 +329,7 @@ async def run_analysis_task_wrapper(task_id: int, semaphore: asyncio.Semaphore, 
         status_field = "status" # 預設
         if stage == "performance":
             status_field = "performance_status"
-            update_payload = {status_field: "processing"}
+            update_payload = {status_field: "processing", "performance_model": kwargs.get("model_name")}
         elif stage == 'date_inference':
             status_field = "date_inference_status"
             update_payload = {status_field: "processing"}
@@ -430,6 +438,9 @@ async def start_performance_analysis(request: Request, payload: PerformanceAnaly
     """【新增】啟動績效分析"""
     if not payload.task_ids:
         raise HTTPException(status_code=400, detail="任務 ID 列表不可為空。")
+    if not payload.model_name:
+        raise HTTPException(status_code=400, detail="必須提供模型名稱。")
+
 
     semaphore = request.app.state.analysis_semaphore
     queue = request.app.state.notification_queue
@@ -443,6 +454,7 @@ async def start_performance_analysis(request: Request, payload: PerformanceAnaly
             blocking_func=_run_performance_analysis_blocking_task,
             queue=queue,
             loop=loop,
+            model_name=payload.model_name,
             stage="performance"
         )
 
@@ -514,17 +526,17 @@ async def get_files_for_stage1():
 
 @router.get("/files_for_date_inference")
 async def get_files_for_date_inference():
-    """【新增】獲取已完成第一階段，可供進行日期推斷的任務列表。"""
+    """【重構】獲取所有已完成第一階段的任務，供日期推斷頁面顯示。"""
     tasks = DB_CLIENT.get_all_analysis_tasks()
-    # 篩選條件：第一階段已完成，且日期推斷不是 'completed'
-    return [t for t in tasks if t.get('stage1_status') == 'completed' and t.get('date_inference_status') != 'completed']
+    # 返回所有已完成第一階段的任務，前端將根據 'date_inference_status' 決定卡片狀態
+    return [t for t in tasks if t.get('stage1_status') == 'completed']
 
 @router.get("/files_for_performance_analysis")
 async def get_files_for_performance_analysis():
-    """【修改】獲取已完成日期推斷，但尚未進行績效分析的任務列表。"""
+    """【重構】獲取所有已完成日期推斷的任務，供績效分析頁面顯示。"""
     tasks = DB_CLIENT.get_all_analysis_tasks()
-    # 篩選條件：日期推斷已完成，且績效分析狀態不是 'completed'
-    return [t for t in tasks if t.get('date_inference_status') == 'completed' and t.get('performance_status') != 'completed']
+    # 返回所有已完成日期推斷的任務，前端將根據 'performance_status' 決定卡片狀態
+    return [t for t in tasks if t.get('date_inference_status') == 'completed']
 
 @router.get("/files_for_stage2")
 async def get_files_for_stage2():
@@ -547,6 +559,41 @@ async def get_stage1_result(task_id: int):
 
     with open(json_path, "r", encoding="utf-8") as f:
         return json.load(f)
+
+@router.get("/stage1_5_result/{task_id}")
+async def get_stage1_5_result(task_id: int):
+    """【新增】獲取指定任務日期推斷的 JSON 結果"""
+    task = DB_CLIENT.get_analysis_task(task_id=task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="找不到指定的任務。")
+
+    # 日期推斷的結果直接存在資料庫，因此我們動態生成一個 JSON
+    return {
+        "task_id": task.get("id"),
+        "status": task.get("date_inference_status"),
+        "inferred_publish_date": task.get("inferred_publish_date"),
+        "model": task.get("date_inference_model"), # 假設這個欄位存在
+        "token_usage": task.get("date_inference_token_usage"), # 假設這個欄位存在
+        "error_log": task.get("date_inference_error_log")
+    }
+
+@router.get("/stage2_result/{task_id}")
+async def get_stage2_result(task_id: int):
+    """【新增】獲取指定任務績效分析的 JSON 結果 (即完整的第一階段 JSON)"""
+    task = DB_CLIENT.get_analysis_task(task_id=task_id)
+    if not task or not task.get("stage1_json_path"):
+        raise HTTPException(status_code=404, detail="找不到任務或其 JSON 產出。")
+
+    # 績效分析的結果是寫回同一個 stage1 的 json，所以直接回傳它
+    json_path = Path(task["stage1_json_path"])
+    if not json_path.exists():
+        raise HTTPException(status_code=404, detail=f"JSON 檔案遺失於路徑：{json_path}")
+
+    with open(json_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+        # 為了方便前端，我們可以只返回績效分析的部分
+        return data.get("performance_analysis", {"detail": "在 JSON 中找不到績效分析結果。"})
+
 
 # --- 已棄用的舊版分析流程 ---
 # 移除了 /analysis_status 和 /processed_files 端點，由新的專用端點取代

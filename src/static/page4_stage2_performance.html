@@ -1,9 +1,10 @@
 <!DOCTYPE html>
 <html lang="zh-Hant">
 <head>
+    <!-- 版本同步：2025-09-15，確保前端與後端 API 一致 -->
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI 分析 - 階段二</title>
+    <title>AI 分析 - 階段二 績效分析</title>
     <link rel="stylesheet" href="/static/css/nav.css">
     <link rel="stylesheet" href="/static/css/common.css">
     <link rel="stylesheet" href="/static/css/page4.css">
@@ -34,21 +35,29 @@
         </div>
 
         <div class="panel">
-            <h2>階段二：績效分析</h2>
-            <p>此處顯示已完成 AI 文字擷取，但尚未進行量化績效分析的任務。勾選後即可開始分析。完成後，項目將會出現在「報告生成」頁面。</p>
+            <h2>階段二：AI 績效分析</h2>
+            <p>此處顯示已完成日期推斷的任務。勾選後即可開始進行 AI 績效分析。</p>
 
-            <div style="margin-bottom: 10px; margin-top: 20px;">
-                <button id="select-all-button">全選</button>
-                <button id="deselect-all-button">取消全選</button>
+            <div class="form-group" style="margin-top: 20px;">
+                <label for="model-select">選擇分析模型:</label>
+                <select id="model-select" disabled>
+                    <option value="">正在檢查 API 金鑰...</option>
+                </select>
+            </div>
+
+            <div class="action-bar">
+                <div class="action-group">
+                    <button id="select-all-button">全選可分析項</button>
+                    <button id="deselect-all-button">取消全選</button>
+                </div>
+                <div class="action-group">
+                    <button id="start-analysis-btn" class="primary-action">📊 開始績效分析</button>
+                </div>
             </div>
 
             <!-- 卡片容器 -->
             <div id="task-cards-container">
-                <p>正在載入待分析任務...</p>
-            </div>
-
-            <div style="margin-top: 20px;">
-                <button id="start-performance-btn">📊 開始績效分析</button>
+                <p>正在載入已完成日期推斷的任務...</p>
             </div>
         </div>
 
@@ -62,130 +71,247 @@
     </div>
 
     <script>
-        document.addEventListener('DOMContentLoaded', () => {
-            // --- DOM Element Cache ---
-            const taskCardsContainer = document.getElementById('task-cards-container');
-            const selectAllButton = document.getElementById('select-all-button');
-            const deselectAllButton = document.getElementById('deselect-all-button');
-            const startPerformanceBtn = document.getElementById('start-performance-btn');
-            const statusArea = document.getElementById('status-area');
-            const copyLogButton = document.getElementById('copy-log-button');
+    document.addEventListener('DOMContentLoaded', () => {
+        // --- DOM Element Cache ---
+        const taskCardsContainer = document.getElementById('task-cards-container');
+        const selectAllButton = document.getElementById('select-all-button');
+        const deselectAllButton = document.getElementById('deselect-all-button');
+        const startAnalysisBtn = document.getElementById('start-analysis-btn');
+        const statusArea = document.getElementById('status-area');
+        const copyLogButton = document.getElementById('copy-log-button');
+        const modelSelect = document.getElementById('model-select');
 
-            // --- Utility Functions ---
-            const logStatus = (message, color = 'black') => {
-                const timestamp = new Date().toLocaleTimeString('zh-TW', { hour12: false });
-                statusArea.insertAdjacentHTML('afterbegin', `<p style="color: ${color};">[${timestamp}] ${message}</p>`);
-            };
+        // --- Utility Functions ---
+        const logStatus = (message, color = 'black') => {
+            const timestamp = new Date().toLocaleTimeString('zh-TW', { hour12: false });
+            statusArea.insertAdjacentHTML('afterbegin', `<p style="color: ${color};">[${timestamp}] ${message}</p>`);
+        };
 
-            // --- Core Render Functions ---
-            const renderTaskList = async () => {
-                try {
-                    logStatus('正在從後端獲取待分析任務...');
-                    const response = await fetch('/api/analyzer/files_for_performance_analysis');
-                    if (!response.ok) throw new Error(`無法獲取待處理任務 (HTTP ${response.status})`);
-                    const tasks = await response.json();
-                    logStatus(`成功獲取 ${tasks.length} 個任務。`, 'green');
+        // --- Core Render Functions ---
+        const renderTaskList = async () => {
+            try {
+                logStatus('正在從後端獲取任務列表...');
+                const response = await fetch('/api/analyzer/files_for_performance_analysis');
+                if (!response.ok) throw new Error(`無法獲取待處理任務 (HTTP ${response.status})`);
+                const tasks = await response.json();
+                logStatus(`成功獲取 ${tasks.length} 個任務的資訊。`, 'green');
 
-                    if (tasks.length === 0) {
-                        taskCardsContainer.innerHTML = '<p>目前沒有可進行績效分析的任務。請先完成第一階段 AI 分析。</p>';
-                        return;
-                    }
+                if (tasks.length === 0) {
+                    taskCardsContainer.innerHTML = '<p>目前沒有可進行績效分析的任務。請先完成日期推斷。</p>';
+                    return;
+                }
 
-                    let cardsHtml = '';
-                    tasks.forEach(task => {
-                        cardsHtml += `
-                            <div class="file-card status-completed" data-task-id="${task.id}">
-                                <div class="card-header">
-                                    <input type="checkbox" class="task-checkbox" value="${task.id}">
-                                    <h3 class="filename" title="${task.filename}">${task.filename}</h3>
-                                </div>
-                                <div class="card-body">
-                                    <div class="info-grid">
-                                        <div class="info-item"><strong>第一階段狀態:</strong> <span class="status-badge">✅ 分析完成</span></div>
-                                        <div class="info-item"><strong>模型:</strong> <span class="model-name">${task.stage1_model || 'N/A'}</span></div>
-                                    </div>
-                                </div>
-                                <div class="card-footer">
-                                   <a href="/page8?hash=${task.file_hash}" class="action-btn btn-details" ${!task.file_hash ? 'style="display:none;"' : ''}>詳細資料</a>
+                const statusMap = {
+                    'pending': '待分析',
+                    'processing': '佇列中...',
+                    'gemini_processing': 'AI 分析中...',
+                    'completed': '✅ 分析完成',
+                    'failed': '❌ 分析失敗'
+                };
+
+                let cardsHtml = '';
+                tasks.forEach(task => {
+                    const status = task.performance_status || 'pending';
+                    const statusText = statusMap[status] || status;
+                    const isPending = status === 'pending';
+                    const isCompleted = status === 'completed';
+                    const isFailed = status === 'failed';
+                    const taskId = task.id;
+
+                    cardsHtml += `
+                        <div class="file-card status-${status}" data-task-id="${taskId}">
+                            <div class="card-header">
+                                <input type="checkbox" class="task-checkbox" value="${taskId}" ${!isPending ? 'disabled' : ''}>
+                                <h3 class="filename" title="${task.filename}">${task.filename}</h3>
+                            </div>
+                            <div class="card-body">
+                                <div class="info-grid">
+                                    <div class="info-item"><strong>分析狀態:</strong> <span class="status-badge">${statusText}</span></div>
+                                    <div class="info-item"><strong>分析模型:</strong> <span class="model-name">${task.performance_model || 'N/A'}</span></div>
+                                    <div class="info-item"><strong>Token 耗用:</strong> <span class="token-usage">${task.performance_token_usage || 'N/A'}</span></div>
                                 </div>
                             </div>
-                        `;
-                    });
-                    taskCardsContainer.innerHTML = cardsHtml;
-
-                } catch (error) {
-                    logStatus(`載入任務列表失敗: ${error.message}`, 'red');
-                    taskCardsContainer.innerHTML = `<p style="color:red;">載入任務列表失敗: ${error.message}</p>`;
-                }
-            };
-
-            // --- Event Listeners ---
-            startPerformanceBtn.addEventListener('click', async () => {
-                const selectedIds = Array.from(document.querySelectorAll('.task-checkbox:checked')).map(cb => parseInt(cb.value, 10));
-                if (selectedIds.length === 0) return alert('請至少選擇一個任務。');
-
-                logStatus(`啟動績效分析，共 ${selectedIds.length} 個任務...`, 'blue');
-                try {
-                    const response = await fetch('/api/analyzer/start_performance_analysis', {
-                        method: 'POST',
-                        headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({ task_ids: selectedIds })
-                    });
-                    const result = await response.json();
-                    if (response.ok) {
-                        logStatus(`分析請求已成功發送: ${result.message}`, 'green');
-                        logStatus('請稍後至「報告生成」頁面查看結果。正在重新整理列表...', 'purple');
-                        setTimeout(renderTaskList, 1000);
-                    } else {
-                        throw new Error(result.detail || '未知錯誤');
-                    }
-                } catch (error) {
-                    logStatus(`啟動分析失敗: ${error.message}`, 'red');
-                }
-            });
-
-            selectAllButton.addEventListener('click', () => document.querySelectorAll('.task-checkbox:not(:disabled)').forEach(cb => cb.checked = true));
-            deselectAllButton.addEventListener('click', () => document.querySelectorAll('.task-checkbox:checked').forEach(cb => cb.checked = false));
-
-            copyLogButton.addEventListener('click', () => {
-                navigator.clipboard.writeText(statusArea.innerText).then(() => {
-                    const originalText = copyLogButton.innerText;
-                    copyLogButton.innerText = '已複製 ✅';
-                    setTimeout(() => { copyLogButton.innerText = originalText; }, 2000);
+                            <div class="card-footer">
+                                <button class="action-btn btn-json" data-task-id="${taskId}" ${!isCompleted ? 'disabled' : ''}>查看 JSON</button>
+                                <a href="/page8?hash=${task.file_hash}" class="action-btn btn-details" ${!task.file_hash ? 'style="display:none;"' : ''}>詳細資料</a>
+                                <button class="action-btn btn-retry" data-task-id="${taskId}" style="display: ${isFailed ? 'inline-block' : 'none'};">重試分析</button>
+                            </div>
+                            <div class="json-viewer-container" style="display: none;"></div>
+                            ${isFailed ? `<div class="error-log-container"><strong class="error-title">錯誤日誌:</strong><pre class="error-log">${task.performance_error_log || '無詳細錯誤資訊。'}</pre></div>` : ''}
+                        </div>
+                    `;
                 });
+                taskCardsContainer.innerHTML = cardsHtml;
+            } catch (error) {
+                logStatus(`載入任務列表失敗: ${error.message}`, 'red');
+                taskCardsContainer.innerHTML = `<p style="color:red;">載入任務列表失敗: ${error.message}</p>`;
+            }
+        };
+
+        // --- API Call Functions ---
+        const populateModelSelector = (models) => {
+            modelSelect.innerHTML = '';
+            const priorityOrder = ["models/gemini-2.0-flash-lite", "models/gemini-2.0-flash", "models/gemini-2.5-flash-lite", "models/gemini-2.5-flash"];
+            const sortedModels = [...models].sort((a, b) => {
+                let aPriority = priorityOrder.indexOf(a);
+                let bPriority = priorityOrder.indexOf(b);
+                if (aPriority === -1) aPriority = priorityOrder.length;
+                if (bPriority === -1) bPriority = priorityOrder.length;
+                if (aPriority !== bPriority) return aPriority - bPriority;
+                return a.localeCompare(b);
             });
+            sortedModels.forEach((modelName, index) => {
+                const option = document.createElement('option');
+                option.value = modelName;
+                option.textContent = modelName.replace('models/', '');
+                if (index === 0) option.selected = true;
+                modelSelect.appendChild(option);
+            });
+        };
 
-            // --- WebSocket Setup ---
-            const setupWebSocket = () => {
-                const ws = new WebSocket(`${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/api/ws`);
-                ws.onopen = () => logStatus('WebSocket 連線成功。', 'blue');
-                ws.onclose = () => {
-                    logStatus('WebSocket 連線已中斷。5 秒後嘗試重新連線...', 'orange');
-                    setTimeout(setupWebSocket, 5000);
-                };
-                ws.onmessage = (event) => {
-                    try {
-                        const data = JSON.parse(event.data);
-                        // 監聽第一階段或第二階段完成的事件，並刷新列表
-                        if ((data.task_type === 'analysis_stage_1' && data.status === 'completed') ||
-                            (data.task_type === 'analysis_stage_performance' && (data.status === 'completed' || data.status === 'failed'))) {
-                            logStatus(`收到任務 #${data.task_id} 狀態更新: ${data.status}。正在刷新列表...`, 'purple');
-                            renderTaskList();
-                        }
-                    } catch (err) {
-                        logStatus(`處理 WebSocket 訊息時發生錯誤: ${err}`, 'red');
-                    }
-                };
-            };
+        const checkKeysAndLoadModels = async () => {
+            try {
+                const response = await fetch('/api/keys');
+                const keys = await response.json();
+                const validKeys = keys.filter(k => k.is_valid);
+                if (validKeys.length > 0) {
+                    const modelResponse = await fetch('/api/keys/models');
+                    const models = await modelResponse.json();
+                    populateModelSelector(models);
+                    modelSelect.disabled = false;
+                } else {
+                    modelSelect.innerHTML = '<option value="">請先在「金鑰管理」頁面新增有效的 API 金鑰</option>';
+                    modelSelect.disabled = true;
+                    logStatus('偵測到無有效 API 金鑰，模型選單已禁用。', 'orange');
+                }
+            } catch (error) {
+                logStatus(`檢查 API 金鑰或載入模型時發生錯誤: ${error.message}`, 'red');
+                modelSelect.disabled = true;
+            }
+        };
 
-            // --- Initialization ---
-            (async () => {
-                logStatus('頁面載入完成，正在初始化...');
-                await renderTaskList();
-                setupWebSocket();
-                logStatus('初始化完成。', 'green');
-            })();
+        const startAnalysisForTasks = async (taskIds, buttonToUpdate = null) => {
+            if (taskIds.length === 0) return alert('請至少選擇一個任務。');
+            if (modelSelect.disabled) return alert('請先新增有效的 API 金鑰才能開始分析。');
+            const modelName = modelSelect.value;
+            if (!modelName) return alert('請選擇分析模型。');
+
+            if (buttonToUpdate) {
+                buttonToUpdate.disabled = true;
+                buttonToUpdate.textContent = '請求中...';
+            }
+
+            logStatus(`啟動績效分析，共 ${taskIds.length} 個任務...`, 'blue');
+            try {
+                const response = await fetch('/api/analyzer/start_performance_analysis', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ task_ids: taskIds, model_name: modelName })
+                });
+                const result = await response.json();
+                if (response.ok) {
+                    logStatus(`分析請求已成功發送: ${result.message}`, 'green');
+                    logStatus('稍後將自動更新列表...', 'purple');
+                    setTimeout(renderTaskList, 1000);
+                } else {
+                    throw new Error(result.detail || '未知錯誤');
+                }
+            } catch (error) {
+                logStatus(`啟動分析失敗: ${error.message}`, 'red');
+                if (buttonToUpdate) {
+                    buttonToUpdate.disabled = false;
+                    buttonToUpdate.textContent = '重試分析';
+                }
+            }
+        };
+
+        // --- Event Listeners ---
+        startAnalysisBtn.addEventListener('click', () => {
+            const selectedIds = Array.from(document.querySelectorAll('.task-checkbox:checked')).map(cb => parseInt(cb.value, 10));
+            startAnalysisForTasks(selectedIds);
         });
+
+        taskCardsContainer.addEventListener('click', async (e) => {
+            if (e.target.classList.contains('btn-json')) {
+                const button = e.target;
+                const card = button.closest('.file-card');
+                const viewer = card.querySelector('.json-viewer-container');
+                const taskId = button.dataset.taskId;
+
+                if (viewer.style.display === 'none') {
+                    button.disabled = true;
+                    button.textContent = '載入中...';
+                    try {
+                        const response = await fetch(`/api/analyzer/stage2_result/${taskId}`);
+                        if (!response.ok) throw new Error(`無法獲取 JSON (HTTP ${response.status})`);
+                        const data = await response.json();
+                        viewer.innerHTML = `<pre>${JSON.stringify(data, null, 2)}</pre>`;
+                        viewer.style.display = 'block';
+                        button.textContent = '隱藏 JSON';
+                    } catch (error) {
+                        viewer.innerHTML = `<p style="color:red;">${error.message}</p>`;
+                        button.textContent = '查看 JSON';
+                    } finally {
+                        button.disabled = false;
+                    }
+                } else {
+                    viewer.style.display = 'none';
+                    viewer.innerHTML = '';
+                    button.textContent = '查看 JSON';
+                }
+            }
+
+            if (e.target.classList.contains('btn-retry')) {
+                const button = e.target;
+                const taskId = parseInt(button.dataset.taskId, 10);
+                startAnalysisForTasks([taskId], button);
+            }
+        });
+
+        selectAllButton.addEventListener('click', () => document.querySelectorAll('.task-checkbox:not(:disabled)').forEach(cb => cb.checked = true));
+        deselectAllButton.addEventListener('click', () => document.querySelectorAll('.task-checkbox:checked').forEach(cb => cb.checked = false));
+
+        copyLogButton.addEventListener('click', () => {
+            navigator.clipboard.writeText(statusArea.innerText).then(() => {
+                const originalText = copyLogButton.innerText;
+                copyLogButton.innerText = '已複製 ✅';
+                setTimeout(() => { copyLogButton.innerText = originalText; }, 2000);
+            });
+        });
+
+        const setupWebSocket = () => {
+            const ws = new WebSocket(`${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/api/ws`);
+            ws.onopen = () => logStatus('WebSocket 狀態更新連線成功。', 'blue');
+            ws.onclose = () => {
+                logStatus('WebSocket 連線已中斷。5 秒後嘗試重新連線...', 'orange');
+                setTimeout(setupWebSocket, 5000);
+            };
+            ws.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    if (data.task_type === 'analysis_stage_performance') {
+                         logStatus(`收到績效分析任務 #${data.task_id} 狀態更新: ${data.status}。正在刷新列表...`, 'purple');
+                         renderTaskList();
+                    } else if (data.task_type === 'analysis_stage_date_inference' && data.status === 'completed') {
+                         logStatus(`收到日期推斷任務 #${data.task_id} 完成通知，正在刷新列表...`, 'purple');
+                         renderTaskList();
+                    }
+                } catch (err) {
+                    logStatus(`處理 WebSocket 訊息時發生錯誤: ${err}`, 'red');
+                }
+            };
+        };
+
+        (async () => {
+            logStatus('頁面載入完成，正在初始化...');
+            await Promise.all([
+                checkKeysAndLoadModels(),
+                renderTaskList()
+            ]);
+            setupWebSocket();
+            logStatus('初始化完成，等待操作。', 'green');
+        })();
+    });
     </script>
 </body>
 </html>
