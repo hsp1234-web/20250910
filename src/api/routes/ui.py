@@ -60,3 +60,11 @@ async def serve_report_viewer(request: Request, file_id: int):
     但前端的 JavaScript 可以從 URL 中讀取它。
     """
     return templates.TemplateResponse("report_viewer.html", {"request": request, "file_id": file_id})
+
+@router.get("/page8", response_class=HTMLResponse)
+async def serve_page8(request: Request):
+    return templates.TemplateResponse("page8_file_details.html", {"request": request})
+
+@router.get("/page9", response_class=HTMLResponse)
+async def serve_page9(request: Request):
+    return templates.TemplateResponse("page9_dashboard.html", {"request": request})

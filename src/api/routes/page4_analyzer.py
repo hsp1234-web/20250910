@@ -101,13 +101,17 @@ def _run_stage1_blocking_task(task_id: int, file_id: int, model_name: str, queue
         if symbol and start_date:
             log.info(f"任務 {task_id}: 正在為代號 {symbol} (起始日: {start_date}) 執行量化分析...")
             try:
-                performance_stats = calculate_performance_stats(symbol, start_date)
-                structured_data["quantitative_analysis"] = performance_stats
-                log.info(f"任務 {task_id}: 量化分析成功。")
+                # 現在 performance_results 是一個包含 'stats' 和 'chart_html' 的字典
+                performance_results = calculate_performance_stats(symbol, start_date)
+                structured_data["quantitative_analysis"] = performance_results
+                if "error" in performance_results:
+                    log.warning(f"任務 {task_id}: 量化分析回傳錯誤: {performance_results['error']}")
+                else:
+                    log.info(f"任務 {task_id}: 量化分析成功。")
             except Exception as q_e:
-                log.error(f"任務 {task_id}: 量化分析失敗: {q_e}", exc_info=True)
+                log.error(f"任務 {task_id}: 量化分析執行期間發生例外: {q_e}", exc_info=True)
                 # 即使量化分析失敗，我們仍然可以繼續儲存 AI 的結果
-                structured_data["quantitative_analysis"] = {"error": str(q_e)}
+                structured_data["quantitative_analysis"] = {"error": f"執行量化分析時發生例外: {str(q_e)}"}
         else:
             log.warning(f"任務 {task_id}: 缺少 symbol 或 start_date，跳過量化分析。")
             structured_data["quantitative_analysis"] = {"error": "缺少 symbol 或 start_date，無法計算。"}
