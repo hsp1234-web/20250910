@@ -140,7 +140,7 @@ def test_real_file_processing_task(db_conn, tmp_path, dummy_image_path, monkeypa
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
 
-    _run_processing_blocking_task(url_id, queue=mock_queue, loop=loop)
+    _run_processing_blocking_task(url_id, db_client=FakeDBClient(db_conn), queue=mock_queue, loop=loop)
 
     # 3. **驗證**: 從資料庫中讀取結果並進行斷言
     cursor.execute("SELECT * FROM extracted_urls WHERE id = ?", (url_id,))

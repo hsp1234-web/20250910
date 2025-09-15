@@ -86,6 +86,16 @@ def test_stage1_analysis_produces_correct_json(db_conn, tmp_path, monkeypatch):
         key_manager
     )
 
+    # JULES (2025-09-14): 修正 - 注入一個有效的 API 金鑰以進行測試
+    # 為了避免真實的網路呼叫，我們模擬驗證函式使其永遠成功
+    monkeypatch.setattr("core.key_manager._validate_single_key", lambda key: True)
+    # 使用者提供的金鑰
+    USER_API_KEY = "AIzaSyBdw0gY2oh2W_r1eN3ALzK9RCAAcedgF3E"
+    try:
+        key_manager.add_key(USER_API_KEY, "test_key_for_analysis")
+    except ValueError:
+        pass # 金鑰可能已在先前的測試中被加入，忽略重複錯誤
+
     # 1. 準備測試資料
     mock_article_text = """
     標題：台積電(TSM)前景看好，長期投資價值浮現
