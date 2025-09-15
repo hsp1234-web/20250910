@@ -64,6 +64,18 @@
             <div id="load-from-env-status"></div>
         </div>
 
+        <!-- JULES (2025-09-15): 新增 API 超時設定區塊 -->
+        <div class="panel">
+            <h2>全域 API 超時設定</h2>
+            <div class="form-group">
+                <label for="api-timeout-input">API 請求超時秒數 (5-300)</label>
+                <input type="number" id="api-timeout-input" placeholder="建議值 35" min="5" max="300">
+                <button id="save-timeout-btn">儲存設定</button>
+            </div>
+            <div id="timeout-status" class="status-message"></div>
+            <p class="help-text">設定所有對外部 API (Google Gemini, Yahoo Finance) 請求的等待上限。過低可能導致正常請求失敗，過高可能在網路問題時造成長時間等待。</p>
+        </div>
+
         <div class="panel">
             <div class="panel-header">
                 <h2>金鑰池</h2>
@@ -109,6 +121,12 @@
         const loadFromEnvBtn = document.getElementById('load-from-env-btn');
         const keyLoadCountInput = document.getElementById('key-load-count');
         const loadFromEnvStatus = document.getElementById('load-from-env-status');
+
+        // JULES (2025-09-15): 超時設定元素
+        const timeoutInput = document.getElementById('api-timeout-input');
+        const saveTimeoutBtn = document.getElementById('save-timeout-btn');
+        const timeoutStatus = document.getElementById('timeout-status');
+
 
         // --- 通用函式 ---
         const renderStatus = (element, message, isError = false, append = false) => {
@@ -321,8 +339,49 @@
             }
         });
 
+        // --- JULES (2025-09-15): 超時設定邏輯 ---
+        const fetchTimeout = async () => {
+            try {
+                const response = await fetch('/api/keys/config/timeout');
+                if (!response.ok) throw new Error('無法獲取超時設定');
+                const data = await response.json();
+                timeoutInput.value = data.timeout;
+            } catch (error) {
+                renderStatus(timeoutStatus, `獲取設定失敗: ${error.message}`, true);
+            }
+        };
+
+        saveTimeoutBtn.addEventListener('click', async () => {
+            const timeoutValue = parseInt(timeoutInput.value, 10);
+            if (isNaN(timeoutValue) || timeoutValue < 5 || timeoutValue > 300) {
+                renderStatus(timeoutStatus, '請輸入 5 到 300 之間的有效秒數。', true);
+                return;
+            }
+
+            saveTimeoutBtn.disabled = true;
+            saveTimeoutBtn.textContent = '儲存中...';
+            renderStatus(timeoutStatus, '正在儲存...', false);
+
+            try {
+                const response = await fetch('/api/keys/config/timeout', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ timeout: timeoutValue })
+                });
+                const result = await response.json();
+                if (!response.ok) throw new Error(result.detail || '儲存失敗');
+                renderStatus(timeoutStatus, `設定已儲存，新的超時為 ${result.new_timeout} 秒。`, false);
+            } catch (error) {
+                renderStatus(timeoutStatus, `儲存失敗: ${error.message}`, true);
+            } finally {
+                saveTimeoutBtn.disabled = false;
+                saveTimeoutBtn.textContent = '儲存設定';
+            }
+        });
+
         // --- 初始載入 ---
         fetchKeys();
+        fetchTimeout(); // 載入超時設定
 
         const centerActiveNavButton = () => {
             const activeNavButton = document.querySelector('.top-nav a.active');

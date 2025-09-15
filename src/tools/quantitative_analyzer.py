@@ -87,27 +87,33 @@ def _generate_performance_chart_html(stock_df: pd.DataFrame, benchmark_df: pd.Da
     # 返回不含<html><body>標籤的圖表div，並使用CDN的JS，以方便嵌入
     return fig.to_html(full_html=False, include_plotlyjs='cdn')
 
-def calculate_performance_stats(symbol: str, start_date: str, end_date: str = None) -> dict:
+def calculate_performance_stats(symbol: str, start_date: str, end_date: str = None, timeout: int = 30) -> dict:
     """
     計算給定股票代號在指定期間內的績效指標，並生成圖表。
+    【新增】支援網路請求超時設定。
     """
     if not end_date:
         end_date = datetime.now().strftime('%Y-%m-%d')
 
-    log.info(f"開始為代號 {symbol} 計算從 {start_date} 到 {end_date} 的績效...")
+    log.info(f"開始為代號 {symbol} 計算從 {start_date} 到 {end_date} 的績效 (超時: {timeout}秒)...")
 
     try:
         # --- 資料下載 ---
         try:
-            stock_data = yf.download(symbol, start=start_date, end=end_date, progress=False)
+            # JULES (2025-09-15): 新增 timeout 參數
+            stock_data = yf.download(symbol, start=start_date, end=end_date, progress=False, timeout=timeout)
             if stock_data.empty:
                 # yfinance might not raise an exception for invalid tickers, just return an empty df.
                 raise ValueError(f"下載的資料為空，代號 '{symbol}' 可能無效或在該期間無資料。")
         except Exception as e:
             log.error(f"下載代號 {symbol} 的資料時失敗: {e}")
+            # 檢查是否為超時錯誤
+            if "timeout" in str(e).lower():
+                 return {"error": f"下載代號 '{symbol}' 的股價資料時發生超時。請嘗試增加 API 超時秒數或檢查網路連線。"}
             return {"error": f"無法下載代號 '{symbol}' 的股價資料。該代號可能已下市、不存在或在此期間無交易資料。"}
 
-        benchmark_data = yf.download('^TWII', start=start_date, end=end_date, progress=False)
+        # JULES (2025-09-15): 新增 timeout 參數
+        benchmark_data = yf.download('^TWII', start=start_date, end=end_date, progress=False, timeout=timeout)
         if benchmark_data.empty:
             log.warning("找不到大盤 (^TWII) 的資料，部分指標 (Alpha, Beta) 將無法計算。")
 

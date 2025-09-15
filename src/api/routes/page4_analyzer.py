@@ -68,6 +68,10 @@ def _run_stage1_blocking_task(task_id: int, file_id: int, model_name: str, queue
     log.info(f"第一階段任務實際執行開始：task_id={task_id}, file_id={file_id}, model={model_name}")
     try:
         # 1. 初始化 Gemini Manager
+        # JULES (2025-09-15): 新增超時處理
+        from core.config_manager import get_config_value
+        api_timeout = get_config_value("api_timeout_seconds", 35)
+
         all_prompts = prompt_manager.get_all_prompts()
         prompt_template = all_prompts.get("stage_1_extraction_prompt")
         if not prompt_template:
@@ -76,7 +80,7 @@ def _run_stage1_blocking_task(task_id: int, file_id: int, model_name: str, queue
         valid_keys = key_manager.get_all_valid_keys_for_manager()
         if not valid_keys:
             raise ValueError("在金鑰池中找不到任何有效的 API 金鑰。")
-        gemini = GeminiManager(api_keys=valid_keys)
+        gemini = GeminiManager(api_keys=valid_keys, timeout=api_timeout)
 
         # 2. 從資料庫獲取檔案內容
         analysis_task_data = DB_CLIENT.get_analysis_task(task_id=task_id)
@@ -159,10 +163,14 @@ def _run_date_inference_blocking_task(task_id: int, model_name: str, queue: asyn
              raise ValueError(f"任務 {task_id} 中找不到可供分析的檔案內容。")
 
         # 2. 初始化 Gemini Manager
+        # JULES (2025-09-15): 新增超時處理
+        from core.config_manager import get_config_value
+        api_timeout = get_config_value("api_timeout_seconds", 35)
+
         valid_keys = key_manager.get_all_valid_keys_for_manager()
         if not valid_keys:
             raise ValueError("在金鑰池中找不到任何有效的 API 金鑰。")
-        gemini = GeminiManager(api_keys=valid_keys)
+        gemini = GeminiManager(api_keys=valid_keys, timeout=api_timeout)
 
         # 3. 準備並執行提示
         text_content = task_data['file_content_for_analysis']
@@ -244,7 +252,10 @@ def _run_performance_analysis_blocking_task(task_id: int, queue: asyncio.Queue, 
             raise ValueError(f"任務 {task_id}: 缺少可用的起始日期 (推斷或訊息日期)，無法執行量化分析。")
 
         log.info(f"任務 {task_id}: 正在為代號 {symbol} (起始日: {start_date}) 執行量化分析...")
-        performance_results = calculate_performance_stats(symbol, start_date)
+        # JULES (2025-09-15): 新增超時處理
+        from core.config_manager import get_config_value
+        api_timeout = get_config_value("api_timeout_seconds", 35)
+        performance_results = calculate_performance_stats(symbol, start_date, timeout=api_timeout)
         stage1_data["performance_analysis"] = performance_results
 
         # 3. 將包含績效分析的結果寫回同一個 JSON 檔案
@@ -279,6 +290,10 @@ def _run_stage2_blocking_task(task_id: int, model_name: str, queue: asyncio.Queu
             structured_data = json.load(f)
 
         # 2. 初始化 Gemini Manager
+        # JULES (2025-09-15): 新增超時處理
+        from core.config_manager import get_config_value
+        api_timeout = get_config_value("api_timeout_seconds", 35)
+
         all_prompts = prompt_manager.get_all_prompts()
         prompt_template = all_prompts.get("stage_2_generation_prompt")
         if not prompt_template:
@@ -286,7 +301,7 @@ def _run_stage2_blocking_task(task_id: int, model_name: str, queue: asyncio.Queu
         valid_keys = key_manager.get_all_valid_keys_for_manager()
         if not valid_keys:
             raise ValueError("在金鑰池中找不到任何有效的 API 金鑰。")
-        gemini = GeminiManager(api_keys=valid_keys)
+        gemini = GeminiManager(api_keys=valid_keys, timeout=api_timeout)
 
         # 3. 執行 AI 報告生成
         prompt = prompt_template.format(data_package=json.dumps(structured_data, ensure_ascii=False, indent=2))

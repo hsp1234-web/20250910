@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 SRC_DIR = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(SRC_DIR))
 
-from core import key_manager
+from core import key_manager, config_manager
 from tools.gemini_manager import GeminiManager
 
 # --- 常數與設定 ---
@@ -124,3 +124,35 @@ async def test_api_key(payload: TestKeyRequest):
         log.error(f"測試金鑰時發生錯誤: {e}", exc_info=True)
         # 即使是測試，也回傳一個明確的失敗狀態，而不是 500 錯誤
         return {"is_valid": False, "error": str(e)}
+
+# --- JULES (2025-09-15): 新增設定相關的 API 端點 ---
+
+class TimeoutUpdateRequest(BaseModel):
+    timeout: int = Field(..., ge=5, le=300, description="API 請求的超時秒數，範圍 5-300。")
+
+@router.get("/config/timeout", summary="獲取 API 超時設定")
+async def get_api_timeout():
+    """
+    從設定檔中讀取並回傳目前的 API 超時秒數。
+    """
+    try:
+        timeout = config_manager.get_config_value("api_timeout_seconds", default=35)
+        return {"timeout": timeout}
+    except Exception as e:
+        log.error(f"讀取超時設定時發生錯誤: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="無法讀取設定檔。")
+
+@router.post("/config/timeout", summary="更新 API 超時設定")
+async def update_api_timeout(payload: TimeoutUpdateRequest):
+    """
+    更新設定檔中的 API 超時秒數。
+    """
+    try:
+        success = config_manager.update_config_value("api_timeout_seconds", payload.timeout)
+        if success:
+            return {"message": "API 超時設定已成功更新。", "new_timeout": payload.timeout}
+        else:
+            raise HTTPException(status_code=500, detail="儲存設定檔時發生錯誤。")
+    except Exception as e:
+        log.error(f"更新超時設定時發生錯誤: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="更新設定時發生伺服器內部錯誤。")
