@@ -412,3 +412,32 @@ button.primary-action:hover {
     background-color: #0056b3;
     border-color: #0056b3;
 }
+
+/* --- RWD 優化 (2025-09-15) --- */
+@media (max-width: 768px) {
+    .action-bar {
+        flex-direction: column; /* 垂直堆疊 */
+        align-items: stretch;   /* 延展以填滿寬度 */
+        gap: 15px;              /* 增加堆疊元素之間的間距 */
+        margin-left: -10px;     /* 微調邊距使其在手機上更好看 */
+        margin-right: -10px;
+    }
+
+    .action-group {
+        justify-content: center; /* 將按鈕置中 */
+        flex-wrap: wrap;         /* 如果空間仍然不足，允許按鈕換行 */
+    }
+
+    .action-bar button {
+        flex-grow: 1;            /* 允許按鈕伸展以填滿可用空間 */
+        text-align: center;      /* 確保文字置中 */
+    }
+
+    .content {
+        padding: 10px; /* 縮小內容邊距 */
+    }
+
+    .panel {
+        padding: 15px; /* 縮小面板邊距 */
+    }
+}
