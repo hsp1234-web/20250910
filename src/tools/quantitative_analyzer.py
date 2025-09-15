@@ -3,7 +3,11 @@ import pandas as pd
 import numpy as np
 import logging
 from datetime import datetime
-import plotly.graph_objects as go
+import matplotlib
+matplotlib.use('Agg')  # 使用非互動式後端，防止在無頭伺服器上出錯
+import matplotlib.pyplot as plt
+import io
+import base64
 
 log = logging.getLogger(__name__)
 
@@ -50,42 +54,50 @@ def to_float(value: any) -> float | None:
     except (ValueError, TypeError):
         return None
 
-def _generate_performance_chart_html(stock_df: pd.DataFrame, benchmark_df: pd.DataFrame) -> str:
+def _generate_performance_chart_matplotlib(stock_df: pd.DataFrame, benchmark_df: pd.DataFrame) -> str:
     """
-    使用 Plotly 產生權益曲線圖的 HTML 字串。
+    使用 Matplotlib 產生權益曲線圖，並以 Base64 編碼的 PNG 格式回傳。
     """
-    log.info("正在生成績效圖表...")
-    fig = go.Figure()
+    log.info("正在使用 Matplotlib 生成績效圖表...")
 
-    fig.add_trace(go.Scatter(
-        x=stock_df.index,
-        y=(1 + stock_df['daily_return']).cumprod(),
-        mode='lines',
-        name='策略權益曲線',
-        line=dict(color='royalblue', width=2)
-    ))
+    # --- 字型設定 ---
+    # 為支援中文，使用 'Noto Sans TC'。需確保此字型存在於系統中。
+    # 另一種方式是讓 matplotlib 自動尋找可用字體，但可能不穩定。
+    plt.rcParams['font.sans-serif'] = ['Noto Sans TC', 'sans-serif']
+    plt.rcParams['axes.unicode_minus'] = False # 解決負號顯示問題
 
+    fig, ax = plt.subplots(figsize=(10, 5), dpi=100)
+
+    # 計算累積報酬
+    stock_cumulative_return = (1 + stock_df['daily_return']).cumprod()
+
+    # 繪製策略權益曲線
+    ax.plot(stock_cumulative_return.index, stock_cumulative_return, label='策略權益曲線', color='royalblue', linewidth=2)
+
+    # 繪製大盤指數權益曲線
     if not benchmark_df.empty:
-        fig.add_trace(go.Scatter(
-            x=benchmark_df.index,
-            y=(1 + benchmark_df['daily_return']).cumprod(),
-            mode='lines',
-            name='大盤指數 (^TWII)',
-            line=dict(color='grey', width=2, dash='dash')
-        ))
+        benchmark_cumulative_return = (1 + benchmark_df['daily_return']).cumprod()
+        ax.plot(benchmark_cumulative_return.index, benchmark_cumulative_return, label='大盤指數 (^TWII)', color='grey', linestyle='--', linewidth=2)
 
-    fig.update_layout(
-        title_text='<b>策略權益曲線 vs. 大盤指數</b>',
-        xaxis_title='日期',
-        yaxis_title='累積報酬',
-        legend_title_text='圖例',
-        template='plotly_white',
-        font=dict(family="Arial, sans-serif", size=12),
-        height=400,
-        margin=dict(l=40, r=40, t=60, b=40)
-    )
-    # 返回不含<html><body>標籤的圖表div，並使用CDN的JS，以方便嵌入
-    return fig.to_html(full_html=False, include_plotlyjs='cdn')
+    # --- 圖表美化 ---
+    ax.set_title('策略權益曲線 vs. 大盤指數', fontsize=16, fontweight='bold')
+    ax.set_xlabel('日期', fontsize=12)
+    ax.set_ylabel('累積報酬', fontsize=12)
+    ax.legend(loc='upper left', fontsize=10)
+    ax.grid(True, linestyle='--', alpha=0.6)
+    fig.autofmt_xdate() # 自動旋轉日期標籤
+    plt.tight_layout() # 自動調整邊距
+
+    # --- 轉換為 Base64 ---
+    buf = io.BytesIO()
+    fig.savefig(buf, format='png', bbox_inches='tight')
+    plt.close(fig) # 釋放記憶體
+
+    img_base64 = base64.b64encode(buf.getvalue()).decode('utf-8')
+    buf.close()
+
+    return f"data:image/png;base64,{img_base64}"
+
 
 def calculate_performance_stats(symbol: str, start_date: str, end_date: str = None, timeout: int = 30) -> dict:
     """
@@ -159,7 +171,7 @@ def calculate_performance_stats(symbol: str, start_date: str, end_date: str = No
         log.info(f"代號 {symbol} 的績效計算完成。")
 
         # --- 圖表生成 ---
-        chart_html = _generate_performance_chart_html(stock_data, benchmark_data)
+        chart_base64 = _generate_performance_chart_matplotlib(stock_data, benchmark_data)
 
         # --- 彙整結果 ---
         final_results = {
@@ -172,7 +184,7 @@ def calculate_performance_stats(symbol: str, start_date: str, end_date: str = No
                 "alpha": to_float(alpha),
                 "beta": to_float(beta)
             },
-            "chart_html": chart_html
+            "chart_base64": chart_base64
         }
         return final_results
 
@@ -195,7 +207,8 @@ if __name__ == '__main__':
             else:
                 print(f"{key.replace('_', ' ').title():<25}: N/A")
 
-        # 為了測試，將圖表HTML寫入檔案
-        with open("temp_chart.html", "w", encoding="utf-8") as f:
-            f.write(results['chart_html'])
-        print("\n圖表已暫存至 temp_chart.html")
+        # 為了測試，將圖表 Base64 寫入一個 HTML 檔案以便預覽
+        if "chart_base64" in results:
+            with open("temp_chart.html", "w", encoding="utf-8") as f:
+                f.write(f'<img src="{results["chart_base64"]}" alt="Performance Chart">')
+            print("\n圖表已暫存至 temp_chart.html，請用瀏覽器開啟。")
