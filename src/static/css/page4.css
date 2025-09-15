@@ -228,7 +228,7 @@ select {
 #file-cards-container {
     display: grid;
     /* For smaller screens, 1 column. For screens > 768px, 2 columns, etc. */
-    grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
     gap: 20px;
     margin-top: 20px;
 }
