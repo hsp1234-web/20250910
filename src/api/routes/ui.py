@@ -31,6 +31,10 @@ async def serve_page3(request: Request):
 async def serve_page4_stage1(request: Request):
     return templates.TemplateResponse("page4_stage1_ai.html", {"request": request})
 
+@router.get("/page4_stage1_5_date", response_class=HTMLResponse)
+async def serve_page4_stage1_5(request: Request):
+    return templates.TemplateResponse("page4_stage1_5_date.html", {"request": request})
+
 @router.get("/page4_stage2_performance", response_class=HTMLResponse)
 async def serve_page4_stage2(request: Request):
     return templates.TemplateResponse("page4_stage2_performance.html", {"request": request})

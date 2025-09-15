@@ -399,7 +399,10 @@ async def start_stage1_analysis(request: Request, payload: Stage1Request, backgr
 
 @router.post("/start_date_inference")
 async def start_date_inference(request: Request, payload: DateInferenceRequest, background_tasks: BackgroundTasks):
-    """【新增】啟動 AI 日期推斷"""
+    """
+    【新增】啟動 AI 日期推斷
+    JULES (2025-09-15): 正式啟用此路由以修復 404 錯誤。
+    """
     if not payload.task_ids:
         raise HTTPException(status_code=400, detail="任務 ID 列表不可為空。")
 
