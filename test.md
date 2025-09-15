@@ -15,6 +15,9 @@ uv pip install -r requirements/core.txt --system
 
 # 接著安裝 Gemini AI 分析所需的套件
 uv pip install -r requirements/gemini.txt --system
+
+# 最後安裝額外的量化分析套件 (為 Page 4 的進階功能所需)
+uv pip install -r requirements/analysis.txt --system
 ```
 
 **請勿**直接安裝 `requirements.txt` 或 `requirements/transcriber.txt`，除非您確實需要執行語音轉文字相關功能。

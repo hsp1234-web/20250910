@@ -1,10 +1,7 @@
 python-multipart==0.0.20
 websocket-client==1.8.0
-yt-dlp==2025.8.27
-gdown
-
-# --- 檔案處理功能所需依賴 ---
-python-docx
-PyMuPDF
-python-pptx
-Pillow # 用於 src/tools/image_compressor.py
+gdown==5.2.0
+python-docx==1.1.2
+PyMuPDF==1.24.1
+python-pptx==0.6.23
+Pillow==11.3.0

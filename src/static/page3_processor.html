@@ -29,17 +29,18 @@
             <h1>頁面三：檔案處理</h1>
             <p>此頁面會列出所有已下載完成、可以進行處理的檔案。列表會透過 WebSocket 自動更新。</p>
 
-            <div style="margin-bottom: 10px;">
-                <button id="select-all-button">全選</button>
-                <button id="deselect-all-button">取消全選</button>
+            <div class="action-bar">
+                <div class="action-group">
+                    <button id="select-all-button">全選</button>
+                    <button id="deselect-all-button">取消全選</button>
+                </div>
+                <div class="action-group">
+                    <button id="process-button" class="primary-action">開始處理選中項目</button>
+                </div>
             </div>
 
             <div id="file-list-container">
                 <p>正在載入待處理的檔案...</p>
-            </div>
-
-            <div style="margin-top: 20px;">
-                <button id="process-button">開始處理選中項目</button>
             </div>
         </div>
 
