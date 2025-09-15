@@ -368,13 +368,38 @@ async def start_stage2_analysis(request: Request, payload: Stage2Request, backgr
 
 @router.get("/files_for_stage1")
 async def get_files_for_stage1():
-    """【新增】獲取所有已處理、可供第一階段分析的檔案列表。"""
+    """【修改】獲取所有已處理、可供第一階段分析的檔案列表，並包含其對應的分析任務狀態。"""
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT id, local_path, status FROM extracted_urls WHERE status = 'processed' ORDER BY created_at DESC")
-    rows = cursor.fetchall()
+
+    # 步驟 1: 從 `extracted_urls` 表中獲取所有已完成前置處理 (status='processed') 的檔案。
+    # 這些是所有可能出現在「階段一」列表中的候選檔案。
+    cursor.execute("SELECT id, local_path FROM extracted_urls WHERE status = 'processed' ORDER BY created_at DESC")
+    processed_files = cursor.fetchall()
     conn.close()
-    return [{"id": row['id'], "filename": Path(row['local_path']).name} for row in rows if row['local_path']]
+
+    if not processed_files:
+        return []
+
+    # 步驟 2: 為每一個已處理的檔案，去 `analysis_tasks` 表中查找其對應的分析任務。
+    # `create_or_get_analysis_task` 是一個關鍵輔助函式：
+    # - 如果已存在該檔案的任務，就直接返回任務資料。
+    # - 如果不存在，就為它創建一個新的、預設狀態為 'pending' 的任務記錄。
+    # 這樣可以確保前端拿到的每個項目都一定有一個狀態可供顯示。
+    results = []
+    for file_row in processed_files:
+        file_id = file_row['id']
+        # 從完整路徑中提取檔案名稱
+        filename = Path(file_row['local_path']).name if file_row['local_path'] else f"未知檔案_{file_id}"
+
+        task_data = DB_CLIENT.create_or_get_analysis_task(file_id=file_id, filename=filename)
+
+        # `task_data` 是一個字典，包含了前端卡片所需的所有欄位
+        # (如 id, stage1_status, stage1_token_usage 等)
+        if task_data:
+            results.append(task_data)
+
+    return results
 
 @router.get("/files_for_performance_analysis")
 async def get_files_for_performance_analysis():

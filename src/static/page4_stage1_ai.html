@@ -32,7 +32,6 @@
             <a href="/page4_stage3_report" class="sub-nav-button">3. 報告生成</a>
         </div>
 
-        <!-- Panel 1: 檔案選擇與第一階段分析 -->
         <div class="panel">
             <h2>階段一：AI 文字擷取</h2>
             <p>請從下方列表中勾選您想分析的檔案，選擇模型後啟動第一階段分析。完成後，項目將會出現在「績效分析」頁面。</p>
@@ -45,11 +44,12 @@
             </div>
 
             <div style="margin-bottom: 10px; margin-top: 20px;">
-                <button id="select-all-button">全選</button>
+                <button id="select-all-button">全選可分析項</button>
                 <button id="deselect-all-button">取消全選</button>
             </div>
 
-            <div id="file-list-container">
+            <!-- 卡片容器 -->
+            <div id="file-cards-container">
                 <p>正在載入已處理的檔案...</p>
             </div>
 
@@ -58,7 +58,6 @@
             </div>
         </div>
 
-        <!-- Panel 2: 狀態日誌 -->
         <div class="panel">
             <div class="panel-header">
                 <h2>狀態日誌</h2>
@@ -69,158 +68,244 @@
     </div>
 
     <script>
-        document.addEventListener('DOMContentLoaded', () => {
-            // --- DOM Element Cache ---
-            const fileListContainer = document.getElementById('file-list-container');
-            const selectAllButton = document.getElementById('select-all-button');
-            const deselectAllButton = document.getElementById('deselect-all-button');
-            const startStage1Btn = document.getElementById('start-stage1-btn');
-            const statusArea = document.getElementById('status-area');
-            const copyLogButton = document.getElementById('copy-log-button');
-            const modelSelect = document.getElementById('stage1-model-select');
+    document.addEventListener('DOMContentLoaded', () => {
+        // --- DOM Element Cache ---
+        const fileCardsContainer = document.getElementById('file-cards-container');
+        const selectAllButton = document.getElementById('select-all-button');
+        const deselectAllButton = document.getElementById('deselect-all-button');
+        const startStage1Btn = document.getElementById('start-stage1-btn');
+        const statusArea = document.getElementById('status-area');
+        const copyLogButton = document.getElementById('copy-log-button');
+        const modelSelect = document.getElementById('stage1-model-select');
 
-            // --- Utility Functions ---
-            const logStatus = (message, color = 'black') => {
-                const timestamp = new Date().toLocaleTimeString('zh-TW', { hour12: false });
-                statusArea.insertAdjacentHTML('afterbegin', `<p style="color: ${color};">[${timestamp}] ${message}</p>`);
-            };
+        // --- Utility Functions ---
+        const logStatus = (message, color = 'black') => {
+            const timestamp = new Date().toLocaleTimeString('zh-TW', { hour12: false });
+            statusArea.insertAdjacentHTML('afterbegin', `<p style="color: ${color};">[${timestamp}] ${message}</p>`);
+        };
 
-            // --- Core Render Functions ---
-            const renderFileList = async () => {
-                try {
-                    const response = await fetch('/api/analyzer/files_for_stage1');
-                    if (!response.ok) throw new Error('無法獲取待分析檔案');
-                    const files = await response.json();
-                    if (files.length === 0) {
-                        fileListContainer.innerHTML = '<p>目前沒有可供分析的檔案。請至「檔案處理」頁面處理新檔案。</p>';
-                        return;
-                    }
-                    let html = `<table class="results-table"><thead><tr><th><input type="checkbox" id="select-all-header-checkbox"></th><th>檔案名稱</th></tr></thead><tbody>`;
-                    files.forEach(file => {
-                        html += `<tr>
-                                     <td><input type="checkbox" class="file-checkbox" value="${file.id}"></td>
-                                     <td title="${file.filename}">${file.filename}</td>
-                                 </tr>`;
-                    });
-                    html += '</tbody></table>';
-                    fileListContainer.innerHTML = html;
-                } catch (error) {
-                    fileListContainer.innerHTML = `<p style="color:red;">載入檔案列表失敗: ${error.message}</p>`;
+        // --- Core Render Functions ---
+        const renderFileList = async () => {
+            try {
+                logStatus('正在從後端獲取檔案列表...');
+                const response = await fetch('/api/analyzer/files_for_stage1');
+                if (!response.ok) throw new Error(`無法獲取待分析檔案 (HTTP ${response.status})`);
+                const tasks = await response.json();
+                logStatus(`成功獲取 ${tasks.length} 個檔案的任務資訊。`, 'green');
+
+                if (tasks.length === 0) {
+                    fileCardsContainer.innerHTML = '<p>目前沒有可供分析的檔案。請至「檔案處理」頁面處理新檔案。</p>';
+                    return;
                 }
-            };
 
-            // --- API Call Functions ---
-            const populateModelSelector = (models) => {
-                modelSelect.innerHTML = ''; // 清空舊選項
-                const priorityOrder = ["models/gemini-2.0-flash-lite", "models/gemini-2.0-flash", "models/gemini-2.5-flash-lite", "models/gemini-2.5-flash"];
-                const sortedModels = [...models].sort((a, b) => {
-                    let aPriority = priorityOrder.indexOf(a);
-                    let bPriority = priorityOrder.indexOf(b);
-                    if (aPriority === -1) aPriority = priorityOrder.length + 1;
-                    if (bPriority === -1) bPriority = priorityOrder.length + 1;
-                    if (aPriority !== bPriority) return aPriority - bPriority;
-                    return a.localeCompare(b);
-                });
-                sortedModels.forEach((modelName, index) => {
-                    const option = document.createElement('option');
-                    option.value = modelName;
-                    option.textContent = modelName.replace('models/', '');
-                    if (index === 0) option.selected = true;
-                    modelSelect.appendChild(option);
-                });
-            };
-
-            const checkKeysAndLoadModels = async () => {
-                try {
-                    const response = await fetch('/api/keys');
-                    const keys = await response.json();
-                    const validKeys = keys.filter(k => k.is_valid);
-                    if (validKeys.length > 0) {
-                        const modelResponse = await fetch('/api/keys/models');
-                        const models = await modelResponse.json();
-                        populateModelSelector(models);
-                        modelSelect.disabled = false;
-                    } else {
-                        modelSelect.innerHTML = '<option value="">請先在「金鑰管理」頁面新增有效的 API 金鑰</option>';
-                        modelSelect.disabled = true;
-                        logStatus('偵測到無有效 API 金鑰，模型選單已禁用。', 'orange');
-                    }
-                } catch (error) {
-                    logStatus(`檢查 API 金鑰或載入模型時發生錯誤: ${error.message}`, 'red');
-                    modelSelect.disabled = true;
-                }
-            };
-
-            // --- Event Listeners ---
-            startStage1Btn.addEventListener('click', async () => {
-                const selectedIds = Array.from(document.querySelectorAll('.file-checkbox:checked')).map(cb => parseInt(cb.value, 10));
-                if (selectedIds.length === 0) return alert('請至少選擇一個檔案。');
-                if (modelSelect.disabled) return alert('請先新增有效的 API 金鑰才能開始分析。');
-                const modelName = modelSelect.value;
-                if (!modelName) return alert('請選擇分析模型。');
-
-                logStatus(`啟動第一階段分析，共 ${selectedIds.length} 個檔案...`, 'blue');
-                try {
-                    const response = await fetch('/api/analyzer/start_stage1_analysis', {
-                        method: 'POST',
-                        headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({ file_ids: selectedIds, model_name: modelName })
-                    });
-                    const result = await response.json();
-                    if (response.ok) {
-                        logStatus(`分析請求已成功發送: ${result.message}`, 'green');
-                        logStatus('請稍後至「績效分析」頁面查看結果。正在重新整理列表...', 'purple');
-                        setTimeout(renderFileList, 1000); // 等待一秒後刷新
-                    } else {
-                        throw new Error(result.detail || '未知錯誤');
-                    }
-                } catch (error) {
-                    logStatus(`啟動分析失敗: ${error.message}`, 'red');
-                }
-            });
-
-            fileListContainer.addEventListener('change', e => {
-                if (e.target.id === 'select-all-header-checkbox') {
-                    document.querySelectorAll('.file-checkbox').forEach(cb => e.target.checked ? cb.checked = true : cb.checked = false);
-                }
-            });
-            selectAllButton.addEventListener('click', () => document.querySelectorAll('.file-checkbox').forEach(cb => cb.checked = true));
-            deselectAllButton.addEventListener('click', () => document.querySelectorAll('.file-checkbox').forEach(cb => cb.checked = false));
-
-            copyLogButton.addEventListener('click', () => {
-                navigator.clipboard.writeText(statusArea.innerText).then(() => {
-                    const originalText = copyLogButton.innerText;
-                    copyLogButton.innerText = '已複製 ✅';
-                    setTimeout(() => { copyLogButton.innerText = originalText; }, 2000);
-                });
-            });
-
-            const setupWebSocket = () => {
-                const ws = new WebSocket(`${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/api/ws`);
-                ws.onopen = () => logStatus('WebSocket 連線成功。', 'blue');
-                ws.onclose = () => {
-                    logStatus('WebSocket 連線已中斷。5 秒後嘗試重新連線...', 'orange');
-                    setTimeout(setupWebSocket, 5000);
+                const statusMap = {
+                    'pending': '待分析',
+                    'processing': '佇列中...',
+                    'gemini_processing': 'AI 分析中...',
+                    'completed': '✅ 分析完成',
+                    'failed': '❌ 分析失敗'
                 };
-                ws.onmessage = (event) => {
+
+                let cardsHtml = '';
+                tasks.forEach(task => {
+                    const statusText = statusMap[task.stage1_status] || task.stage1_status;
+                    const isPending = task.stage1_status === 'pending';
+                    const isCompleted = task.stage1_status === 'completed';
+                    const isFailed = task.stage1_status === 'failed';
+                    const fileId = task.source_document_id;
+                    const taskId = task.id;
+
+                    cardsHtml += `
+                        <div class="file-card status-${task.stage1_status}" data-task-id="${taskId}" data-file-id="${fileId}">
+                            <div class="card-header">
+                                <input type="checkbox" class="file-checkbox" value="${fileId}" ${!isPending ? 'disabled' : ''}>
+                                <h3 class="filename" title="${task.filename}">${task.filename}</h3>
+                            </div>
+                            <div class="card-body">
+                                <div class="info-grid">
+                                    <div class="info-item"><strong>狀態:</strong> <span class="status-badge">${statusText}</span></div>
+                                    <div class="info-item"><strong>模型:</strong> <span class="model-name">${task.stage1_model || 'N/A'}</span></div>
+                                    <div class="info-item"><strong>Token 耗用:</strong> <span class="token-usage">${task.stage1_token_usage || 'N/A'}</span></div>
+                                </div>
+                            </div>
+                            <div class="card-footer">
+                                <button class="action-btn btn-json" data-task-id="${taskId}" ${!isCompleted ? 'disabled' : ''}>查看 JSON</button>
+                                <a href="/page8?file_id=${fileId}" class="action-btn btn-details">詳細資料</a>
+                                <button class="action-btn btn-retry" data-file-id="${fileId}" style="display: ${isFailed ? 'inline-block' : 'none'};">重試分析</button>
+                            </div>
+                            <div class="json-viewer-container" style="display: none;"></div>
+                            ${isFailed ? `<div class="error-log-container"><strong class="error-title">錯誤日誌:</strong><pre class="error-log">${task.stage1_error_log || '無詳細錯誤資訊。'}</pre></div>` : ''}
+                        </div>
+                    `;
+                });
+                fileCardsContainer.innerHTML = cardsHtml;
+            } catch (error) {
+                logStatus(`載入檔案列表失敗: ${error.message}`, 'red');
+                fileCardsContainer.innerHTML = `<p style="color:red;">載入檔案列表失敗: ${error.message}</p>`;
+            }
+        };
+
+        // --- API Call Functions ---
+        const populateModelSelector = (models) => {
+            modelSelect.innerHTML = '';
+            const priorityOrder = ["models/gemini-2.0-flash-lite", "models/gemini-2.0-flash", "models/gemini-2.5-flash-lite", "models/gemini-2.5-flash"];
+            const sortedModels = [...models].sort((a, b) => {
+                let aPriority = priorityOrder.indexOf(a);
+                let bPriority = priorityOrder.indexOf(b);
+                if (aPriority === -1) aPriority = priorityOrder.length;
+                if (bPriority === -1) bPriority = priorityOrder.length;
+                if (aPriority !== bPriority) return aPriority - bPriority;
+                return a.localeCompare(b);
+            });
+            sortedModels.forEach((modelName, index) => {
+                const option = document.createElement('option');
+                option.value = modelName;
+                option.textContent = modelName.replace('models/', '');
+                if (index === 0) option.selected = true;
+                modelSelect.appendChild(option);
+            });
+        };
+
+        const checkKeysAndLoadModels = async () => {
+            try {
+                const response = await fetch('/api/keys');
+                const keys = await response.json();
+                const validKeys = keys.filter(k => k.is_valid);
+                if (validKeys.length > 0) {
+                    const modelResponse = await fetch('/api/keys/models');
+                    const models = await modelResponse.json();
+                    populateModelSelector(models);
+                    modelSelect.disabled = false;
+                } else {
+                    modelSelect.innerHTML = '<option value="">請先在「金鑰管理」頁面新增有效的 API 金鑰</option>';
+                    modelSelect.disabled = true;
+                    logStatus('偵測到無有效 API 金鑰，模型選單已禁用。', 'orange');
+                }
+            } catch (error) {
+                logStatus(`檢查 API 金鑰或載入模型時發生錯誤: ${error.message}`, 'red');
+                modelSelect.disabled = true;
+            }
+        };
+
+        const startAnalysisForFiles = async (fileIds, buttonToUpdate = null) => {
+            if (fileIds.length === 0) return alert('請至少選擇一個檔案。');
+            if (modelSelect.disabled) return alert('請先新增有效的 API 金鑰才能開始分析。');
+            const modelName = modelSelect.value;
+            if (!modelName) return alert('請選擇分析模型。');
+
+            if (buttonToUpdate) {
+                buttonToUpdate.disabled = true;
+                buttonToUpdate.textContent = '請求中...';
+            }
+
+            logStatus(`啟動第一階段分析，共 ${fileIds.length} 個檔案...`, 'blue');
+            try {
+                const response = await fetch('/api/analyzer/start_stage1_analysis', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ file_ids: fileIds, model_name: modelName })
+                });
+                const result = await response.json();
+                if (response.ok) {
+                    logStatus(`分析請求已成功發送: ${result.message}`, 'green');
+                    logStatus('稍後將自動更新列表...', 'purple');
+                    setTimeout(renderFileList, 1000);
+                } else {
+                    throw new Error(result.detail || '未知錯誤');
+                }
+            } catch (error) {
+                logStatus(`啟動分析失敗: ${error.message}`, 'red');
+                if (buttonToUpdate) {
+                    buttonToUpdate.disabled = false;
+                    buttonToUpdate.textContent = '重試分析';
+                }
+            }
+        };
+
+        // --- Event Listeners ---
+        startStage1Btn.addEventListener('click', () => {
+            const selectedIds = Array.from(document.querySelectorAll('.file-checkbox:checked')).map(cb => parseInt(cb.value, 10));
+            startAnalysisForFiles(selectedIds);
+        });
+
+        fileCardsContainer.addEventListener('click', async (e) => {
+            if (e.target.classList.contains('btn-json')) {
+                const button = e.target;
+                const card = button.closest('.file-card');
+                const viewer = card.querySelector('.json-viewer-container');
+                const taskId = button.dataset.taskId;
+
+                if (viewer.style.display === 'none') {
+                    button.disabled = true;
+                    button.textContent = '載入中...';
+                    try {
+                        const response = await fetch(`/api/analyzer/stage1_result/${taskId}`);
+                        if (!response.ok) throw new Error(`無法獲取 JSON (HTTP ${response.status})`);
+                        const data = await response.json();
+                        viewer.innerHTML = `<pre>${JSON.stringify(data, null, 2)}</pre>`;
+                        viewer.style.display = 'block';
+                        button.textContent = '隱藏 JSON';
+                    } catch (error) {
+                        viewer.innerHTML = `<p style="color:red;">${error.message}</p>`;
+                        button.textContent = '查看 JSON';
+                    } finally {
+                        button.disabled = false;
+                    }
+                } else {
+                    viewer.style.display = 'none';
+                    viewer.innerHTML = '';
+                    button.textContent = '查看 JSON';
+                }
+            }
+
+            if (e.target.classList.contains('btn-retry')) {
+                const button = e.target;
+                const fileId = parseInt(button.dataset.fileId, 10);
+                startAnalysisForFiles([fileId], button);
+            }
+        });
+
+        selectAllButton.addEventListener('click', () => document.querySelectorAll('.file-checkbox:not(:disabled)').forEach(cb => cb.checked = true));
+        deselectAllButton.addEventListener('click', () => document.querySelectorAll('.file-checkbox:checked').forEach(cb => cb.checked = false));
+
+        copyLogButton.addEventListener('click', () => {
+            navigator.clipboard.writeText(statusArea.innerText).then(() => {
+                const originalText = copyLogButton.innerText;
+                copyLogButton.innerText = '已複製 ✅';
+                setTimeout(() => { copyLogButton.innerText = originalText; }, 2000);
+            });
+        });
+
+        const setupWebSocket = () => {
+            const ws = new WebSocket(`${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/api/ws`);
+            ws.onopen = () => logStatus('WebSocket 狀態更新連線成功。', 'blue');
+            ws.onclose = () => {
+                logStatus('WebSocket 連線已中斷。5 秒後嘗試重新連線...', 'orange');
+                setTimeout(setupWebSocket, 5000);
+            };
+            ws.onmessage = (event) => {
+                try {
                     const data = JSON.parse(event.data);
-                    if (data.task_type === 'analysis_stage_1' && (data.status === 'completed' || data.status === 'failed')) {
-                         logStatus(`收到第一階段任務 #${data.task_id} 完成通知，建議刷新列表。`, 'purple');
+                    if (data.task_type === 'analysis_stage_1' && (data.status === 'completed' || data.status === 'failed' || data.status === 'processing' || data.status === 'gemini_processing')) {
+                         logStatus(`收到任務 #${data.task_id} 狀態更新: ${data.status}。正在刷新列表...`, 'purple');
                          renderFileList();
                     }
-                };
+                } catch (err) {
+                    logStatus(`處理 WebSocket 訊息時發生錯誤: ${err}`, 'red');
+                }
             };
+        };
 
-            (async () => {
-                logStatus('頁面載入完成，正在初始化...');
-                await Promise.all([
-                    checkKeysAndLoadModels(),
-                    renderFileList()
-                ]);
-                setupWebSocket();
-                logStatus('初始化完成。', 'green');
-            })();
-        });
+        (async () => {
+            logStatus('頁面載入完成，正在初始化...');
+            await Promise.all([
+                checkKeysAndLoadModels(),
+                renderFileList()
+            ]);
+            setupWebSocket();
+            logStatus('初始化完成，等待操作。', 'green');
+        })();
+    });
     </script>
 </body>
 </html>
