@@ -123,7 +123,7 @@
                                 </div>
                             </div>
                             <div class="card-footer">
-                                <button class="action-btn btn-json" data-task-id="${taskId}" ${!(isCompleted || isFailed) ? 'disabled' : ''}>查看 JSON</button>
+                                <button class="action-btn btn-performance" data-task-id="${taskId}" ${!(isCompleted || isFailed) ? 'disabled' : ''}>查看績效報告</button>
                                 <a href="/page8?hash=${task.file_hash}" class="action-btn btn-details" ${!task.file_hash ? 'style="display:none;"' : ''}>詳細資料</a>
                                 <button class="action-btn btn-retry" data-task-id="${taskId}" style="display: ${isFailed ? 'inline-block' : 'none'};">重試分析</button>
                             </div>
@@ -179,7 +179,7 @@
         });
 
         fileCardsContainer.addEventListener('click', async (e) => {
-            if (e.target.classList.contains('btn-json')) {
+            if (e.target.classList.contains('btn-performance')) {
                 const button = e.target;
                 const card = button.closest('.file-card');
                 const viewer = card.querySelector('.json-viewer-container');
@@ -190,21 +190,51 @@
                     button.textContent = '載入中...';
                     try {
                         const response = await fetch(`/api/analyzer/stage2_result/${taskId}`);
-                        if (!response.ok) throw new Error(`無法獲取 JSON (HTTP ${response.status})`);
+                        if (!response.ok) {
+                             const errorData = await response.json().catch(() => ({ detail: '無法解析錯誤訊息。' }));
+                             throw new Error(errorData.detail || `無法獲取績效報告 (HTTP ${response.status})`);
+                        }
                         const data = await response.json();
-                        viewer.innerHTML = `<pre>${JSON.stringify(data, null, 2)}</pre>`;
+
+                        let contentHtml = '';
+
+                        // 處理圖表
+                        if (data && data.chart_html) {
+                            contentHtml += `<div class="performance-chart">${data.chart_html}</div>`;
+                        } else {
+                            contentHtml += `<p>此報告沒有可用的圖表。</p>`;
+                        }
+
+                        // 處理績效統計數據
+                        if (data && data.stats) {
+                            contentHtml += `
+                                <details class="performance-stats-details">
+                                    <summary>顯示/隱藏詳細績效數據</summary>
+                                    <pre>${JSON.stringify(data.stats, null, 2)}</pre>
+                                </details>
+                            `;
+                        }
+
+                        // 處理錯誤訊息
+                        if (data && data.error) {
+                            contentHtml += `<div class="error-log-container"><strong class="error-title">分析錯誤:</strong><pre class="error-log">${data.error}</pre></div>`;
+                        }
+
+
+                        viewer.innerHTML = contentHtml;
                         viewer.style.display = 'block';
-                        button.textContent = '隱藏 JSON';
+                        button.textContent = '隱藏報告';
                     } catch (error) {
-                        viewer.innerHTML = `<p style="color:red;">${error.message}</p>`;
-                        button.textContent = '查看 JSON';
+                        viewer.innerHTML = `<p style="color:red;">載入失敗: ${error.message}</p>`;
+                        viewer.style.display = 'block';
+                        button.textContent = '查看績效報告';
                     } finally {
                         button.disabled = false;
                     }
                 } else {
                     viewer.style.display = 'none';
                     viewer.innerHTML = '';
-                    button.textContent = '查看 JSON';
+                    button.textContent = '查看績效報告';
                 }
             }
 

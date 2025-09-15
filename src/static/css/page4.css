@@ -441,3 +441,56 @@ button.primary-action:hover {
         padding: 15px; /* 縮小面板邊距 */
     }
 }
+
+/* --- Performance Chart and Stats Styling (新增於 2025-09-15) --- */
+.performance-chart {
+    margin-bottom: 15px;
+    padding: 10px;
+    background-color: #fff;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+}
+
+.performance-stats-details {
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    padding: 10px;
+    margin-top: 10px;
+    background-color: #f9f9f9;
+}
+
+.performance-stats-details summary {
+    cursor: pointer;
+    font-weight: bold;
+    color: var(--primary-hover);
+    padding-bottom: 5px;
+}
+
+.performance-stats-details[open] summary {
+    border-bottom: 1px solid #ddd;
+    margin-bottom: 10px;
+}
+
+.performance-stats-details pre {
+    background-color: #fff;
+    padding: 10px;
+    border-radius: 4px;
+}
+
+/* --- Retry Controls Styling (新增於 2025-09-15) --- */
+.retry-controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-grow: 1; /* Allow it to take available space */
+    justify-content: flex-end;
+}
+
+.retry-model-select {
+    padding: 5px 8px;
+    border-radius: 4px;
+    border: 1px solid #ccc;
+    background-color: #fff;
+    max-width: 160px; /* Prevent it from being too wide */
+    font-size: 0.9em;
+}

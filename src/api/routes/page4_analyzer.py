@@ -43,6 +43,10 @@ class Stage1Request(BaseModel):
     file_ids: List[int]
     model_name: str
 
+class Stage1RetryRequest(BaseModel):
+    task_id: int
+    model_name: str
+
 class PerformanceAnalysisRequest(BaseModel):
     task_ids: List[int]
 
@@ -432,6 +436,54 @@ async def start_stage1_analysis(request: Request, payload: Stage1Request, backgr
     conn.close()
 
     return {"message": f"已成功為 {len(tasks_created)} 個檔案排入第一階段分析佇列。"}
+
+
+@router.post("/retry_stage1_analysis")
+async def retry_stage1_analysis(request: Request, payload: Stage1RetryRequest, background_tasks: BackgroundTasks):
+    """【新增】重試單一失敗的第一階段分析任務"""
+    semaphore = request.app.state.analysis_semaphore
+    queue = request.app.state.notification_queue
+    loop = asyncio.get_running_loop()
+
+    if not semaphore or not queue:
+        raise HTTPException(status_code=500, detail="伺服器狀態未完全初始化（缺少佇列或信號量）。")
+
+    # 1. 獲取任務資訊
+    task = DB_CLIENT.get_analysis_task(task_id=payload.task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail=f"找不到任務 ID: {payload.task_id}")
+
+    # 2. 重設任務狀態，準備重試
+    DB_CLIENT.update_analysis_task(
+        task_id=payload.task_id,
+        updates={
+            "stage1_status": "pending",
+            "stage1_error_log": None,
+            "stage1_json_path": None,
+            "stage1_token_usage": None,
+            "stage1_model": None,
+            # 也重設後續階段的狀態
+            "date_inference_status": "pending",
+            "performance_status": "pending",
+            "stage2_status": "pending",
+        }
+    )
+
+    # 3. 重新排入分析佇列
+    background_tasks.add_task(
+        run_analysis_task_wrapper,
+        task_id=task['id'],
+        semaphore=semaphore,
+        blocking_func=_run_stage1_blocking_task,
+        queue=queue,
+        loop=loop,
+        file_id=task['file_id'], # 從任務資料中獲取 file_id
+        model_name=payload.model_name,
+        stage=1
+    )
+
+    return {"message": f"已成功為任務 #{payload.task_id} 排入重試佇列。"}
+
 
 @router.post("/start_date_inference")
 async def start_date_inference(request: Request, payload: DateInferenceRequest, background_tasks: BackgroundTasks):
