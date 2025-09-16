@@ -11,3 +11,4 @@ python-multipart==0.0.20
 Pillow==11.3.0
 twstock
 lxml
+yfinance==0.2.65
