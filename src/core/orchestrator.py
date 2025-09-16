@@ -19,7 +19,7 @@ sys.path.insert(0, str(SRC_DIR))
 ROOT_DIR = SRC_DIR.parent
 
 # --- 現在可以安全地導入專案內部模組了 ---
-from db.client import DBClient, get_client
+from db.client import DBClient
 
 logging.basicConfig(
     level=logging.INFO,
@@ -141,7 +141,7 @@ def main():
         log.info(f"✅ 資料庫管理器 API 已在埠號 {db_manager_port} 上就緒。")
 
         # 2. 初始化 DB 客戶端
-        db_client = get_client()
+        db_client = DBClient()
         log.info("✅ DB 客戶端初始化完成。")
 
         # 3. 啟動 API 伺服器

@@ -15,14 +15,21 @@ from typing import List
 SRC_DIR = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(SRC_DIR))
 
+from fastapi import APIRouter, HTTPException, Request, BackgroundTasks, Depends
+
 from db.database import get_db_connection
-from db.client import get_client
+# V4 優化：移除 get_client，改為依賴注入
+# from db.client import get_client
+from db.client import DBClient
+from ..dependencies import get_db
+
 
 # --- 常數與設定 ---
 log = logging.getLogger(__name__)
 templates = Jinja2Templates(directory=str(SRC_DIR / "static"))
 router = APIRouter()
-DB_CLIENT = get_client()
+# V4 優化：移除在模組加載時建立的客戶端實例。
+# DB_CLIENT = get_client()
 
 # --- API 端點 ---
 @router.get("/pending_urls")
@@ -183,9 +190,14 @@ async def run_task_wrapper(task_id: int, semaphore: asyncio.Semaphore, blocking_
 
 
 @router.post("/start_downloads")
-async def start_downloads(payload: DownloadRequest, background_tasks: BackgroundTasks, request: Request):
+async def start_downloads(
+    payload: DownloadRequest,
+    background_tasks: BackgroundTasks,
+    request: Request,
+    db: DBClient = Depends(get_db)
+):
     """
-    (重構後) 接收要下載的 URL ID 列表，並為每一個 ID 建立一個使用佇列通知的背景下載任務。
+    (V4 優化後) 接收要下載的 URL ID 列表，並使用共享的 DBClient 實例來建立背景任務。
     """
     url_ids = payload.ids
     if not url_ids:
@@ -202,11 +214,9 @@ async def start_downloads(payload: DownloadRequest, background_tasks: Background
         raise HTTPException(status_code=500, detail="伺服器狀態未完全初始化（缺少佇列或信號量）。")
 
     try:
-        # 立即將所有請求的 URL 狀態更新為 'downloading'
-        # JULES (2025-09-14): 修正錯誤。DBClient 沒有 execute_query 方法。
-        # 改為使用迴圈和高階的 update_url 方法，以符合現有的抽象層設計。
+        # V4 優化：使用透過 Depends 注入的共享 db 實例，而不是全域變數
         for url_id in url_ids:
-            DB_CLIENT.update_url(url_id, {"status": "downloading", "status_message": "已加入下載佇列"})
+            db.update_url(url_id, {"status": "downloading", "status_message": "已加入下載佇列"})
         log.info(f"API: 已將 {len(url_ids)} 個 URL 的狀態更新為 'downloading'。")
 
         # 為每個 URL 新增一個背景任務
@@ -218,7 +228,7 @@ async def start_downloads(payload: DownloadRequest, background_tasks: Background
                 blocking_func=_run_download_blocking_task,
                 queue=queue,
                 loop=loop,
-                db_client=DB_CLIENT  # 傳遞 client 進去
+                db_client=db  # V4 優化：將共享的 db 實例傳遞到背景任務中
             )
 
         return JSONResponse(

@@ -11,13 +11,15 @@ SRC_DIR = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(SRC_DIR))
 
 # --- 核心模組匯入 ---
-from db.client import get_client
+# V4 優化：移除未使用的 get_client
+# from db.client import get_client
 from db.database import get_db_connection
 
 # --- 常數與設定 ---
 log = logging.getLogger(__name__)
 router = APIRouter()
-DB_CLIENT = get_client()
+# V4 優化：移除未使用的 DB_CLIENT 實例
+# DB_CLIENT = get_client()
 
 @router.get("/performance_reports", response_model=List[Dict[str, Any]])
 async def get_performance_reports():

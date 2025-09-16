@@ -27,7 +27,8 @@ import psutil
 SRC_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SRC_DIR))
 
-from db.client import get_client
+# V4 循環導入修復：從新的依賴檔案中導入
+from .dependencies import db_client
 
 # --- JULES 於 2025-08-09 的修改：設定應用程式全域時區 ---
 # 為了確保所有日誌和資料庫時間戳都使用一致的時區，我們在應用程式啟動的
@@ -101,10 +102,9 @@ class ConnectionManager:
 manager = ConnectionManager()
 
 
-# --- DB 客戶端 ---
-# 在模組加載時獲取客戶端單例
-# 客戶端內部有重試機制，會等待 DB 管理者服務就緒
-db_client = get_client()
+# V4 循環導入修復：
+# db_client 的實例化和 get_db 函數已移至 `dependencies.py`
+# 以解決循環導入問題。api_server 現在直接從那裡導入共享的 db_client 實例。
 
 # --- FastAPI Lifespan Manager ---
 
@@ -134,47 +134,14 @@ async def notification_broadcaster(app: FastAPI):
             await asyncio.sleep(1)
 
 
-def install_system_fonts():
-    """
-    [POC] 檢查並安裝系統級的 Noto CJK 字型，並強制更新字體快取。
-    這對於確保 Matplotlib 等工具能正確呈現中文至關重要。
-    """
-    font_package = "fonts-noto-cjk"
-    log.info(f"--- [字體安裝 POC 開始] ---")
-    log.info(f"目標：安裝 '{font_package}' 以解決缺字問題。")
-
-    # 指令分為兩部分：安裝和更新快取
-    install_command = f"sudo apt-get update && sudo apt-get install -y {font_package}"
-    cache_command = "sudo fc-cache -fv"
-
-    try:
-        log.info(f"執行安裝指令: `{install_command}`")
-        # 增加 timeout 以避免指令卡住
-        install_result = subprocess.run(
-            install_command, shell=True, check=True, capture_output=True, text=True, timeout=300
-        )
-        log.info(f"✅ 字型套件 '{font_package}' 安裝成功。")
-        log.debug(f"   - 安裝程序輸出:\n{install_result.stdout.strip()}")
-
-        log.info(f"執行字體快取更新指令: `{cache_command}`")
-        cache_result = subprocess.run(
-            cache_command, shell=True, check=True, capture_output=True, text=True, timeout=120
-        )
-        log.info("✅ 系統字體快取已成功更新。")
-        log.debug(f"   - 快取更新程序輸出:\n{cache_result.stdout.strip()}")
-
-    except subprocess.TimeoutExpired as e:
-        log.error(f"❌ 執行 '{e.cmd}' 時發生超時錯誤。")
-        log.error("   - 這可能是因為網路緩慢或系統資源不足。")
-    except subprocess.CalledProcessError as e:
-        log.error(f"❌ 執行 '{e.cmd}' 時發生錯誤。返回碼: {e.returncode}")
-        log.error(f"   - Stderr:\n{e.stderr.strip()}")
-        log.error(f"   - Stdout:\n{e.stdout.strip()}")
-        log.warning("字型安裝失敗，後續的圖表或PDF生成可能會有缺字或亂碼問題。")
-    except Exception as e:
-        log.error(f"❌ 執行字型安裝時發生未預期的例外: {e}", exc_info=True)
-    finally:
-        log.info("--- [字體安裝 POC 結束] ---")
+# V4 計畫書優化 (2025-09-18)：移除冗長的啟動任務
+#
+# 移除了 install_system_fonts() 函數及其在 lifespan 中的呼叫。
+#
+# 原因：
+# 根據 V4 計畫書分析，字體安裝流程是造成應用啟動過於冗長的瓶頸之一。
+# 由於此功能在當前部署環境中並非必要，直接移除是最高效的優化手段。
+# 這將直接縮短從啟動到服務完全就緒的時間。
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -183,12 +150,6 @@ async def lifespan(app: FastAPI):
     負責在啟動時初始化資源，在關閉時進行清理。
     """
     # --- 應用程式啟動時 ---
-    # 0. (非同步) 安裝必要的系統級字型 (JULES FIX 2025-09-16)
-    # 將耗時的字型安裝操作移至背景執行緒，避免阻塞伺服器啟動
-    log.info("排程背景字型安裝任務...")
-    font_thread = threading.Thread(target=install_system_fonts, daemon=True)
-    font_thread.start()
-
     # 1. 設定資料庫日誌
     setup_database_logging()
     log.info("資料庫日誌處理器已透過 lifespan 事件設定。")

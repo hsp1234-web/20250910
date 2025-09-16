@@ -1,12 +1,14 @@
 import logging
 import json
 import time
+import random  # 導入 random 模組
 import threading
 from collections import deque
 from typing import List, Optional, Dict, Any
 
 try:
     import google.generativeai as genai
+    from google.api_core import exceptions as google_exceptions # 導入具體的例外類型
     from google.generativeai.types import GenerationConfig
     from PIL import Image
 except ImportError:
@@ -14,6 +16,7 @@ except ImportError:
     genai = None
     Image = None
     GenerationConfig = None
+    google_exceptions = None # 確保在導入失敗時變數存在
 
 class ApiKey:
     """一個簡單的類別，用於儲存 API 金鑰及其名稱。"""
@@ -85,14 +88,17 @@ class GeminiManager:
             raise e
 
     def _api_call_wrapper(self, task_name: str, model_name: str, prompt_content: List[Any], output_format: str = 'json'):
-        if not genai:
-            return None, "google.generativeai not installed", "N/A"
+        if not genai or not google_exceptions:
+            return None, "google.generativeai 或其依賴未安裝", "N/A", 0
 
         last_error = None
 
         with self._lock:
             self._activate_cooled_down_keys()
             keys_to_try = list(self.key_pool)
+            # V4 優化：實現金鑰隨機選取，避免所有請求衝擊單一金鑰
+            # 這能最有效地將負載均分到所有可用金鑰上，解決日誌中大量請求等待的瓶頸。
+            random.shuffle(keys_to_try)
 
         if not keys_to_try:
             error_msg = f"金鑰池為空，無法執行 API 請求。(有 {len(self.cooldown_keys)} 個金鑰正在冷卻中)"
@@ -101,7 +107,7 @@ class GeminiManager:
 
         for i, api_key in enumerate(keys_to_try):
             tag = f"{task_name}-{api_key.name}"
-            logging.info(f"[{tag}] 準備使用金鑰 #{i+1}/{len(keys_to_try)} 執行 API 請求...")
+            logging.info(f"[{tag}] 準備使用隨機金鑰 #{i+1}/{len(keys_to_try)} 執行 API 請求...")
 
             try:
                 genai.configure(api_key=api_key.key)
@@ -125,6 +131,7 @@ class GeminiManager:
                     if not raw_text:
                         raise ValueError("API 回傳空內容")
 
+                    # V4 優化：成功後，將金鑰移至隊列末端 (Round-Robin)，確保它不會立即被下一個請求再次使用
                     with self._lock:
                         if api_key in self.key_pool:
                             self.key_pool.remove(api_key)
@@ -159,16 +166,21 @@ class GeminiManager:
                     last_error = e
                     last_error_str = f"{type(e).__name__}: {e}".lower()
 
-                    is_permanent_error = any(s in last_error_str for s in ["permission_denied", "invalid_api_key", "invalid_argument"])
-                    is_rate_limit_error = any(s in last_error_str for s in ["quota", "resourceexhausted", "429"])
+                    # V4 優化：更精準地捕捉速率限制錯誤
+                    is_rate_limit_by_type = isinstance(e, google_exceptions.ResourceExhausted) if google_exceptions else False
+                    is_rate_limit_by_string = any(s in last_error_str for s in ["resourceexhausted", "429", "rate limit"])
 
-                    if is_rate_limit_error:
+                    is_permanent_error = any(s in last_error_str for s in ["permission_denied", "invalid_api_key", "invalid_argument"])
+
+
+                    if is_rate_limit_by_type or is_rate_limit_by_string:
                         logging.error(f"[{tag}] 遭遇配額耗盡錯誤。將此金鑰移至冷卻區 {self.cooldown_seconds} 秒。")
                         with self._lock:
+                            # 確保金鑰仍在池中，避免多執行緒下的競爭條件
                             if api_key in self.key_pool:
                                 self.key_pool.remove(api_key)
                                 self.cooldown_keys[api_key.key] = time.time() + self.cooldown_seconds
-                        break # 跳出內層重試迴圈，嘗試下一個金鑰
+                        break # 跳出內層重試迴圈，立即嘗試下一個金鑰
 
                     if is_permanent_error:
                         logging.error(f"[{tag}] 遭遇永久性錯誤: {last_error_str}。將立即嘗試下一個金鑰。")
