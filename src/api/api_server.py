@@ -230,7 +230,7 @@ async def add_server_port_to_state(request: Request, call_next):
 
 # --- 整合模組化路由 ---
 from core import config_manager
-from api.routes import ui, page1_ingestion, page2_downloader, page3_processor, page4_analyzer, page5_backup, page6_keys, page7_prompts, page8_details, page9_dashboard
+from api.routes import ui, page1, page2_downloader, page3_processor, page4_analyzer, page5_backup, page6_keys, page7_prompts, page8_details, page9_dashboard
 
 # --- JULES (2025-09-15): 在應用程式啟動時載入設定 ---
 # 將設定載入到 app.state 中，使其在整個應用程式中可用。
@@ -242,7 +242,7 @@ log.info(f"全域設定已載入。API 超時設定為: {app.state.config.get('a
 app.include_router(ui.router, tags=["UI"])
 
 # API 路由 (提供資料介面)
-app.include_router(page1_ingestion.router, prefix="/api/ingestion", tags=["API: 網址提取"])
+app.include_router(page1.router) # No prefix, as it's defined in the router itself
 app.include_router(page2_downloader.router, prefix="/api/downloader", tags=["API: 批次下載"])
 app.include_router(page3_processor.router, prefix="/api/processor", tags=["API: 檔案處理"])
 app.include_router(page4_analyzer.router, prefix="/api/analyzer", tags=["API: AI 分析"])

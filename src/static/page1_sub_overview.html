@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>資料總覽</title>
+    <link rel="stylesheet" href="/static/css/page1_unified.css">
+</head>
+<body>
+    <div class="content">
+        <div class="panel">
+            <h2>資料總覽 (卡片視圖)</h2>
+            <div class="filter-container">
+                <label for="start-date">開始日期:</label>
+                <input type="date" id="start-date">
+                <label for="end-date">結束日期:</label>
+                <input type="date" id="end-date">
+                <button id="filter-button">篩選</button>
+                <button id="export-button">匯出目前結果</button>
+            </div>
+        </div>
+
+        <div id="card-container" class="card-grid">
+            <!-- 卡片將由 JavaScript 動態生成 -->
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const startDateInput = document.getElementById('start-date');
+            const endDateInput = document.getElementById('end-date');
+            const filterButton = document.getElementById('filter-button');
+            const exportButton = document.getElementById('export-button');
+            const cardContainer = document.getElementById('card-container');
+
+            const fetchAndDisplayData = async (startDate = '', endDate = '') => {
+                let url = '/api/page1/overview_data';
+                const params = new URLSearchParams();
+                if (startDate) params.append('start_date', startDate);
+                if (endDate) params.append('end_date', endDate);
+                if (params.toString()) {
+                    url += `?${params.toString()}`;
+                }
+
+                try {
+                    const response = await fetch(url);
+                    if (!response.ok) throw new Error(`HTTP 錯誤！狀態: ${response.status}`);
+                    const data = await response.json();
+
+                    cardContainer.innerHTML = '';
+
+                    if (data.length === 0) {
+                        cardContainer.innerHTML = '<p>在此範圍內沒有找到資料。</p>';
+                        return;
+                    }
+
+                    data.forEach(item => {
+                        const card = document.createElement('div');
+                        card.className = 'card';
+                        card.innerHTML = `
+                            <div class="card-header">卡片 ${item.id}</div>
+                            <div class="card-body">
+                                <p><strong>網址:</strong> <a href="${item.url}" target="_blank">${item.url}</a></p>
+                                <p><strong>作者:</strong> ${item.author || 'N/A'}</p>
+                                <p><strong>日期:</strong> ${item.date || 'N/A'}</p>
+                            </div>
+                        `;
+                        cardContainer.appendChild(card);
+                    });
+
+                } catch (error) {
+                    cardContainer.innerHTML = `<p style="color: var(--error-color);">載入資料失敗: ${error.message}</p>`;
+                }
+            };
+
+            filterButton.addEventListener('click', () => {
+                fetchAndDisplayData(startDateInput.value, endDateInput.value);
+            });
+
+            exportButton.addEventListener('click', () => {
+                const startDate = startDateInput.value;
+                const endDate = endDateInput.value;
+                let exportUrl = `/page1/export`;
+                const params = new URLSearchParams();
+                if (startDate) params.append('start_date', startDate);
+                if (endDate) params.append('end_date', endDate);
+                if (params.toString()) {
+                    exportUrl += `?${params.toString()}`;
+                }
+                // 在父級視窗中導航到匯出頁面
+                window.parent.location.href = exportUrl;
+            });
+
+            // 初始載入所有資料
+            fetchAndDisplayData();
+        });
+    </script>
+</body>
+</html>
