@@ -11,29 +11,71 @@ import base64
 
 log = logging.getLogger(__name__)
 
-def is_ticker_valid(symbol: str) -> bool:
+# --- JULES: 新增全球交易所後綴列表 ---
+YFINANCE_SUFFIXES = [
+    '.L',   # London Stock Exchange
+    '.F',   # Frankfurt Stock Exchange
+    '.HK',  # Hong Kong Stock Exchange
+    '.DE',  # XETRA (Germany)
+    '.PA',  # Euronext Paris
+    '.AS',  # Euronext Amsterdam
+    '.TO',  # Toronto Stock Exchange (Canada)
+    '.AX',  # Australian Securities Exchange
+]
+
+def _check_symbol_validity(symbol: str) -> bool:
     """
-    使用 yfinance 檢查一個股票代號是否有效且可獲取資料。
-    一個"有效"的代號是 Ticker 物件有 `info` 且 `info` 內有價格資訊。
+    一個精簡的輔助函式，僅用於檢查單一 yfinance 代號是否能獲取資料。
     """
-    if not symbol or not isinstance(symbol, str):
+    if not symbol:
         return False
     try:
-        log.info(f"正在驗證代號: {symbol}")
         ticker = yf.Ticker(symbol)
-        # 檢查 .info 字典是否為空或缺少關鍵價格鍵
-        if not ticker.info or ticker.info.get('regularMarketPrice') is None:
-            # 作為後備，快速檢查是否有任何歷史資料
-            history = ticker.history(period="7d")
-            if history.empty:
-                log.warning(f"代號 '{symbol}' 的 .info 和歷史資料均為空。標記為無效。")
-                return False
-        log.info(f"代號 '{symbol}' 驗證成功。")
+        # 檢查是否有歷史資料是比檢查 .info 更可靠的方法
+        history = ticker.history(period="5d")
+        if history.empty:
+            log.info(f"檢查 '{symbol}': 失敗 (找不到歷史資料)。")
+            return False
         return True
-    except Exception as e:
-        # 捕獲可能發生的任何網路或 API 錯誤
-        log.error(f"驗證代號 '{symbol}' 時發生例外: {e}")
+    except Exception:
+        # 在重試邏輯中，我們預期會有很多例外，因此在此處降低日誌級別
+        log.info(f"檢查 '{symbol}' 時捕獲到例外，視為無效。")
         return False
+
+def find_valid_yfinance_symbol(symbol: str) -> str | None:
+    """
+    【JULES: 新的校正函式】
+    嘗試找到一個有效的 yfinance 代號，並在失敗時使用後綴列表進行重試。
+    1. 檢查原始代號。
+    2. 如果失敗，則嘗試附加後綴列表中的後綴進行重試。
+    回傳有效的完整代號字串，或在失敗時回傳 None。
+    """
+    if not symbol or not isinstance(symbol, str):
+        return None
+
+    symbol_upper = symbol.strip().upper()
+
+    # 1. 嘗試原始代號 (適用於美國市場或已格式化的代號)
+    log.info(f"步驟 1: 嘗試原始代號 '{symbol_upper}'...")
+    if _check_symbol_validity(symbol_upper):
+        log.info(f"代號 '{symbol_upper}' 驗證成功。")
+        return symbol_upper
+
+    # 2. 如果失敗，且代號不包含 '.' (避免對 'VOD.L' 這樣的代號再次添加後綴)
+    if '.' in symbol_upper:
+        log.warning(f"代號 '{symbol_upper}' 包含 '.' 且驗證失敗，將不進行後綴重試。")
+        return None
+
+    # 3. 啟動後綴重試邏輯
+    log.info(f"步驟 2: 為 '{symbol_upper}' 啟動後綴重試邏輯...")
+    for suffix in YFINANCE_SUFFIXES:
+        test_symbol = f"{symbol_upper}{suffix}"
+        if _check_symbol_validity(test_symbol):
+            log.info(f"成功找到有效代號: '{test_symbol}'")
+            return test_symbol
+
+    log.warning(f"'{symbol_upper}' 在嘗試所有後綴後，仍找不到有效的 yfinance 代號。")
+    return None
 
 def to_float(value: any) -> float | None:
     """
