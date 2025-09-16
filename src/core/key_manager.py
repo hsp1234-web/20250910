@@ -53,13 +53,14 @@ def _validate_single_key(api_key: str) -> bool:
     tool_script_path = ROOT_DIR / "src" / "tools" / "gemini_processor.py"
     cmd = [sys.executable, str(tool_script_path), "--command=validate_key"]
 
-    minimal_env = {
-        "PATH": os.environ.get("PATH", ""),
-        "GOOGLE_API_KEY": api_key,
-        "SYSTEMROOT": os.environ.get("SYSTEMROOT", "")
-    }
+    # 建立一個當前環境的副本，以避免修改主程序的環境
+    env = os.environ.copy()
+    # 在這個副本中設定要驗證的特定金鑰
+    env["GOOGLE_API_KEY"] = api_key
+
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', env=minimal_env, check=False)
+        # 使用繼承的完整環境來執行子程序，以確保所有必要的設定 (如代理) 都被傳遞
+        result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', env=env, check=False)
         return result.returncode == 0
     except Exception:
         return False

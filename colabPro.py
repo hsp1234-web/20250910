@@ -1,24 +1,24 @@
 # -*- coding: utf-8 -*-
 # ╔══════════════════════════════════════════════════════════════════╗
 # ║                                                                      ║
-# ║   ✨🐺 善狼一鍵啟動器 (v27) 🐺                                   ✨🐺 ║
+# ║   ✨🐺 善狼一鍵啟動器 (v28) 🐺                                   ✨🐺 ║
 # ║                                                                      ║
 # ╠══════════════════════════════════════════════════════════════════╣
 # ║                                                                      ║
-# ║ - V27 更新日誌 (2025-09-14):                                         ║
-# ║   - **介面再次簡化**: 根據使用者最終要求，移除模式選擇和手動輸入，   ║
-# ║     將金鑰載入流程固定為「自動從 Colab Secrets 載入」。             ║
-# ║   - **保留核心選項**: 介面僅保留「後端版本」與「金鑰載入數量」。      ║
+# ║ - V28 更新日誌 (2025-09-16):                                         ║
+# ║   - **修復金鑰驗證**: 調整金鑰驗證時的子程序環境，解決高階硬體上     ║
+# ║     因環境變數不完整而導致的驗證失敗問題。                         ║
+# ║   - **更新預設分支**: 將預設分支號碼更新為 `25.4`。                  ║
 # ║                                                                      ║
 # ╚══════════════════════════════════════════════════════════════════╝
 
-#@title ✨🐺 善狼一鍵啟動器 (v27) - 終極簡化版 🐺 { vertical-output: true, display-mode: "form" }
+#@title ✨🐺 善狼一鍵啟動器 (v28) - 終極簡化版 🐺 { vertical-output: true, display-mode: "form" }
 #@markdown ---
 #@markdown ### **核心設定**
 #@markdown > **請確認以下兩個核心設定。**
 #@markdown ---
 #@markdown **後端版本分支或標籤**
-TARGET_BRANCH_OR_TAG = "15" #@param {type:"string"}
+TARGET_BRANCH_OR_TAG = "25.4" #@param {type:"string"}
 #@markdown **自動從 Colab Secrets 載入的金鑰數量 (0-20)**
 #@markdown > 輸入 `2` 將載入 `GOOGLE_API_KEY`, `_1`, `_2` 共三組金鑰。
 KEY_LOAD_COUNT_LIMIT = 2 #@param {type:"number"}
@@ -134,7 +134,7 @@ class DisplayManager:
         self._thread = threading.Thread(target=self._run, daemon=True)
 
     def _build_output_buffer(self) -> list[str]:
-        output_buffer = ["✨🐺 善狼一鍵啟動器 (v26) 🐺", ""]
+        output_buffer = ["✨🐺 善狼一鍵啟動器 (v28) 🐺", ""]
         logs_to_display = self._log_manager.get_display_logs()
         for log in logs_to_display:
             ts = log['timestamp'].strftime('%H:%M:%S')
@@ -344,13 +344,30 @@ class ServerManager:
                     # 根據 force_pip 決定是否嘗試使用 uv
                     use_uv = not force_pip and Path("./uv").is_file()
                     if use_uv:
-                        pip_command = [sys.executable, "-m", "uv", "pip", "install", "--system", "-q", "-r", str(temp_req_path)]
+                        # 移除 -q 參數以獲取詳細日誌
+                        pip_command = [sys.executable, "-m", "uv", "pip", "install", "--system", "-r", str(temp_req_path)]
                         self._log_manager.log("INFO", f"[{log_prefix}] 使用 'uv' 進行快速安裝...")
                     else:
-                        pip_command = [sys.executable, "-m", "pip", "install", "-q", "--progress-bar", "off", "-r", str(temp_req_path)]
+                        # 移除 -q 和 --progress-bar off 參數以獲取詳細日誌
+                        pip_command = [sys.executable, "-m", "pip", "install", "-r", str(temp_req_path)]
                         self._log_manager.log("INFO", f"[{log_prefix}] 使用 'pip' 進行安裝。")
 
-                    subprocess.check_call(pip_command)
+                    # 改用 subprocess.run 以便捕獲錯誤輸出
+                    result = subprocess.run(pip_command, capture_output=True, text=True, encoding='utf-8')
+
+                    # 無論成功或失敗，都記錄 stdout
+                    if result.stdout and result.stdout.strip():
+                        self._log_manager.log("DEBUG", f"[{log_prefix}] pip stdout:\n{result.stdout}", "Installer")
+
+                    if result.returncode != 0:
+                        # 如果安裝失敗，記錄詳細的錯誤日誌
+                        error_log = f"pip install 失敗！返回碼: {result.returncode}\n"
+                        if result.stderr and result.stderr.strip():
+                            error_log += f"STDERR:\n{result.stderr}\n"
+                        self._log_manager.log("ERROR", error_log, "Installer")
+                        # 重新引發異常，讓上層知道安裝失敗了
+                        raise subprocess.CalledProcessError(result.returncode, pip_command, output=result.stdout, stderr=result.stderr)
+
                     self._log_manager.log("SUCCESS", f"✅ [{log_prefix}] 依賴安裝完成。")
                     self._log_manager.log("INFO", f"--- [{log_prefix}] 安裝耗時: {time.monotonic() - install_start_time:.2f} 秒 ---")
                 except subprocess.CalledProcessError as e:
