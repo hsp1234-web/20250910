@@ -3,6 +3,8 @@ import sqlite3
 import logging
 import json
 from pathlib import Path
+from datetime import datetime, timedelta
+from typing import List, Dict, Optional
 
 # --- 日誌設定 ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -193,6 +195,34 @@ def initialize_database(conn: sqlite3.Connection = None):
             """)
             # --- 結束 ---
 
+            # --- 新增：智慧金鑰管理 (2025-09-16) ---
+            cursor.execute('''
+            CREATE TABLE IF NOT EXISTS api_keys (
+                key_name TEXT PRIMARY KEY NOT NULL,
+                status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'cooldown', 'disabled')),
+                last_used_at TIMESTAMP,
+                cooldown_until TIMESTAMP,
+                request_count INTEGER NOT NULL DEFAULT 0,
+                error_count INTEGER NOT NULL DEFAULT 0
+            )
+            ''')
+            log.info("資料表 'api_keys' 已檢查或建立。")
+            # 建立索引以加速查詢「最久未使用的活躍金鑰」
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_key_status_last_used ON api_keys (status, last_used_at)")
+            log.info("索引 'idx_key_status_last_used' 已檢查或建立。")
+            # --- 結束 ---
+
+            # --- 為 analysis_tasks 新增原始 JSON 回應欄位 (2025-09-16) ---
+            try:
+                cursor.execute("ALTER TABLE analysis_tasks ADD COLUMN stage1_raw_json TEXT")
+                log.info("欄位 'stage1_raw_json' 已成功新增至 'analysis_tasks' 資料表。")
+            except sqlite3.OperationalError as e:
+                if "duplicate column name" in str(e):
+                    pass # 欄位已存在，是正常情況
+                else:
+                    raise # 其他錯誤則需拋出
+            # --- 結束 ---
+
             # --- 為 extracted_urls 進行簡易遷移，新增狀態相關欄位 ---
             url_migrations = {
                 "author": "TEXT", # 新增作者欄位
@@ -306,7 +336,7 @@ def initialize_database(conn: sqlite3.Connection = None):
                         raise
             # --- 結束 ---
 
-        log.info("✅ 資料庫初始化完成。`tasks`, `system_logs`, `app_state`, `extracted_urls`, `reports`, `analysis_tasks` 資料表已存在。")
+        log.info("✅ 資料庫初始化完成。`tasks`, `system_logs`, `app_state`, `extracted_urls`, `reports`, `analysis_tasks`, `api_keys` 資料表已存在。")
     except sqlite3.Error as e:
         log.error(f"初始化資料庫時發生錯誤: {e}")
     finally:
@@ -907,6 +937,198 @@ def get_all_app_states() -> dict[str, str]:
     finally:
         if conn:
             conn.close()
+
+
+# --- 新增：智慧金鑰管理 (API Keys) 專用函式 (2025-09-16) ---
+
+def sync_api_keys(key_names: List[str]) -> bool:
+    """
+    將環境變數中讀取到的金鑰名稱同步到資料庫。
+    只新增不存在的金鑰，不刪除舊的。
+    """
+    if not key_names:
+        return True
+    sql = "INSERT OR IGNORE INTO api_keys (key_name) VALUES (?)"
+    conn = get_db_connection()
+    if not conn: return False
+    try:
+        with conn:
+            cursor = conn.cursor()
+            # executemany needs a list of tuples
+            cursor.executemany(sql, [(name,) for name in key_names])
+        log.info(f"成功同步 {len(key_names)} 個金鑰名稱到資料庫。")
+        return True
+    except sqlite3.Error as e:
+        log.error(f"同步 API 金鑰時發生錯誤: {e}", exc_info=True)
+        return False
+    finally:
+        if conn:
+            conn.close()
+
+def reactivate_cooled_down_keys() -> int:
+    """
+    檢查所有在冷卻中的金鑰，如果冷卻時間已到，則將其狀態恢復為 'active'。
+    返回被重新啟用的金鑰數量。
+    """
+    now_ts = datetime.now().isoformat()
+    sql = "UPDATE api_keys SET status = 'active', cooldown_until = NULL WHERE status = 'cooldown' AND cooldown_until <= ?"
+    conn = get_db_connection()
+    if not conn: return 0
+    try:
+        with conn:
+            cursor = conn.cursor()
+            cursor.execute(sql, (now_ts,))
+            activated_count = cursor.rowcount
+            if activated_count > 0:
+                log.info(f"已自動將 {activated_count} 個金鑰從冷卻狀態恢復為活躍。")
+            return activated_count
+    except sqlite3.Error as e:
+        log.error(f"恢復冷卻中金鑰時發生錯誤: {e}", exc_info=True)
+        return 0
+    finally:
+        if conn:
+            conn.close()
+
+def get_available_api_key() -> Optional[str]:
+    """
+    以原子操作獲取一個可用的 API 金鑰。
+    它會自動恢復到期的冷卻中金鑰，然後選擇最久未被使用的活躍金鑰。
+    """
+    reactivate_cooled_down_keys()
+
+    conn = get_db_connection()
+    if not conn: return None
+
+    # This should be an atomic transaction
+    try:
+        with conn:
+            cursor = conn.cursor()
+            # Find the best key
+            sql_find = """
+                SELECT key_name FROM api_keys
+                WHERE status = 'active'
+                ORDER BY last_used_at ASC
+                LIMIT 1
+            """
+            cursor.execute(sql_find)
+            row = cursor.fetchone()
+
+            if not row:
+                log.warning("金鑰池枯竭：沒有可用的活躍金鑰。")
+                return None
+
+            key_name = row['key_name']
+            now_ts = datetime.now().isoformat()
+
+            # Update its last_used_at timestamp and request_count
+            sql_update = """
+                UPDATE api_keys
+                SET last_used_at = ?, request_count = request_count + 1
+                WHERE key_name = ?
+            """
+            cursor.execute(sql_update, (now_ts, key_name))
+            log.info(f"已選取金鑰 '{key_name}' 供使用。")
+            return key_name
+    except sqlite3.Error as e:
+        log.error(f"獲取可用 API 金鑰時發生錯誤: {e}", exc_info=True)
+        return None
+    finally:
+        if conn:
+            conn.close()
+
+def set_api_key_cooldown(key_name: str, cooldown_seconds: int) -> bool:
+    """
+    將指定金鑰設定為冷卻狀態，並增加其錯誤計數。
+    """
+    cooldown_until_ts = (datetime.now() + timedelta(seconds=cooldown_seconds)).isoformat()
+    sql = """
+        UPDATE api_keys
+        SET status = 'cooldown', cooldown_until = ?, error_count = error_count + 1
+        WHERE key_name = ?
+    """
+    conn = get_db_connection()
+    if not conn: return False
+    try:
+        with conn:
+            conn.execute(sql, (cooldown_until_ts, key_name))
+        log.warning(f"金鑰 '{key_name}' 因錯誤進入冷卻狀態，直到 {cooldown_until_ts}。")
+        return True
+    except sqlite3.Error as e:
+        log.error(f"設定金鑰 '{key_name}' 冷卻時發生錯誤: {e}", exc_info=True)
+        return False
+    finally:
+        if conn:
+            conn.close()
+
+def get_all_api_key_statuses() -> List[Dict]:
+    """
+    獲取所有 API 金鑰的當前狀態，用於儀表板顯示。
+    """
+    sql = "SELECT key_name, status, last_used_at, cooldown_until, request_count, error_count FROM api_keys ORDER BY key_name"
+    conn = get_db_connection()
+    if not conn: return []
+    try:
+        cursor = conn.cursor()
+        cursor.execute(sql)
+        keys = cursor.fetchall()
+        return [dict(key) for key in keys]
+    except sqlite3.Error as e:
+        log.error(f"獲取所有 API 金鑰狀態時發生錯誤: {e}", exc_info=True)
+        return []
+    finally:
+        if conn:
+            conn.close()
+
+def update_key_status_manually(key_name: str, new_status: str) -> bool:
+    """
+    手動更新指定金鑰的狀態 (例如，從儀表板禁用一個金鑰)。
+    """
+    if new_status not in ['active', 'disabled']:
+        log.error(f"不支援的狀態 '{new_status}'。只允許 'active' 或 'disabled'。")
+        return False
+
+    sql = "UPDATE api_keys SET status = ? WHERE key_name = ?"
+    conn = get_db_connection()
+    if not conn: return False
+    try:
+        with conn:
+            cursor = conn.cursor()
+            cursor.execute(sql, (new_status, key_name))
+            if cursor.rowcount > 0:
+                log.info(f"已手動將金鑰 '{key_name}' 的狀態更新為 '{new_status}'。")
+                return True
+            else:
+                log.warning(f"找不到名為 '{key_name}' 的金鑰，無法更新狀態。")
+                return False
+    except sqlite3.Error as e:
+        log.error(f"手動更新金鑰 '{key_name}' 狀態時發生錯誤: {e}", exc_info=True)
+        return False
+    finally:
+        if conn:
+            conn.close()
+
+def reset_all_keys_to_active() -> bool:
+    """
+    將所有金鑰的狀態重設為 'active'，並清除冷卻時間。
+    這是一個管理員操作，用於從大規模冷卻中恢復。
+    """
+    sql = "UPDATE api_keys SET status = 'active', cooldown_until = NULL WHERE status != 'active'"
+    conn = get_db_connection()
+    if not conn: return False
+    try:
+        with conn:
+            cursor = conn.cursor()
+            cursor.execute(sql)
+            log.info(f"已成功將 {cursor.rowcount} 個金鑰的狀態重設為 'active'。")
+        return True
+    except sqlite3.Error as e:
+        log.error(f"重設所有金鑰狀態時發生錯誤: {e}", exc_info=True)
+        return False
+    finally:
+        if conn:
+            conn.close()
+
+# --- 結束：智慧金鑰管理專用函式 ---
 
 
 if __name__ == "__main__":
