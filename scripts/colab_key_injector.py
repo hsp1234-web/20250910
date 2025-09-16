@@ -44,6 +44,7 @@ try:
 
     from google.colab import userdata
     from src.core import key_manager
+    from src.db.database import initialize_database
     print("✅ 成功匯入 Colab userdata 和 key_manager 模組。")
 except ImportError:
     print("❌ 錯誤：此腳本似乎並非在 Google Colab 環境中執行，或專案結構不完整。")
@@ -135,6 +136,11 @@ def handle_manual_mode(keys_string: str):
 
 def main():
     """主執行函式，解析參數並分派任務。"""
+    # 在執行任何操作之前，先確保資料庫及其所有資料表都已建立。
+    print("ℹ️  正在執行資料庫初始化檢查...")
+    initialize_database()
+    print("✅  資料庫初始化檢查完成。")
+
     parser = argparse.ArgumentParser(description="Colab 金鑰注入器，支援自動與手動模式。")
     parser.add_argument("--mode", type=str, choices=['auto', 'manual'], required=True, help="金鑰載入模式：'auto' 或 'manual'")
     parser.add_argument("--count", type=int, default=0, help="在自動模式下，要載入的金鑰數量 (0-20)。")
