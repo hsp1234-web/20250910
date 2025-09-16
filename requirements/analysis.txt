@@ -3,3 +3,5 @@ matplotlib==3.10.0
 pandas==2.2.2
 scikit-learn==1.6.1
 numpy==2.0.2
+twstock
+filetype==1.2.0
