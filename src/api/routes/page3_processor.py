@@ -16,9 +16,8 @@ from typing import List
 SRC_DIR = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(SRC_DIR))
 
-from db.database import get_db_connection
-# V4 優化：移除 get_client，改為依賴注入
-# from db.client import get_client
+# V4 優化：移除 get_db_connection，全面改用依賴注入
+# from db.database import get_db_connection
 from db.client import DBClient
 from ..dependencies import get_db
 from tools.file_hasher import calculate_sha256
@@ -29,8 +28,7 @@ from fastapi import Depends
 log = logging.getLogger(__name__)
 templates = Jinja2Templates(directory=str(SRC_DIR / "static"))
 router = APIRouter()
-# V4 優化：移除在模組加載時建立的客戶端實例。
-# DB_CLIENT = get_client()
+
 
 # --- Pydantic 模型 ---
 class ProcessRequest(BaseModel):
@@ -41,21 +39,12 @@ class ResetRequest(BaseModel):
 
 # --- API 端點 ---
 @router.get("/terminal_files")
-async def get_terminal_files():
-    """獲取所有已進入終端狀態 (processed, processed_unsupported, processing_failed) 的檔案列表。"""
+async def get_terminal_files(db: DBClient = Depends(get_db)):
+    """(V4 優化後) 獲取所有已進入終端狀態的檔案列表。"""
     log.info("API: 收到獲取所有終端狀態檔案列表的請求。")
-    conn = None
     try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        # 查詢所有已結束處理的狀態
-        cursor.execute("""
-            SELECT id, url, local_path, status, status_message
-            FROM extracted_urls
-            WHERE status IN ('processed', 'processed_unsupported', 'processing_failed')
-            ORDER BY created_at DESC
-        """)
-        rows = cursor.fetchall()
+        statuses = ['processed', 'processed_unsupported', 'processing_failed']
+        rows = db.get_urls_by_statuses(statuses=statuses)
         results = [
             {
                 "id": row['id'],
@@ -69,10 +58,9 @@ async def get_terminal_files():
         return JSONResponse(content=results)
     except Exception as e:
         log.error(f"API: 獲取終端狀態檔案時發生錯誤: {e}", exc_info=True)
+        if isinstance(e, (ConnectionError, RuntimeError)):
+             raise HTTPException(status_code=503, detail=f"資料庫服務通訊失敗: {e}")
         raise HTTPException(status_code=500, detail="獲取終端狀態檔案時發生伺服器內部錯誤。")
-    finally:
-        if conn:
-            conn.close()
 
 
 @router.post("/reset_files")
@@ -102,39 +90,26 @@ async def reset_files(payload: ResetRequest, db: DBClient = Depends(get_db)):
 
 
 @router.get("/completed_files")
-async def get_completed_files():
-    """獲取所有狀態為 'completed' (已下載完成) 的檔案列表。"""
+async def get_completed_files(db: DBClient = Depends(get_db)):
+    """(V4 優化後) 獲取所有狀態為 'completed' (已下載完成) 的檔案列表。"""
     log.info("API: 收到獲取已下載檔案列表的請求。")
-    conn = None
     try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT id, url, local_path FROM extracted_urls WHERE status = 'completed' ORDER BY created_at DESC")
-        rows = cursor.fetchall()
+        rows = db.get_urls_by_statuses(statuses=['completed'])
         results = [{"id": row['id'], "url": row['url'], "filename": Path(row['local_path']).name} for row in rows if row['local_path']]
         return JSONResponse(content=results)
     except Exception as e:
         log.error(f"API: 獲取已下載檔案時發生錯誤: {e}", exc_info=True)
+        if isinstance(e, (ConnectionError, RuntimeError)):
+             raise HTTPException(status_code=503, detail=f"資料庫服務通訊失敗: {e}")
         raise HTTPException(status_code=500, detail="獲取已下載檔案時發生伺服器內部錯誤。")
-    finally:
-        if conn:
-            conn.close()
 
 
 @router.get("/processed")
-async def get_processed_files():
-    """
-    獲取所有狀態為 'processed' (已處理完成) 的檔案列表。
-    這是為了在頁面三顯示已處理的報告。
-    """
+async def get_processed_files(db: DBClient = Depends(get_db)):
+    """(V4 優化後) 獲取所有狀態為 'processed' (已處理完成) 的檔案列表。"""
     log.info("API: 收到獲取已處理報告列表的請求。")
-    conn = None
     try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        # 選擇 file_hash 也是為了將來可能的用途
-        cursor.execute("SELECT id, local_path FROM extracted_urls WHERE status = 'processed' ORDER BY created_at DESC")
-        rows = cursor.fetchall()
+        rows = db.get_urls_by_statuses(statuses=['processed'])
         results = [
             {
                 "id": row['id'],
@@ -145,28 +120,18 @@ async def get_processed_files():
         return JSONResponse(content=results)
     except Exception as e:
         log.error(f"API: 獲取已處理報告列表時發生錯誤: {e}", exc_info=True)
+        if isinstance(e, (ConnectionError, RuntimeError)):
+             raise HTTPException(status_code=503, detail=f"資料庫服務通訊失敗: {e}")
         raise HTTPException(status_code=500, detail="獲取已處理報告列表時發生伺服器內部錯誤。")
-    finally:
-        if conn:
-            conn.close()
 
 
 @router.get("/report/{file_id}")
-async def get_report_content(file_id: int):
-    """
-    獲取單一已處理報告的詳細內容，包括文字和壓縮後的圖片路徑。
-    """
+async def get_report_content(file_id: int, db: DBClient = Depends(get_db)):
+    """(V4 優化後) 獲取單一已處理報告的詳細內容。"""
     log.info(f"API: 收到對檔案 ID {file_id} 的報告內容請求。")
-    conn = None
     try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute(
-            "SELECT extracted_text, extracted_image_paths FROM extracted_urls WHERE id = ? AND status = 'processed'",
-            (file_id,)
-        )
-        row = cursor.fetchone()
-        if not row:
+        row = db.get_url_by_id(url_id=file_id)
+        if not row or row['status'] != 'processed':
             raise HTTPException(status_code=404, detail="找不到指定 ID 的已處理報告。")
 
         # 從資料庫獲取真實的文字內容
@@ -195,10 +160,9 @@ async def get_report_content(file_id: int):
 
     except Exception as e:
         log.error(f"API: 獲取報告 ID {file_id} 的內容時發生錯誤: {e}", exc_info=True)
+        if isinstance(e, (ConnectionError, RuntimeError)):
+             raise HTTPException(status_code=503, detail=f"資料庫服務通訊失敗: {e}")
         raise HTTPException(status_code=500, detail="獲取報告內容時發生伺服器內部錯誤。")
-    finally:
-        if conn:
-            conn.close()
 
 
 # --- 背景任務函式 (重構後) ---

@@ -21,7 +21,8 @@ sys.path.insert(0, str(SRC_DIR))
 # from db.client import get_client
 from db.client import DBClient
 from ..dependencies import get_db
-from db.database import get_db_connection
+# V4 優化：移除 get_db_connection
+# from db.database import get_db_connection
 from core import key_manager, prompt_manager
 from core.time_utils import get_current_taipei_date_str
 from tools.gemini_manager import GeminiManager
@@ -399,12 +400,14 @@ async def start_stage1_analysis(request: Request, payload: Stage1Request, backgr
         raise HTTPException(status_code=500, detail="伺服器狀態未完全初始化（缺少佇列或信號量）。")
 
     tasks_created = []
-    conn = get_db_connection()
-    cursor = conn.cursor()
     for file_id in payload.file_ids:
-        cursor.execute("SELECT local_path FROM extracted_urls WHERE id = ?", (file_id,))
-        file_data = cursor.fetchone()
-        filename = Path(file_data['local_path']).name if file_data else f"未知檔案_{file_id}"
+        # V4 Bug Fix: 使用注入的 db client 查詢，並處理找不到紀錄的情況
+        file_data = db.get_url_by_id(url_id=file_id)
+        if not file_data:
+            log.warning(f"在啟動第一階段分析時，找不到檔案 ID: {file_id}，已跳過。")
+            continue
+
+        filename = Path(file_data['local_path']).name if file_data.get('local_path') else f"未知檔案_{file_id}"
 
         task = db.create_or_get_analysis_task(file_id=file_id, filename=filename)
         if task:
@@ -420,13 +423,12 @@ async def start_stage1_analysis(request: Request, payload: Stage1Request, backgr
                 blocking_func=_run_stage1_blocking_task,
                 queue=queue,
                 loop=loop,
-                db_client=db,  # V4 優化：傳入共享的 db 實例
+                db_client=db,
                 file_id=file_id,
                 model_name=payload.model_name,
                 stage=1
             )
             tasks_created.append(task['id'])
-    conn.close()
 
     return {"message": f"已成功為 {len(tasks_created)} 個檔案排入第一階段分析佇列。"}
 
@@ -560,29 +562,31 @@ async def start_stage2_analysis(request: Request, payload: Stage2Request, backgr
 @router.get("/files_for_stage1")
 async def get_files_for_stage1(db: DBClient = Depends(get_db)):
     """(V4 優化後) 獲取所有已處理、可供第一階段分析的檔案列表。"""
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT id, local_path, file_hash FROM extracted_urls WHERE status = 'processed' ORDER BY created_at DESC")
-    processed_files = cursor.fetchall()
-    conn.close()
+    try:
+        processed_files = db.get_urls_by_statuses(statuses=['processed'])
 
-    if not processed_files:
-        return []
+        if not processed_files:
+            return []
 
-    results = []
-    for file_row in processed_files:
-        file_id = file_row['id']
-        filename = Path(file_row['local_path']).name if file_row['local_path'] else f"未知檔案_{file_id}"
-        file_hash = file_row['file_hash']
+        results = []
+        for file_row in processed_files:
+            file_id = file_row['id']
+            filename = Path(file_row['local_path']).name if file_row['local_path'] else f"未知檔案_{file_id}"
+            file_hash = file_row['file_hash']
 
-        task_data = db.create_or_get_analysis_task(file_id=file_id, filename=filename)
+            task_data = db.create_or_get_analysis_task(file_id=file_id, filename=filename)
 
-        if task_data:
-            task_data['source_document_id'] = file_id
-            task_data['file_hash'] = file_hash
-            results.append(task_data)
+            if task_data:
+                task_data['source_document_id'] = file_id
+                task_data['file_hash'] = file_hash
+                results.append(task_data)
 
-    return results
+        return results
+    except Exception as e:
+        log.error(f"API: 獲取待分析檔案列表時出錯: {e}", exc_info=True)
+        if isinstance(e, (ConnectionError, RuntimeError)):
+             raise HTTPException(status_code=503, detail=f"資料庫服務通訊失敗: {e}")
+        raise HTTPException(status_code=500, detail="獲取待分析檔案列表時發生伺服器內部錯誤。")
 
 @router.get("/files_for_date_inference")
 async def get_files_for_date_inference(db: DBClient = Depends(get_db)):

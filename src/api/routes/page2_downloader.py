@@ -17,9 +17,8 @@ sys.path.insert(0, str(SRC_DIR))
 
 from fastapi import APIRouter, HTTPException, Request, BackgroundTasks, Depends
 
-from db.database import get_db_connection
-# V4 優化：移除 get_client，改為依賴注入
-# from db.client import get_client
+# V4 優化：移除 get_db_connection，全面改用依賴注入
+# from db.database import get_db_connection
 from db.client import DBClient
 from ..dependencies import get_db
 
@@ -28,25 +27,17 @@ from ..dependencies import get_db
 log = logging.getLogger(__name__)
 templates = Jinja2Templates(directory=str(SRC_DIR / "static"))
 router = APIRouter()
-# V4 優化：移除在模組加載時建立的客戶端實例。
-# DB_CLIENT = get_client()
+
 
 # --- API 端點 ---
 @router.get("/pending_urls")
-async def get_pending_urls():
+async def get_pending_urls(db: DBClient = Depends(get_db)):
     """
-    獲取所有狀態為 'pending' 的網址列表。
-    現在也會獲取作者和訊息時間等欄位，以便在前端表格中顯示。
+    (V4 優化後) 獲取所有狀態為 'pending' 的網址列表。
     """
     log.info("API: 收到獲取待處理網址列表的請求。")
-    conn = None
     try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute(
-            "SELECT id, url, author, message_date, message_time FROM extracted_urls WHERE status = 'pending' ORDER BY created_at DESC"
-        )
-        rows = cursor.fetchall()
+        rows = db.get_urls_by_statuses(statuses=['pending'])
         results = [
             {
                 "id": row['id'],
@@ -60,25 +51,20 @@ async def get_pending_urls():
         return JSONResponse(content=results)
     except Exception as e:
         log.error(f"API: 獲取待處理網址時發生錯誤: {e}", exc_info=True)
+        # 假設 DBClient 在出錯時會引發一個可捕獲的異常
+        if isinstance(e, (ConnectionError, RuntimeError)):
+             raise HTTPException(status_code=503, detail=f"資料庫服務通訊失敗: {e}")
         raise HTTPException(status_code=500, detail="獲取待處理網址時發生伺服器內部錯誤。")
-    finally:
-        if conn:
-            conn.close()
 
 
 @router.get("/completed")
-async def get_completed_downloads():
+async def get_completed_downloads(db: DBClient = Depends(get_db)):
     """
-    獲取所有狀態為 'completed' (已下載完成) 的檔案列表。
-    這是為了在頁面二顯示已完成的項目。
+    (V4 優化後) 獲取所有狀態為 'completed' (已下載完成) 的檔案列表。
     """
     log.info("API: 收到獲取已完成下載列表的請求。")
-    conn = None
     try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT id, url, local_path, created_at FROM extracted_urls WHERE status = 'completed' ORDER BY created_at DESC")
-        rows = cursor.fetchall()
+        rows = db.get_urls_by_statuses(statuses=['completed'])
         # 從 local_path 提取檔名，並確保 local_path 存在
         results = [
             {
@@ -92,10 +78,9 @@ async def get_completed_downloads():
         return JSONResponse(content=results)
     except Exception as e:
         log.error(f"API: 獲取已完成下載列表時發生錯誤: {e}", exc_info=True)
+        if isinstance(e, (ConnectionError, RuntimeError)):
+             raise HTTPException(status_code=503, detail=f"資料庫服務通訊失敗: {e}")
         raise HTTPException(status_code=500, detail="獲取已完成下載列表時發生伺服器內部錯誤。")
-    finally:
-        if conn:
-            conn.close()
 
 
 # --- Pydantic 模型 ---

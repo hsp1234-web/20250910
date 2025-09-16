@@ -13,13 +13,17 @@ from io import BytesIO
 SRC_DIR = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(SRC_DIR))
 
-from tools.url_extractor import parse_chat_log, save_urls_to_db
-from db.database import get_db_connection
+from tools.url_extractor import parse_chat_log
+# V4 優化：移除舊的資料庫連線方式
+# from db.database import get_db_connection
+from fastapi import Depends
+from db.client import DBClient
+from ..dependencies import get_db
 
 # --- 常數與設定 ---
 log = logging.getLogger(__name__)
 templates = Jinja2Templates(directory=str(SRC_DIR / "static"))
-router = APIRouter() # REMOVED prefix
+router = APIRouter()
 
 class UrlExtractionRequest(BaseModel):
     text: str
@@ -39,7 +43,8 @@ async def get_export_page(request: Request):
 
 # --- API 端點 ---
 @router.post("/api/page1/extract_urls", status_code=200)
-async def extract_urls_endpoint(payload: UrlExtractionRequest):
+async def extract_urls_endpoint(payload: UrlExtractionRequest, db: DBClient = Depends(get_db)):
+    """(V4 優化後) 提取 URL 並使用 DBClient 儲存。"""
     source_text = payload.text
     if not source_text.strip():
         raise HTTPException(status_code=400, detail="提供的文字不可為空。")
@@ -47,80 +52,60 @@ async def extract_urls_endpoint(payload: UrlExtractionRequest):
     try:
         parsed_data = parse_chat_log(source_text)
         if parsed_data:
-            with get_db_connection() as conn:
-                save_urls_to_db(parsed_data, source_text, conn)
+            # 使用新的 DBClient 方法
+            db.add_new_urls(parsed_data, source_text)
+        # 即使沒有新增資料，也回傳解析出的內容讓前端確認
         return JSONResponse(content=parsed_data)
     except Exception as e:
         log.error(f"處理網址提取請求時發生錯誤: {e}", exc_info=True)
+        if isinstance(e, (ConnectionError, RuntimeError)):
+             raise HTTPException(status_code=503, detail=f"資料庫服務通訊失敗: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/api/page1/overview_data")
 async def get_overview_data(
     start_date: Optional[str] = Query(None),
     end_date: Optional[str] = Query(None),
-    count_only: bool = Query(False)
+    count_only: bool = Query(False),
+    db: DBClient = Depends(get_db)
 ):
-    # 修正：將 'date' 欄位更正為 'message_date'
-    query = "SELECT id, url, author, message_date as date FROM extracted_urls"
-    filters = []
-    params = []
-
-    # 修正：篩選條件也應使用 'message_date'
-    if start_date:
-        filters.append("message_date >= ?")
-        params.append(start_date)
-    if end_date:
-        filters.append("message_date <= ?")
-        params.append(end_date)
-
-    if filters:
-        query += " WHERE " + " AND ".join(filters)
-
-    query += " ORDER BY created_at DESC"
-
+    """(V4 優化後) 使用 DBClient 獲取總覽資料。"""
     try:
-        with get_db_connection() as conn:
-            cursor = conn.cursor()
-            if count_only:
-                count_query = f"SELECT COUNT(*) FROM ({query})"
-                cursor.execute(count_query, params)
-                count = cursor.fetchone()[0]
-                return {"count": count}
-
-            cursor.execute(query, params)
-            rows = cursor.fetchall()
-            results = [{"id": r[0], "url": r[1], "author": r[2], "date": r[3]} for r in rows]
-            return JSONResponse(content=results)
+        results = db.get_filtered_urls(start_date=start_date, end_date=end_date)
+        if count_only:
+            return {"count": len(results)}
+        return JSONResponse(content=results)
     except Exception as e:
         log.error(f"查詢總覽資料時發生錯誤: {e}", exc_info=True)
+        if isinstance(e, (ConnectionError, RuntimeError)):
+             raise HTTPException(status_code=503, detail=f"資料庫服務通訊失敗: {e}")
         raise HTTPException(status_code=500, detail="資料庫查詢失敗")
 
 @router.get("/api/page1/export")
 async def export_data(
     format: str,
     start_date: Optional[str] = Query(None),
-    end_date: Optional[str] = Query(None)
+    end_date: Optional[str] = Query(None),
+    db: DBClient = Depends(get_db)
 ):
-    # 修正：將 'date' 和 'time' 欄位更正為 'message_date' 和 'message_time'
-    query = "SELECT message_date, message_time, author, url FROM extracted_urls"
-    filters = []
-    params = []
-    if start_date and start_date != '未設定':
-        filters.append("message_date >= ?")
-        params.append(start_date)
-    if end_date and end_date != '未設定':
-        filters.append("message_date <= ?")
-        params.append(end_date)
-    if filters:
-        query += " WHERE " + " AND ".join(filters)
-
-    query += " ORDER BY message_date, message_time"
-
+    """(V4 優化後) 使用 DBClient 獲取資料並匯出。"""
     try:
-        with get_db_connection() as conn:
-            df = pd.read_sql_query(query, conn, params=params)
+        # 獲取資料
+        results = db.get_filtered_urls(start_date=start_date, end_date=end_date)
+        # 將字典列表轉換為 DataFrame
+        df = pd.DataFrame(results)
+        # 為了匯出，將 'date' 欄位重新命名回 'message_date'
+        if 'date' in df.columns:
+            df.rename(columns={'date': 'message_date'}, inplace=True)
+        # 確保匯出欄位的順序與舊版一致
+        export_columns = ['message_date', 'author', 'url']
+        # 有些紀錄可能沒有 message_time，所以這裡不加入
+        df = df[export_columns]
+
     except Exception as e:
         log.error(f"匯出時讀取資料庫失敗: {e}", exc_info=True)
+        if isinstance(e, (ConnectionError, RuntimeError)):
+             raise HTTPException(status_code=503, detail=f"資料庫服務通訊失敗: {e}")
         raise HTTPException(status_code=500, detail="讀取資料庫失敗")
 
     if format == "excel":

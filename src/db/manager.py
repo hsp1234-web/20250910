@@ -60,12 +60,16 @@ ACTION_MAP = {
     "update_analysis_task": database.update_analysis_task,
     "get_all_analysis_tasks": database.get_all_analysis_tasks,
     "get_analysis_task": database.get_analysis_task,
+    "get_performance_dashboard_data": database.get_performance_dashboard_data, # V4 優化 (2025-09-18)
     "get_urls_by_hash": database.get_urls_by_hash,
     "get_analysis_task_by_file_id": database.get_analysis_task_by_file_id,
 
     # --- extracted_urls Actions (2025-09-13) ---
     "get_url_by_id": database.get_url_by_id,
     "update_url": database.update_url,
+    "get_urls_by_statuses": database.get_urls_by_statuses, # V4 優化 (2025-09-18)
+    "add_new_urls": database.add_new_urls, # V4 優化 (2025-09-18)
+    "get_filtered_urls": database.get_filtered_urls, # V4 優化 (2025-09-18)
 
     # For testing:
     "clear_all_tasks": database.clear_all_tasks,

@@ -139,6 +139,10 @@ class DBClient:
     def get_analysis_task(self, task_id: int) -> dict | None:
         return self._send_request("get_analysis_task", {"task_id": task_id})
 
+    def get_performance_dashboard_data(self) -> list[dict]:
+        """(V4 優化新增) 獲取儀表板數據。"""
+        return self._send_request("get_performance_dashboard_data")
+
     def get_urls_by_hash(self, file_hash: str) -> list[dict]:
         return self._send_request("get_urls_by_hash", {"file_hash": file_hash})
 
@@ -150,6 +154,18 @@ class DBClient:
 
     def update_url(self, url_id: int, updates: dict) -> bool:
         return self._send_request("update_url", {"url_id": url_id, "updates": updates})
+
+    def get_urls_by_statuses(self, statuses: list[str]) -> list[dict]:
+        """(V4 優化新增) 根據狀態列表獲取 URL 紀錄。"""
+        return self._send_request("get_urls_by_statuses", {"statuses": statuses})
+
+    def add_new_urls(self, parsed_data: list[dict], source_text: str) -> int:
+        """(V4 優化新增) 新增 URL 紀錄，並進行去重。"""
+        return self._send_request("add_new_urls", {"parsed_data": parsed_data, "source_text": source_text})
+
+    def get_filtered_urls(self, start_date: str = None, end_date: str = None) -> list[dict]:
+        """(V4 優化新增) 根據日期範圍獲取 URL 紀錄。"""
+        return self._send_request("get_filtered_urls", {"start_date": start_date, "end_date": end_date})
 
     def get_system_logs(self, levels: list[str] = None, sources: list[str] = None) -> list[dict]:
         return self._send_request("get_system_logs", {
