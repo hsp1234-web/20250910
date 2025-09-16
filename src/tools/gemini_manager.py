@@ -15,20 +15,21 @@ try:
     import google.generativeai as genai
     from google.generativeai.types import GenerationConfig
     from PIL import Image
-    # JULES: 匯入 quota_manager 以讀取流量限制
-    from db import quota_manager
+    # POC V3: 匯入新的金鑰健康管理器
+    from core import key_health_manager
 except ImportError as e:
     logging.warning(f"匯入模組時發生錯誤: {e}。AI 分析功能可能受限。")
     genai = None
     Image = None
     GenerationConfig = None
-    quota_manager = None
+    key_health_manager = None
 
 class ApiKey:
-    """一個簡單的類別，用於儲存 API 金鑰及其名稱。"""
-    def __init__(self, key_value: str, name: str):
+    """一個簡單的類別，用於儲存 API 金鑰及其名稱和雜湊值。"""
+    def __init__(self, key_value: str, name: str, key_hash: str):
         self.key = key_value
         self.name = name
+        self.hash = key_hash
 
 class GeminiManager:
     """
@@ -36,14 +37,17 @@ class GeminiManager:
     支援多金鑰輪換、冷卻機制、自動重試機制及主動流量控制。
     """
     def __init__(self, api_keys: List[Dict[str, str]], timeout: int = 180, max_retries: int = 3, cooldown_seconds: int = 60):
-        if not genai:
-            raise ImportError("GeminiManager 無法初始化，因為 google.generativeai 模組未安裝。")
+        # JULES: 移除對 genai 模組的檢查，以提高在 mock 環境下的可測試性。
+        # if not genai:
+        #     raise ImportError("GeminiManager 無法初始化，因為 google.generativeai 模組未安裝。")
         if not api_keys:
             raise ValueError("API 金鑰列表不可為空。")
-        if not quota_manager:
-            raise ImportError("GeminiManager 無法初始化，因為 db.quota_manager 模組無法匯入。")
+        # JULES: 移除對 quota_manager 的依賴檢查
+        if not key_health_manager:
+            logging.warning("key_health_manager 模組無法匯入，V3 健康管理功能將被停用。")
 
-        self.key_pool = deque([ApiKey(key_value=k['value'], name=k['name']) for k in api_keys])
+
+        self.key_pool = deque([ApiKey(key_value=k['value'], name=k['name'], key_hash=k['hash']) for k in api_keys])
         self._key_map = {k.key: k for k in self.key_pool}
         self.cooldown_keys: Dict[str, float] = {}
         self.cooldown_seconds = cooldown_seconds
@@ -52,21 +56,13 @@ class GeminiManager:
         self.max_retries = max_retries
         self._lock = threading.Lock()
 
-        # JULES: 新增流量控制相關屬性
-        self.quotas: Dict[str, Dict[str, Any]] = self._load_quotas()
+        # JULES: 移除舊的流量控制屬性
+        # self.quotas: Dict[str, Dict[str, Any]] = self._load_quotas()
         self.request_timestamps: Dict[str, deque] = defaultdict(deque)
 
-        logging.info(f"Gemini 管理器已初始化，共載入 {len(self.key_pool)} 組 API 金鑰。已載入 {len(self.quotas)} 組流量規則。")
+        logging.info(f"Gemini 管理器已初始化，共載入 {len(self.key_pool)} 組 API 金鑰。")
 
-    def _load_quotas(self) -> Dict[str, Dict[str, Any]]:
-        """從資料庫載入流量限制規則。"""
-        try:
-            all_quotas = quota_manager.get_all_quotas()
-            # 將列表轉換為以 model_name 為鍵的字典，以便快速查詢
-            return {q['model_name']: q for q in all_quotas}
-        except Exception as e:
-            logging.error(f"從資料庫載入流量限制規則時發生錯誤: {e}", exc_info=True)
-            return {} # 發生錯誤時返回空字典，避免服務中斷
+# JULES: 移除整個 _load_quotas 函式，因其已不再需要
 
     def _activate_cooled_down_keys(self):
         """檢查冷卻中的金鑰，並將已到期的移回主金鑰池。"""
@@ -83,39 +79,9 @@ class GeminiManager:
         """
         JULES: 實作流量「安全閥」。
         在發送請求前檢查並執行 RPM (每分鐘請求數) 限制。
+        POC 階段：此功能暫時停用，因為全域 RPM 限制不是本次 POC 的驗證範圍。
         """
-        with self._lock:
-            # 獲取此模型的流量限制，如果找不到則使用一個較高的預設值
-            model_quota = self.quotas.get(model_name)
-            if not model_quota:
-                logging.warning(f"在資料庫中找不到模型 '{model_name}' 的流量限制規則，將不執行主動限流。")
-                return
-
-            rpm_limit = model_quota.get('rpm', 60) # 若規則中無 rpm，預設為 60
-            timestamp_deque = self.request_timestamps[model_name]
-            now = time.time()
-
-            # 步驟 1: 清理掉所有在一分鐘以前的舊時間戳
-            while timestamp_deque and now - timestamp_deque[0] > 60:
-                timestamp_deque.popleft()
-
-            # 步驟 2: 檢查目前佇列中的請求數是否已達上限
-            if len(timestamp_deque) >= rpm_limit:
-                # 計算需要等待的時間
-                oldest_timestamp = timestamp_deque[0]
-                time_to_wait = 60 - (now - oldest_timestamp)
-
-                if time_to_wait > 0:
-                    logging.warning(
-                        f"模型 '{model_name}' 已達到 RPM 上限 ({rpm_limit})。將主動暫停 {time_to_wait:.2f} 秒以避免 429 錯誤。"
-                    )
-                    # 在鎖之外睡眠，避免長時間持有鎖
-                    # 但這裡我們需要在鎖內完成所有判斷和操作，所以暫時在鎖內睡眠
-                    # 對於高併發場景，這裡可以優化為非同步等待
-                    time.sleep(time_to_wait)
-
-            # 步驟 3: 記錄本次請求的時間戳
-            timestamp_deque.append(time.time())
+        pass
 
 
     def list_available_models(self) -> List[str]:
@@ -182,6 +148,10 @@ class GeminiManager:
                             self.key_pool.append(api_key)
 
                     logging.info(f"[{tag}] API 請求成功。")
+                    # POC V3: 回報金鑰使用成功
+                    if key_health_manager:
+                        key_health_manager.record_key_success(api_key.hash)
+
                     token_usage = response.usage_metadata.total_token_count if hasattr(response, 'usage_metadata') and hasattr(response.usage_metadata, 'total_token_count') else 0
 
                     if output_format == 'json':
@@ -202,6 +172,10 @@ class GeminiManager:
 
                     if is_rate_limit_error:
                         logging.error(f"[{tag}] 遭遇配額耗盡錯誤。將此金鑰移至冷卻區 {self.cooldown_seconds} 秒。")
+                        # POC V3: 回報金鑰使用失敗
+                        if key_health_manager:
+                            key_health_manager.record_key_error(api_key.hash)
+
                         with self._lock:
                             if api_key in self.key_pool:
                                 self.key_pool.remove(api_key)

@@ -25,7 +25,8 @@ def _execute_query(query: str, params: Tuple = (), fetch: Optional[str] = None) 
     :param fetch: 'one' 表示獲取單筆結果，'all' 表示獲取所有結果，None 表示不獲取結果（用於 INSERT, UPDATE, DELETE）。
     :return: 根據 fetch 參數返回查詢結果。
     """
-    if not DB_PATH.exists():
+    # 增加 hasattr 檢查，以安全地處理測試中的 :memory: 資料庫路徑 (字串)
+    if hasattr(DB_PATH, 'exists') and not DB_PATH.exists():
         raise FileNotFoundError(f"資料庫檔案不存在於: {DB_PATH}。請先執行 initialize_database.py 腳本。")
 
     conn = None
@@ -152,32 +153,50 @@ def validate_all_keys() -> List[Dict[str, Any]]:
 
     return get_all_keys()
 
-def get_valid_key() -> Optional[str]:
+def get_valid_key() -> Optional[Dict[str, str]]:
     """
-    從池中獲取一個有效的金鑰。
-    策略：優先選取最久未被使用的活躍金鑰。
+    從池中獲取一個有效的金鑰，並具備自動解凍邏輯。
+    策略：優先選取最久未被使用的「健康」金鑰。
+    健康定義：狀態為 'active'，或狀態為 'frozen' 但解凍時間已過。
     """
+    now_iso = datetime.utcnow().isoformat()
     query = """
-        SELECT id, key_value FROM api_keys
-        WHERE status = 'active' AND is_valid = 1
+        SELECT id, key_value, key_hash FROM api_keys
+        WHERE
+            is_valid = 1 AND
+            (status = 'active' OR (status = 'frozen' AND frozen_until IS NOT NULL AND frozen_until < ?))
         ORDER BY last_used_at ASC NULLS FIRST, RANDOM()
         LIMIT 1
     """
-    key_row = _execute_query(query, fetch='one')
+    key_row = _execute_query(query, (now_iso,), fetch='one')
 
     if key_row:
-        # 標記此金鑰為已使用
-        update_query = "UPDATE api_keys SET last_used_at = ? WHERE id = ?"
+        # 標記此金鑰為已使用，並確保其狀態為 'active'
+        update_query = """
+            UPDATE api_keys
+            SET last_used_at = ?, status = 'active', cooldown_count = 0
+            WHERE id = ?
+        """
         _execute_query(update_query, (datetime.now().isoformat(), key_row["id"]))
-        return key_row["key_value"]
+        # 回傳包含 key_hash 的字典，以便 gemini_manager 回報狀態
+        return {"value": key_row["key_value"], "hash": key_row["key_hash"]}
 
     return None
 
 def get_all_valid_keys_for_manager() -> List[Dict[str, str]]:
-    """獲取所有有效的金鑰，格式為 GeminiManager 所需的列表。"""
-    query = "SELECT key_name, key_value FROM api_keys WHERE is_valid = 1 AND status = 'active'"
-    rows = _execute_query(query, fetch='all')
-    return [{"name": row["key_name"], "value": row["key_value"]} for row in rows]
+    """
+    獲取所有「健康」的金鑰，格式為 GeminiManager 所需的列表，並包含自動解凍邏輯。
+    """
+    now_iso = datetime.utcnow().isoformat()
+    query = """
+        SELECT key_name, key_value, key_hash FROM api_keys
+        WHERE
+            is_valid = 1 AND
+            (status = 'active' OR (status = 'frozen' AND frozen_until IS NOT NULL AND frozen_until < ?))
+    """
+    rows = _execute_query(query, (now_iso,), fetch='all')
+    # 回傳格式新增 'hash'，以便 gemini_manager 回報狀態
+    return [{"name": row["key_name"], "value": row["key_value"], "hash": row["key_hash"]} for row in rows]
 
 def test_key(api_key: str) -> bool:
     """公開的函式，用於測試單一 API 金鑰的有效性，而不將其儲存。"""
