@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>頁面一</title>
+    <link rel="stylesheet" href="/static/css/nav.css">
+    <link rel="stylesheet" href="/static/css/page1.css">
+    <style>
+        #content-frame {
+            width: 100%;
+            border: none;
+            min-height: 80vh; /* 根據需要調整 */
+        }
+    </style>
+</head>
+<body>
+    <nav class="top-nav">
+        <ul>
+            <li><a href="/">鳳凰主頁</a></li>
+            <li><a href="/page1" class="active">資料擷取</a></li>
+            <li><a href="/page2">批次下載</a></li>
+            <li><a href="/page3">檔案處理</a></li>
+            <li><a href="/page4_stage1_ai">AI 分析</a></li>
+            <li><a href="/page5">備份管理</a></li>
+            <li><a href="/page6">金鑰管理</a></li>
+            <li><a href="/page7">提示詞管理</a></li>
+            <li><a href="/page9">績效儀表板</a></li>
+        </ul>
+    </nav>
+
+    <div class="content">
+        <!-- 副導覽列 -->
+        <nav class="sub-nav">
+            <ul>
+                <li><a href="/page1/ingestion" target="content-frame" class="active">資料擷取</a></li>
+                <li><a href="/page1/overview" target="content-frame">資料總覽</a></li>
+                <li><a href="/page1/export" target="content-frame">匯出選項</a></li>
+            </ul>
+        </nav>
+
+        <iframe id="content-frame" name="content-frame" src="/page1/ingestion"></iframe>
+    </div>
+
+    <script>
+        const subNavLinks = document.querySelectorAll('.sub-nav a');
+        const contentFrame = document.getElementById('content-frame');
+
+        subNavLinks.forEach(link => {
+            link.addEventListener('click', function(e) {
+                // 移除所有連結的 active class
+                subNavLinks.forEach(l => l.classList.remove('active'));
+                // 為點擊的連結添加 active class
+                this.classList.add('active');
+            });
+        });
+
+        // 監聽 iframe 的載入事件，以確保在子頁面載入後，父頁面的導覽列狀態是正確的
+        contentFrame.addEventListener('load', () => {
+            const currentSrc = contentFrame.contentWindow.location.pathname;
+            subNavLinks.forEach(link => {
+                if (link.getAttribute('href') === currentSrc) {
+                    link.classList.add('active');
+                } else {
+                    link.classList.remove('active');
+                }
+            });
+        });
+
+        const centerActiveNavButton = () => {
+            const activeNavButton = document.querySelector('.top-nav a.active');
+            if (activeNavButton) {
+                activeNavButton.scrollIntoView({
+                    behavior: 'smooth',
+                    inline: 'center',
+                    block: 'nearest'
+                });
+            }
+        };
+        setTimeout(centerActiveNavButton, 100);
+    </script>
+</body>
+</html>

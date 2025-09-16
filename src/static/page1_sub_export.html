@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>匯出選項</title>
+    <link rel="stylesheet" href="/static/css/nav.css">
+    <link rel="stylesheet" href="/static/css/page1.css">
+</head>
+<body>
+    <!-- 主導覽列將由 ui.py 統一管理 -->
+
+    <div class="content">
+        <!-- 副導覽列 -->
+        <nav class="sub-nav">
+            <ul>
+                <li><a href="/page1/ingestion">資料擷取</a></li>
+                <li><a href="/page1/overview">資料總覽</a></li>
+                <li><a href="/page1/export" class="active">匯出選項</a></li>
+            </ul>
+        </nav>
+
+        <h1>匯出選項</h1>
+
+        <!-- 確認篩選範圍 -->
+        <div class="filter-summary">
+            <p><strong>再次確認篩選範圍</strong></p>
+            <p>開始日期: <span id="start-date-summary">未設定</span></p>
+            <p>結束日期: <span id="end-date-summary">未設定</span></p>
+            <p>(共篩選出 <span id="record-count">N/A</span> 筆資料)</p>
+        </div>
+
+        <!-- 匯出格式按鈕 -->
+        <div class="export-options">
+            <h2>請選擇您想要的匯出格式:</h2>
+            <div class="export-grid">
+                <button class="export-button" data-format="pdf">匯出 PDF</button>
+                <button class="export-button" data-format="html">匯出 HTML</button>
+                <button class="export-button" data-format="docx">匯出 DOCX</button>
+                <button class="export-button" data-format="excel">匯出 EXCEL</button>
+                <button class="export-button" data-format="csv">匯出 CSV</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const exportButtons = document.querySelectorAll('.export-button');
+            const startDateSummary = document.getElementById('start-date-summary');
+            const endDateSummary = document.getElementById('end-date-summary');
+            const recordCount = document.getElementById('record-count');
+
+            // 從 URL 取得日期範圍 (假設從 overview 頁面跳轉過來)
+            const urlParams = new URLSearchParams(window.location.search);
+            const startDate = urlParams.get('start_date') || '未設定';
+            const endDate = urlParams.get('end_date') || '未設定';
+
+            startDateSummary.textContent = startDate;
+            endDateSummary.textContent = endDate;
+
+            // 獲取記錄數量
+            const fetchRecordCount = async () => {
+                let url = `/api/page1/overview_data?count_only=true`;
+                if (startDate !== '未設定') url += `&start_date=${startDate}`;
+                if (endDate !== '未設定') url += `&end_date=${endDate}`;
+
+                try {
+                    const response = await fetch(url);
+                    const data = await response.json();
+                    recordCount.textContent = data.count;
+                } catch (error) {
+                    recordCount.textContent = '無法取得';
+                }
+            };
+            fetchRecordCount();
+
+            exportButtons.forEach(button => {
+                button.addEventListener('click', () => {
+                    const format = button.dataset.format;
+                    let exportUrl = `/api/page1/export?format=${format}`;
+                    if (startDate !== '未設定') exportUrl += `&start_date=${startDate}`;
+                    if (endDate !== '未設定') exportUrl += `&end_date=${endDate}`;
+
+                    // 透過開啟新視窗來觸發下載
+                    window.open(exportUrl, '_blank');
+                });
+            });
+        });
+    </script>
+</body>
+</html>

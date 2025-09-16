@@ -16,8 +16,9 @@ async def serve_menu(request: Request):
 
 
 @router.get("/page1", response_class=HTMLResponse)
-async def serve_page1(request: Request):
-    return templates.TemplateResponse("page1_ingestion.html", {"request": request})
+async def read_page1_main(request: Request):
+    """ 主頁面，包含 IFrame """
+    return templates.TemplateResponse("page1.html", {"request": request})
 
 @router.get("/page2", response_class=HTMLResponse)
 async def serve_page2(request: Request):

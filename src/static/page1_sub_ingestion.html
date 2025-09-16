@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>資料擷取</title>
+    <link rel="stylesheet" href="/static/css/nav.css">
+    <link rel="stylesheet" href="/static/css/page1.css">
+</head>
+<body>
+    <div class="content">
+        <button id="submit-button-top">開始處理</button>
+        <h1>資料擷取與處理</h1>
+        <p>請在此處貼上來源文字:</p>
+
+        <textarea id="text-input" rows="20" placeholder="在此貼上來源文字..."></textarea>
+        <br>
+        <button id="submit-button-bottom">開始處理</button>
+
+        <div id="status-message" style="margin-top: 20px; font-weight: bold;"></div>
+
+        <!-- 結果顯示區域 -->
+        <div id="result-container" class="table-container">
+            <table id="result-table">
+                <thead>
+                    <tr>
+                        <th>日期</th>
+                        <th>時間</th>
+                        <th>作者</th>
+                        <th>連結</th>
+                    </tr>
+                </thead>
+                <tbody id="result-body">
+                    <!-- JS 動態填入 -->
+                </tbody>
+            </table>
+        </div>
+
+
+        <hr style="margin: 30px 0;">
+
+        <h2>查詢已提取的網址</h2>
+        <input type="text" id="search-input" placeholder="輸入關鍵字進行搜尋...">
+        <button id="search-button">查詢</button>
+        <div id="search-results" style="margin-top: 20px;"></div>
+    </div>
+
+    <script>
+        const textInput = document.getElementById('text-input');
+        const submitButtonTop = document.getElementById('submit-button-top');
+        const submitButtonBottom = document.getElementById('submit-button-bottom');
+        const statusMessage = document.getElementById('status-message');
+        const resultBody = document.getElementById('result-body');
+        const resultContainer = document.getElementById('result-container');
+
+        resultContainer.style.display = 'none';
+
+        const handleSubmit = async () => {
+            const text = textInput.value;
+            if (!text.trim()) {
+                statusMessage.textContent = '錯誤：輸入文字不可為空。';
+                statusMessage.style.color = 'red';
+                return;
+            }
+
+            statusMessage.textContent = '正在處理中，請稍候...';
+            statusMessage.style.color = 'blue';
+            resultBody.innerHTML = '';
+            resultContainer.style.display = 'none';
+
+            try {
+                const response = await fetch('/api/page1/extract_urls', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ text: text }),
+                });
+
+                if (!response.ok) {
+                    const errorResult = await response.json();
+                    throw new Error(errorResult.detail || '伺服器發生錯誤');
+                }
+
+                const result = await response.json();
+
+                if (result.length === 0) {
+                    statusMessage.textContent = '未在文字中找到可解析的「作者-連結」組合。';
+                    statusMessage.style.color = 'orange';
+                    return;
+                }
+
+                statusMessage.textContent = `成功解析到 ${result.length} 筆資料。`;
+                statusMessage.style.color = 'green';
+
+                result.forEach(item => {
+                    const row = document.createElement('tr');
+                    row.innerHTML = `
+                        <td>${item.date || '---'}</td>
+                        <td>${item.time}</td>
+                        <td>${item.author}</td>
+                        <td><a href="${item.url}" target="_blank" title="${item.url}">${item.url.length > 80 ? item.url.substring(0, 80) + '...' : item.url}</a></td>
+                    `;
+                    resultBody.appendChild(row);
+                });
+
+                resultContainer.style.display = 'block';
+
+            } catch (error) {
+                statusMessage.textContent = `發生錯誤：${error.message}`;
+                statusMessage.style.color = 'red';
+            }
+        };
+
+        submitButtonTop.addEventListener('click', handleSubmit);
+        submitButtonBottom.addEventListener('click', handleSubmit);
+    </script>
+</body>
+</html>
