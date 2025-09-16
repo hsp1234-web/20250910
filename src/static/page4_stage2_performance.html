@@ -199,7 +199,15 @@
                         let contentHtml = '';
 
                         // 處理圖表
-                        if (data && data.chart_html) {
+                        if (data && data.chart_base64) {
+                            // 使用 Base64 數據顯示 Matplotlib 圖表
+                            contentHtml += `
+                                <div class="performance-chart-container">
+                                    <img src="${data.chart_base64}" alt="績效分析圖表" style="max-width: 100%; height: auto; border: 1px solid #ddd;"/>
+                                </div>
+                            `;
+                        } else if (data && data.chart_html) {
+                            // 向下相容，如果舊的 plotly 圖表仍然存在
                             contentHtml += `<div class="performance-chart">${data.chart_html}</div>`;
                         } else {
                             contentHtml += `<p>此報告沒有可用的圖表。</p>`;

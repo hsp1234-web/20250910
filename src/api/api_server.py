@@ -134,6 +134,28 @@ async def notification_broadcaster(app: FastAPI):
             await asyncio.sleep(1)
 
 
+def install_system_fonts():
+    """
+    檢查並安裝系統級的字型，特別是支援 CJK 的字型。
+    這對於確保 Matplotlib 等工具能正確呈現中文至關重要。
+    """
+    log.info("正在檢查並安裝系統字型 (fonts-noto-cjk)...")
+    try:
+        # 首先更新套件列表，然後安裝字型
+        # 使用 -y 參數來自動確認安裝
+        subprocess.run(
+            "sudo apt-get update && sudo apt-get install -y fonts-noto-cjk",
+            shell=True, check=True, capture_output=True, text=True
+        )
+        log.info("✅ 系統字型 (fonts-noto-cjk) 已成功安裝或已是最新版本。")
+    except subprocess.CalledProcessError as e:
+        log.error(f"❌ 安裝系統字型時發生錯誤。返回碼: {e.returncode}")
+        log.error(f"   - Stderr: {e.stderr.strip()}")
+        log.error(f"   - Stdout: {e.stdout.strip()}")
+        # 即使失敗，也繼續執行，但警告圖表可能無法正確顯示
+    except Exception as e:
+        log.error(f"❌ 執行字型安裝時發生未預期的例外: {e}", exc_info=True)
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
@@ -141,6 +163,9 @@ async def lifespan(app: FastAPI):
     負責在啟動時初始化資源，在關閉時進行清理。
     """
     # --- 應用程式啟動時 ---
+    # 0. 安裝必要的系統級字型 (JULES FIX 2025-09-15)
+    install_system_fonts()
+
     # 1. 設定資料庫日誌
     setup_database_logging()
     log.info("資料庫日誌處理器已透過 lifespan 事件設定。")
