@@ -79,11 +79,14 @@ def handle_auto_mode(count: int):
                 continue
 
             print(f"🔄  正在新增金鑰 '{key_name}' (稍後驗證)...")
-            # 解決競爭條件：在啟動時只新增金鑰，不立即驗證。
-            # 驗證將由使用者在 UI 介面或 API 觸發，此時依賴已全部安裝。
-            key_manager.add_key(key_value, key_name, validate=False)
-            print(f"✅  成功新增金鑰 '{key_name}' 至設定檔。")
-            added_count += 1
+            # 使用重構後的 KeyManager 實例來手動新增金鑰
+            # 注意：key_manager 模組中的全域實例也叫做 key_manager
+            success = key_manager.key_manager.add_key_manually(key_name=key_name, key_value=key_value)
+            if success:
+                print(f"✅  成功將金鑰 '{key_name}' 注入系統。")
+                added_count += 1
+            else:
+                print(f"💥  注入金鑰 '{key_name}' 時發生錯誤。")
 
         except ValueError as e:
             print(f"🟡  跳過金鑰 '{key_name}'：{e}")
@@ -113,10 +116,13 @@ def handle_manual_mode(keys_string: str):
         key_name = f"Manual-Key-{i+1}"
         print(f"🔄  正在新增第 {i+1} 把手動金鑰 (稍後驗證)...")
         try:
-            # 解決競爭條件：在啟動時只新增金鑰，不立即驗證。
-            key_manager.add_key(key_value, key_name, validate=False)
-            print(f"✅  成功新增金鑰 '{key_name}' 至設定檔。")
-            added_count += 1
+            # 使用重構後的 KeyManager 實例來手動新增金鑰
+            success = key_manager.key_manager.add_key_manually(key_name=key_name, key_value=key_value)
+            if success:
+                print(f"✅  成功將金鑰 '{key_name}' 注入系統。")
+                added_count += 1
+            else:
+                print(f"💥  注入金鑰 '{key_name}' 時發生錯誤。")
         except ValueError as e:
             print(f"🟡  跳過第 {i+1} 把手動金鑰：{e}")
         except Exception as e:

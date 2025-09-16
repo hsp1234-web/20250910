@@ -1,246 +1,126 @@
 # src/core/key_manager.py
-import json
-import hashlib
 import os
 import sys
-import subprocess
-import time
+import logging
 from pathlib import Path
-from typing import List, Dict, Optional, Any
-from datetime import datetime
+from typing import List, Dict, Optional
 
 # --- 路徑修正 ---
+# 確保 db 模組可以被正確匯入
 SRC_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SRC_DIR))
 
-# --- 常數 ---
-SECRETS_DIR = SRC_DIR / "db" / "secrets"
-KEYS_FILE = SECRETS_DIR / "keys.json"
-IS_MOCK_MODE = os.environ.get("API_MODE", "real") == "mock"
-ROOT_DIR = SRC_DIR.parent
+# 由於這個模組現在需要與資料庫互動，我們需要匯入資料庫函式
+from db import database as db
 
-def _ensure_secrets_dir():
-    """確保儲存金鑰的目錄存在。"""
-    SECRETS_DIR.mkdir(parents=True, exist_ok=True)
+log = logging.getLogger(__name__)
 
-def _load_keys() -> List[Dict[str, Any]]:
-    """從 JSON 檔案載入金鑰列表。"""
-    _ensure_secrets_dir()
-    if not KEYS_FILE.is_file():
-        return []
-    try:
-        with open(KEYS_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except (json.JSONDecodeError, IOError):
-        return []
-
-def _save_keys(keys: List[Dict[str, Any]]):
-    """將金鑰列表儲存到 JSON 檔案。"""
-    _ensure_secrets_dir()
-    with open(KEYS_FILE, "w", encoding="utf-8") as f:
-        json.dump(keys, f, indent=4)
-
-def _hash_key(key: str) -> str:
-    """對金鑰進行 SHA256 雜湊，只取前 16 位以便於使用。"""
-    return hashlib.sha256(key.encode()).hexdigest()[:16]
-
-def _validate_single_key(api_key: str) -> bool:
+class KeyManager:
     """
-    呼叫 gemini_processor.py 工具來驗證單一金鑰的有效性。
-    此函式包含重試機制，以應對偶發性的網路或 API 錯誤。
+    一個基於資料庫的智慧型 API 金鑰管理器。
+    負責從環境變數載入金鑰、將金鑰值安全地儲存在記憶體中、
+    並透過資料庫來管理金鑰的狀態（活躍、冷卻、禁用）。
     """
-    tool_script_path = ROOT_DIR / "src" / "tools" / "gemini_processor.py"
-    cmd = [sys.executable, str(tool_script_path), "--command=validate_key"]
+    def __init__(self):
+        # 金鑰的實際值只儲存在記憶體中，絕不存入資料庫。
+        self._key_values: Dict[str, str] = {}
+        log.info("KeyManager 已初始化。")
 
-    env = os.environ.copy()
-    env["GOOGLE_API_KEY"] = api_key
+    def sync_keys_from_environment(self, count: int = 10) -> Dict:
+        """
+        從環境變數讀取 GOOGLE_API_KEY... 系列金鑰，
+        將其值存入記憶體，並將其名稱同步到資料庫。
+        """
+        log.info(f"正在從環境變數中同步最多 {count} 組 API 金鑰...")
+        base_key_name = "GOOGLE_API_KEY"
+        target_key_names = [base_key_name]
+        if count > 0:
+            target_key_names.extend([f"{base_key_name}_{i}" for i in range(1, count + 1)])
 
-    max_retries = 3
-    retry_delay_seconds = 2
+        found_keys = {}
+        for name in target_key_names:
+            value = os.environ.get(name)
+            if value:
+                found_keys[name] = value
 
-    for attempt in range(max_retries):
-        try:
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                encoding='utf-8',
-                env=env,
-                check=False,
-                timeout=45  # 為每個驗證子程序設定45秒超時
-            )
-            if result.returncode == 0:
-                # 驗證成功，立即返回 True
-                return True
+        if not found_keys:
+            log.warning("在環境變數中沒有找到任何 GOOGLE_API_KEY。")
+            return {"status": "未找到任何金鑰"}
 
-            # 如果失敗，記錄錯誤以供偵錯，然後準備重試
-            error_details = result.stderr or result.stdout or "無可用輸出。"
-            print(f"金鑰驗證嘗試 {attempt + 1}/{max_retries} 失敗。返回碼: {result.returncode}。錯誤: {error_details.strip()}", file=sys.stderr)
+        # 將金鑰值存入記憶體
+        self._key_values.update(found_keys)
+        log.info(f"已從環境變數載入 {len(found_keys)} 組金鑰到記憶體。")
 
-        except subprocess.TimeoutExpired:
-            print(f"金鑰驗證嘗試 {attempt + 1}/{max_retries} 超時。", file=sys.stderr)
-        except Exception as e:
-            print(f"金鑰驗證嘗試 {attempt + 1}/{max_retries} 發生未預期的例外: {e}", file=sys.stderr)
+        # 將金鑰名稱同步到資料庫
+        key_names_list = list(found_keys.keys())
+        success = db.sync_api_keys(key_names_list)
 
-        # 如果不是最後一次嘗試，則等待後重試
-        if attempt < max_retries - 1:
-            time.sleep(retry_delay_seconds)
+        return {
+            "status": "同步成功" if success else "同步失敗",
+            "found_keys": len(found_keys),
+            "synced_to_db": key_names_list
+        }
 
-    # 所有重試均告失敗
-    return False
+    def add_key_manually(self, key_name: str, key_value: str) -> bool:
+        """
+        手動新增單一金鑰，用於手動貼上等情境。
+        """
+        if not key_name or not key_value:
+            log.error("手動新增金鑰失敗：金鑰名稱和值不可為空。")
+            return False
 
-def get_all_keys() -> List[Dict[str, Any]]:
-    """獲取所有金鑰，但不包含金鑰本身，只包含其雜湊值和狀態。"""
-    keys = _load_keys()
-    # 為了安全，不直接回傳金鑰值
-    return [
-        {
-            "name": key.get("name", f"Key-{i+1}"),
-            "key_hash": key["key_hash"],
-            "is_valid": key.get("is_valid", False),
-            "last_validated": key.get("last_validated")
-        } for i, key in enumerate(keys)
-    ]
+        # 1. 將金鑰值存入記憶體
+        self._key_values[key_name] = key_value
+        log.info(f"已將手動金鑰 '{key_name}' 存入記憶體。")
 
-def add_key(key_value: str, key_name: Optional[str] = None, validate: bool = True) -> Dict[str, Any]:
-    """
-    新增一個金鑰到金鑰池。可選擇是否立即進行驗證。
+        # 2. 將金鑰名稱同步到資料庫
+        success = db.sync_api_keys([key_name])
+        if success:
+            log.info(f"已成功將手動金鑰 '{key_name}' 同步到資料庫。")
+        else:
+            log.error(f"手動金鑰 '{key_name}' 同步到資料庫失敗。")
 
-    :param validate: 如果為 True，則立即驗證金鑰。如果為 False，則將其標記為未驗證。
-    """
-    if not key_value or not key_value.strip():
-        raise ValueError("API 金鑰不可為空。")
+        return success
 
-    keys = _load_keys()
-    key_hash = _hash_key(key_value)
+    def get_key(self) -> Optional[Dict[str, str]]:
+        """
+        獲取一個可用的 API 金鑰。
+        這是給 GeminiManager 呼叫的主要函式。
+        """
+        # 從資料庫獲取一個可用金鑰的名稱
+        key_name = db.get_available_api_key()
 
-    if any(k["key_hash"] == key_hash for k in keys):
-        raise ValueError("此 API 金鑰已存在。")
+        if not key_name:
+            log.error("無法獲取可用金鑰：所有金鑰可能都在冷卻中或已被禁用。")
+            return None
 
-    is_valid = False
-    validation_time = None
-    if validate:
-        # 立即驗證金鑰
-        is_valid = _validate_single_key(key_value)
-        validation_time = datetime.now().isoformat()
-
-    new_key = {
-        "name": key_name or f"Key-{len(keys) + 1}",
-        "key_value": key_value,
-        "key_hash": key_hash,
-        "is_valid": is_valid,
-        "last_validated": validation_time
-    }
-    keys.append(new_key)
-    _save_keys(keys)
-
-    return {
-        "name": new_key["name"],
-        "key_hash": new_key["key_hash"],
-        "is_valid": new_key["is_valid"]
-    }
-
-def test_key(api_key: str) -> bool:
-    """
-    公開的函式，用於測試單一 API 金鑰的有效性，而不將其儲存。
-    """
-    if not api_key:
-        return False
-    return _validate_single_key(api_key)
-
-def delete_key(key_hash: str) -> bool:
-    """根據雜湊值從金鑰池中刪除一個金鑰。"""
-    keys = _load_keys()
-    keys_before = len(keys)
-    keys_after = [k for k in keys if k.get("key_hash") != key_hash]
-
-    if len(keys_after) < keys_before:
-        _save_keys(keys_after)
-        return True
-    return False
-
-def validate_all_keys() -> List[Dict[str, Any]]:
-    """重新驗證所有已儲存的金鑰。"""
-    keys = _load_keys()
-    for key in keys:
-        key["is_valid"] = _validate_single_key(key["key_value"])
-        key["last_validated"] = datetime.now().isoformat()
-    _save_keys(keys)
-    return get_all_keys()
-
-def get_valid_key() -> Optional[str]:
-    """從池中獲取一個有效的金鑰。"""
-    keys = _load_keys()
-    valid_keys = [k for k in keys if k.get("is_valid")]
-    if not valid_keys:
-        return None
-    # 簡單輪詢策略
-    return valid_keys[0]["key_value"]
-
-def get_all_valid_keys_for_manager() -> List[Dict[str, str]]:
-    """
-    獲取所有有效的金鑰，格式為 GeminiManager 所需的列表。
-    格式: [{'name': 'key_name', 'value': 'key_value'}, ...]
-    """
-    keys = _load_keys()
-    valid_keys = [k for k in keys if k.get("is_valid")]
-
-    manager_keys = [
-        {"name": key.get("name", f"Key-{i+1}"), "value": key["key_value"]}
-        for i, key in enumerate(valid_keys)
-    ]
-    return manager_keys
-
-def add_keys_from_environment(count: int) -> Dict[str, Any]:
-    """
-    從環境變數中讀取 API 金鑰並將其新增到金鑰池。
-    這是一個伺服器端的操作，用於「授權來源」模式。
-
-    :param count: 要嘗試讀取的金鑰數量。例如，count=2 會嘗試讀取
-                  GOOGLE_API_KEY, GOOGLE_API_KEY_1, GOOGLE_API_KEY_2。
-    :return: 一個包含操作結果的字典。
-    """
-    if not isinstance(count, int) or count < 0:
-        raise ValueError("金鑰數量必須是一個非負整數。")
-
-    # 金鑰名稱的基本部分
-    base_key_name = "GOOGLE_API_KEY"
-
-    # 建立要檢查的目標金鑰名稱列表
-    target_key_names = [base_key_name]
-    if count > 0:
-        target_key_names.extend([f"{base_key_name}_{i}" for i in range(1, count + 1)])
-
-    summary = {
-        "total_attempted": len(target_key_names),
-        "successfully_added": 0,
-        "already_existed": 0,
-        "not_found": 0,
-        "invalid_keys": 0,
-        "details": []
-    }
-
-    for key_name in target_key_names:
-        key_value = os.environ.get(key_name)
-
+        # 從記憶體中查找對應的金鑰值
+        key_value = self._key_values.get(key_name)
         if not key_value:
-            summary["not_found"] += 1
-            summary["details"].append({"name": key_name, "status": "未在環境變數中找到"})
-            continue
+            log.error(f"資料庫回傳金鑰 '{key_name}'，但在記憶體中找不到其對應的值！請檢查同步過程。")
+            return None
 
-        try:
-            result = add_key(key_value, key_name)
-            if result.get("is_valid"):
-                summary["successfully_added"] += 1
-                summary["details"].append({"name": key_name, "status": "成功新增並驗證"})
-            else:
-                summary["invalid_keys"] += 1
-                summary["details"].append({"name": key_name, "status": "新增但驗證失敗"})
-        except ValueError as e:
-            # 通常是 "此 API 金鑰已存在" 的錯誤
-            summary["already_existed"] += 1
-            summary["details"].append({"name": key_name, "status": "已存在，跳過"})
-        except Exception as e:
-            summary["details"].append({"name": key_name, "status": f"發生未預期錯誤: {e}"})
+        log.info(f"提供金鑰 '{key_name}' 供外部使用。")
+        return {"name": key_name, "value": key_value}
 
-    return summary
+    def set_key_cooldown(self, key_name: str, cooldown_seconds: int):
+        """
+        通知管理器將某個金鑰置於冷卻狀態。
+        """
+        log.warning(f"外部請求將金鑰 '{key_name}' 設為冷卻 {cooldown_seconds} 秒。")
+        db.set_api_key_cooldown(key_name, cooldown_seconds)
+
+    def get_key_statuses(self) -> List[Dict]:
+        """
+        從資料庫獲取所有金鑰的狀態，用於儀表板顯示。
+        """
+        return db.get_all_api_key_statuses()
+
+    def update_key_status(self, key_name: str, status: str) -> bool:
+        """
+        手動更新金鑰狀態（例如：禁用）。
+        """
+        return db.update_key_status_manually(key_name, status)
+
+# 建立一個全域實例，使其在應用程式中像單例一樣運作
+key_manager = KeyManager()
