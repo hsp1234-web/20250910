@@ -23,6 +23,7 @@ from core import key_manager, prompt_manager
 from core.time_utils import get_current_taipei_date_str
 from tools.gemini_manager import GeminiManager
 from tools.quantitative_analyzer import is_ticker_valid
+from tools.taiwan_stock_suffix_helper import SUFFIX_HELPER # JULES: 導入新的輔助工具
 
 # --- 常數與設定 ---
 log = logging.getLogger(__name__)
@@ -107,8 +108,13 @@ def _run_stage1_blocking_task(task_id: int, file_id: int, model_name: str, queue
 
         # 4. 【新增】驗證 AI 提取出的股票代號
         symbol = structured_data.get("symbol")
-        if not is_ticker_valid(symbol):
-            error_message = f"AI 提取的股票代號 '{symbol}' 無法通過 yfinance 驗證，可能已下市或無效。"
+
+        # JULES: 使用新的輔助工具校正台灣股票代號
+        corrected_symbol = SUFFIX_HELPER.get_corrected_symbol(symbol)
+
+        if not is_ticker_valid(corrected_symbol):
+            # 在錯誤訊息中同時顯示原始代號和校正後的代號，方便追蹤
+            error_message = f"AI 提取的股票代號 '{symbol}' (校正後為 '{corrected_symbol}') 無法通過 yfinance 驗證，可能已下市或無效。"
             log.warning(f"任務 {task_id}: {error_message}")
             DB_CLIENT.update_analysis_task(
                 task_id=task_id,
@@ -125,6 +131,9 @@ def _run_stage1_blocking_task(task_id: int, file_id: int, model_name: str, queue
                 json.dump(structured_data, f, ensure_ascii=False, indent=2)
             DB_CLIENT.update_analysis_task(task_id=task_id, updates={"stage1_json_path": str(json_path)})
             return # 終止此任務的後續流程
+
+        # JULES: 將校正後的代號存回 structured_data，以便後續階段使用
+        structured_data['symbol'] = corrected_symbol
 
         # 5. 儲存 JSON 結果到檔案
         json_filename = f"stage1_{task_id}_{uuid.uuid4().hex[:8]}.json"
