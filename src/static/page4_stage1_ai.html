@@ -124,6 +124,24 @@
                     'validation_failed': '❌ 代號無效'
                 };
 
+                // 獲取所有已完成任務的 symbol
+                const symbolPromises = tasks.map(task => {
+                    if (task.stage1_status === 'completed' && task.stage1_json_path) {
+                        return fetch(`/api/analyzer/stage1_result/${task.id}`)
+                            .then(res => res.ok ? res.json() : Promise.resolve({ symbol: '讀取錯誤' }))
+                            .then(data => ({ id: task.id, symbol: data.symbol || 'N/A' }))
+                            .catch(() => ({ id: task.id, symbol: '請求失敗' }));
+                    }
+                    return Promise.resolve({ id: task.id, symbol: null });
+                });
+
+                const symbols = await Promise.all(symbolPromises);
+                const symbolMap = symbols.reduce((acc, s) => {
+                    if (s.symbol) acc[s.id] = s.symbol;
+                    return acc;
+                }, {});
+
+
                 let cardsHtml = '';
                 tasks.forEach(task => {
                     const statusText = statusMap[task.stage1_status] || task.stage1_status;
@@ -132,6 +150,7 @@
                     const isFailed = task.stage1_status === 'failed' || task.stage1_status === 'validation_failed';
                     const fileId = task.source_document_id;
                     const taskId = task.id;
+                    const symbol = symbolMap[taskId] || 'N/A';
 
                     // JULES: Build retry UI if the task has failed
                     const retryUI = isFailed ? `
@@ -150,6 +169,7 @@
                             <div class="card-body">
                                 <div class="info-grid">
                                     <div class="info-item"><strong>狀態:</strong> <span class="status-badge">${statusText}</span></div>
+                                    <div class="info-item"><strong>分析標的:</strong> <span class="symbol-badge">${isCompleted ? symbol : 'N/A'}</span></div>
                                     <div class="info-item"><strong>模型:</strong> <span class="model-name">${task.stage1_model || 'N/A'}</span></div>
                                     <div class="info-item"><strong>Token 耗用:</strong> <span class="token-usage">${task.stage1_token_usage || 'N/A'}</span></div>
                                 </div>

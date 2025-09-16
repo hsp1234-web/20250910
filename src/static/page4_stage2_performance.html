@@ -42,6 +42,7 @@
                 <div class="action-group">
                     <button id="select-all-button">全選可分析項</button>
                     <button id="deselect-all-button">取消全選</button>
+                    <button id="toggle-all-charts-btn" style="display: none;">開啟所有圖表</button>
                 </div>
                 <div class="action-group">
                     <button id="start-analysis-btn" class="primary-action">📊 開始績效分析</button>
@@ -72,6 +73,9 @@
         const startAnalysisBtn = document.getElementById('start-analysis-btn');
         const statusArea = document.getElementById('status-area');
         const copyLogButton = document.getElementById('copy-log-button');
+        const toggleAllChartsBtn = document.getElementById('toggle-all-charts-btn');
+
+        let areAllChartsOpen = false;
 
         // --- Utility Functions ---
         const logStatus = (message, color = 'black') => {
@@ -90,8 +94,26 @@
 
                 if (tasks.length === 0) {
                     fileCardsContainer.innerHTML = '<p>目前沒有可進行績效分析的任務。請先完成日期推斷。</p>';
+                    toggleAllChartsBtn.style.display = 'none';
                     return;
                 }
+
+                // 獲取所有已完成任務的 symbol
+                const symbolPromises = tasks.map(task => {
+                    if (task.performance_status === 'completed' && task.stage1_json_path) {
+                        return fetch(`/api/analyzer/stage1_result/${task.id}`)
+                            .then(res => res.ok ? res.json() : Promise.resolve({ symbol: '讀取錯誤' }))
+                            .then(data => ({ id: task.id, symbol: data.symbol || 'N/A' }))
+                            .catch(() => ({ id: task.id, symbol: '請求失敗' }));
+                    }
+                    return Promise.resolve({ id: task.id, symbol: null });
+                });
+
+                const symbols = await Promise.all(symbolPromises);
+                const symbolMap = symbols.reduce((acc, s) => {
+                    if (s.symbol) acc[s.id] = s.symbol;
+                    return acc;
+                }, {});
 
                 const statusMap = {
                     'pending': '待分析',
@@ -102,13 +124,16 @@
                 };
 
                 let cardsHtml = '';
+                let completedCount = 0;
                 tasks.forEach(task => {
                     const status = task.performance_status || 'pending';
                     const statusText = statusMap[status] || status;
                     const isPending = status === 'pending';
                     const isCompleted = status === 'completed';
+                    if (isCompleted) completedCount++;
                     const isFailed = status === 'failed';
                     const taskId = task.id;
+                    const symbol = symbolMap[taskId] || 'N/A';
 
                     cardsHtml += `
                         <div class="file-card status-${status}" data-task-id="${taskId}">
@@ -119,7 +144,7 @@
                             <div class="card-body">
                                 <div class="info-grid">
                                     <div class="info-item"><strong>分析狀態:</strong> <span class="status-badge">${statusText}</span></div>
-                                    <div class="info-item"><strong>分析工具:</strong> <span class="model-name">yfinance (本地)</span></div>
+                                    <div class="info-item"><strong>分析標的:</strong> <span class="symbol-badge">${symbol}</span></div>
                                 </div>
                             </div>
                             <div class="card-footer">
@@ -133,9 +158,12 @@
                     `;
                 });
                 fileCardsContainer.innerHTML = cardsHtml;
+                toggleAllChartsBtn.style.display = completedCount > 0 ? 'inline-block' : 'none';
+
             } catch (error) {
                 logStatus(`載入任務列表失敗: ${error.message}`, 'red');
                 fileCardsContainer.innerHTML = `<p style="color:red;">載入任務列表失敗: ${error.message}</p>`;
+                toggleAllChartsBtn.style.display = 'none';
             }
         };
 
@@ -172,6 +200,50 @@
             }
         };
 
+        const toggleChart = async (button) => {
+            const card = button.closest('.file-card');
+            const viewer = card.querySelector('.json-viewer-container');
+            const taskId = button.dataset.taskId;
+
+            if (viewer.style.display === 'none') {
+                button.disabled = true;
+                button.textContent = '載入中...';
+                try {
+                    const response = await fetch(`/api/analyzer/stage2_result/${taskId}`);
+                    if (!response.ok) {
+                         const errorData = await response.json().catch(() => ({ detail: '無法解析錯誤訊息。' }));
+                         throw new Error(errorData.detail || `無法獲取績效報告 (HTTP ${response.status})`);
+                    }
+                    const data = await response.json();
+                    let contentHtml = '';
+                    if (data && data.chart_base64) {
+                        contentHtml += `<div class="performance-chart-container"><img src="${data.chart_base64}" alt="績效分析圖表" style="max-width: 100%; height: auto; border: 1px solid #ddd;"/></div>`;
+                    } else {
+                        contentHtml += `<p>此報告沒有可用的圖表。</p>`;
+                    }
+                    if (data && data.stats) {
+                        contentHtml += `<details class="performance-stats-details"><summary>顯示/隱藏詳細績效數據</summary><pre>${JSON.stringify(data.stats, null, 2)}</pre></details>`;
+                    }
+                    if (data && data.error) {
+                        contentHtml += `<div class="error-log-container"><strong class="error-title">分析錯誤:</strong><pre class="error-log">${data.error}</pre></div>`;
+                    }
+                    viewer.innerHTML = contentHtml;
+                    viewer.style.display = 'block';
+                    button.textContent = '隱藏報告';
+                } catch (error) {
+                    viewer.innerHTML = `<p style="color:red;">載入失敗: ${error.message}</p>`;
+                    viewer.style.display = 'block';
+                    button.textContent = '查看績效報告';
+                } finally {
+                    button.disabled = false;
+                }
+            } else {
+                viewer.style.display = 'none';
+                viewer.innerHTML = '';
+                button.textContent = '查看績效報告';
+            }
+        };
+
         // --- Event Listeners ---
         startAnalysisBtn.addEventListener('click', () => {
             const selectedIds = Array.from(document.querySelectorAll('.task-checkbox:checked')).map(cb => parseInt(cb.value, 10));
@@ -180,77 +252,26 @@
 
         fileCardsContainer.addEventListener('click', async (e) => {
             if (e.target.classList.contains('btn-performance')) {
-                const button = e.target;
-                const card = button.closest('.file-card');
-                const viewer = card.querySelector('.json-viewer-container');
-                const taskId = button.dataset.taskId;
-
-                if (viewer.style.display === 'none') {
-                    button.disabled = true;
-                    button.textContent = '載入中...';
-                    try {
-                        const response = await fetch(`/api/analyzer/stage2_result/${taskId}`);
-                        if (!response.ok) {
-                             const errorData = await response.json().catch(() => ({ detail: '無法解析錯誤訊息。' }));
-                             throw new Error(errorData.detail || `無法獲取績效報告 (HTTP ${response.status})`);
-                        }
-                        const data = await response.json();
-
-                        let contentHtml = '';
-
-                        // 處理圖表
-                        if (data && data.chart_base64) {
-                            // 使用 Base64 數據顯示 Matplotlib 圖表
-                            contentHtml += `
-                                <div class="performance-chart-container">
-                                    <img src="${data.chart_base64}" alt="績效分析圖表" style="max-width: 100%; height: auto; border: 1px solid #ddd;"/>
-                                </div>
-                            `;
-                        } else if (data && data.chart_html) {
-                            // 向下相容，如果舊的 plotly 圖表仍然存在
-                            contentHtml += `<div class="performance-chart">${data.chart_html}</div>`;
-                        } else {
-                            contentHtml += `<p>此報告沒有可用的圖表。</p>`;
-                        }
-
-                        // 處理績效統計數據
-                        if (data && data.stats) {
-                            contentHtml += `
-                                <details class="performance-stats-details">
-                                    <summary>顯示/隱藏詳細績效數據</summary>
-                                    <pre>${JSON.stringify(data.stats, null, 2)}</pre>
-                                </details>
-                            `;
-                        }
-
-                        // 處理錯誤訊息
-                        if (data && data.error) {
-                            contentHtml += `<div class="error-log-container"><strong class="error-title">分析錯誤:</strong><pre class="error-log">${data.error}</pre></div>`;
-                        }
-
-
-                        viewer.innerHTML = contentHtml;
-                        viewer.style.display = 'block';
-                        button.textContent = '隱藏報告';
-                    } catch (error) {
-                        viewer.innerHTML = `<p style="color:red;">載入失敗: ${error.message}</p>`;
-                        viewer.style.display = 'block';
-                        button.textContent = '查看績效報告';
-                    } finally {
-                        button.disabled = false;
-                    }
-                } else {
-                    viewer.style.display = 'none';
-                    viewer.innerHTML = '';
-                    button.textContent = '查看績效報告';
-                }
+                toggleChart(e.target);
             }
-
             if (e.target.classList.contains('btn-retry')) {
                 const button = e.target;
                 const taskId = parseInt(button.dataset.taskId, 10);
                 startAnalysisForTasks([taskId], button);
             }
+        });
+
+        toggleAllChartsBtn.addEventListener('click', () => {
+            areAllChartsOpen = !areAllChartsOpen;
+            toggleAllChartsBtn.textContent = areAllChartsOpen ? '收合所有圖表' : '開啟所有圖表';
+            const buttons = document.querySelectorAll('.file-card.status-completed .btn-performance');
+            buttons.forEach(btn => {
+                const viewer = btn.closest('.file-card').querySelector('.json-viewer-container');
+                const isChartOpen = viewer.style.display !== 'none';
+                if ((areAllChartsOpen && !isChartOpen) || (!areAllChartsOpen && isChartOpen)) {
+                    btn.click();
+                }
+            });
         });
 
         selectAllButton.addEventListener('click', () => document.querySelectorAll('.task-checkbox:not(:disabled)').forEach(cb => cb.checked = true));
@@ -274,11 +295,8 @@
             ws.onmessage = (event) => {
                 try {
                     const data = JSON.parse(event.data);
-                    if (data.task_type === 'analysis_stage_performance') {
-                         logStatus(`收到績效分析任務 #${data.task_id} 狀態更新: ${data.status}。正在刷新列表...`, 'purple');
-                         renderTaskList();
-                    } else if (data.task_type === 'analysis_stage_date_inference' && data.status === 'completed') {
-                         logStatus(`收到日期推斷任務 #${data.task_id} 完成通知，正在刷新列表...`, 'purple');
+                    if (data.task_type === 'analysis_stage_performance' || (data.task_type === 'analysis_stage_date_inference' && data.status === 'completed')) {
+                         logStatus(`收到任務 #${data.task_id} 狀態更新: ${data.status}。正在刷新列表...`, 'purple');
                          renderTaskList();
                     }
                 } catch (err) {

@@ -96,12 +96,12 @@ def to_float(value: any) -> float | None:
     except (ValueError, TypeError):
         return None
 
-def _generate_performance_chart_matplotlib(stock_df: pd.DataFrame, benchmark_df: pd.DataFrame) -> str:
+def _generate_performance_chart_matplotlib(stock_df: pd.DataFrame, benchmark_df: pd.DataFrame, symbol: str, benchmark_symbol: str = '^TWII') -> str:
     """
     使用 Matplotlib 產生權益曲線圖，並以 Base64 編碼的 PNG 格式回傳。
-    [2025-09-16] 為了解決字體缺字問題，所有標籤已改為英文。
+    【修改】: 增加 symbol 和 benchmark_symbol 參數以動態產生圖表標籤。
     """
-    log.info("正在使用 Matplotlib 生成績效圖表...")
+    log.info(f"正在為 {symbol} vs {benchmark_symbol} 生成績效圖表...")
 
     # 為避免潛在的環境問題，重設為預設值
     plt.rcdefaults()
@@ -113,15 +113,15 @@ def _generate_performance_chart_matplotlib(stock_df: pd.DataFrame, benchmark_df:
     stock_cumulative_return = (1 + stock_df['daily_return']).cumprod()
 
     # 繪製策略權益曲線
-    ax.plot(stock_cumulative_return.index, stock_cumulative_return, label='Strategy', color='royalblue', linewidth=2)
+    ax.plot(stock_cumulative_return.index, stock_cumulative_return, label=symbol, color='royalblue', linewidth=2)
 
     # 繪製大盤指數權益曲線
     if not benchmark_df.empty:
         benchmark_cumulative_return = (1 + benchmark_df['daily_return']).cumprod()
-        ax.plot(benchmark_cumulative_return.index, benchmark_cumulative_return, label='Market Benchmark (^TWII)', color='grey', linestyle='--', linewidth=2)
+        ax.plot(benchmark_cumulative_return.index, benchmark_cumulative_return, label=f'Benchmark ({benchmark_symbol})', color='grey', linestyle='--', linewidth=2)
 
-    # --- 圖表美化 (英文) ---
-    ax.set_title('Strategy vs. Market Benchmark', fontsize=16, fontweight='bold')
+    # --- 圖表美化 (使用動態標籤) ---
+    ax.set_title(f'{symbol} vs. Benchmark ({benchmark_symbol})', fontsize=16, fontweight='bold')
     ax.set_xlabel('Date', fontsize=12)
     ax.set_ylabel('Cumulative Return', fontsize=12)
     ax.legend(loc='upper left', fontsize=10)
@@ -212,7 +212,7 @@ def calculate_performance_stats(symbol: str, start_date: str, end_date: str = No
         log.info(f"代號 {symbol} 的績效計算完成。")
 
         # --- 圖表生成 ---
-        chart_base64 = _generate_performance_chart_matplotlib(stock_data, benchmark_data)
+        chart_base64 = _generate_performance_chart_matplotlib(stock_data, benchmark_data, symbol, '^TWII')
 
         # --- 彙整結果 ---
         final_results = {
