@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>頁面一</title>
+    <link rel="stylesheet" href="/static/css/nav.css">
+    <link rel="stylesheet" href="/static/css/page1_unified.css">
+    <style>
+        body {
+            background-color: #e9ecef; /* A slightly different bg for the main page */
+        }
+        .main-container {
+            max-width: 1400px;
+            margin: 20px auto;
+            padding: 20px;
+            background: var(--body-bg);
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        }
+        #content-frame {
+            width: 100%;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            min-height: 85vh;
+        }
+        .top-nav {
+            position: sticky;
+            top: 0;
+            z-index: 1000;
+        }
+    </style>
+</head>
+<body>
+    <nav class="top-nav">
+        <ul>
+            <li><a href="/">鳳凰主頁</a></li>
+            <li><a href="/page1" class="active">資料處理</a></li>
+            <li><a href="/page2">批次下載</a></li>
+            <li><a href="/page3">檔案處理</a></li>
+            <li><a href="/page4_stage1_ai">AI 分析</a></li>
+            <li><a href="/page5">備份管理</a></li>
+            <li><a href="/page6">金鑰管理</a></li>
+            <li><a href="/page7">提示詞管理</a></li>
+            <li><a href="/page9">績效儀表板</a></li>
+        </ul>
+    </nav>
+
+    <div class="main-container">
+        <nav class="sub-nav">
+            <a href="/page1/ingestion" target="content-frame" class="active">資料擷取</a>
+            <a href="/page1/overview" target="content-frame">資料總覽</a>
+            <a href="/page1/export" target="content-frame">匯出選項</a>
+        </nav>
+
+        <iframe id="content-frame" name="content-frame" src="/page1/ingestion" onload="adjustNav()"></iframe>
+    </div>
+
+    <script>
+        const subNavLinks = document.querySelectorAll('.sub-nav a');
+        const contentFrame = document.getElementById('content-frame');
+
+        const adjustNav = () => {
+            const currentPath = contentFrame.contentWindow.location.pathname;
+            subNavLinks.forEach(link => {
+                link.classList.toggle('active', link.getAttribute('href') === currentPath);
+            });
+        };
+
+        subNavLinks.forEach(link => {
+            link.addEventListener('click', function(e) {
+                setTimeout(adjustNav, 50); // Use timeout to wait for iframe src to update
+            });
+        });
+
+        // Also adjust on initial load
+        contentFrame.addEventListener('load', adjustNav);
+    </script>
+</body>
+</html>
