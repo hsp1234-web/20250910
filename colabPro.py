@@ -1,10 +1,13 @@
 # -*- coding: utf-8 -*-
 # ╔══════════════════════════════════════════════════════════════════╗
 # ║                                                                      ║
-# ║   ✨🐺 善狼一鍵啟動器 (v28) 🐺                                   ✨🐺 ║
+# ║   ✨🐺 善狼一鍵啟動器 (v28.1) 🐺                                 ✨🐺 ║
 # ║                                                                      ║
 # ╠══════════════════════════════════════════════════════════════════╣
 # ║                                                                      ║
+# ║ - V28.1 更新日誌 (2025-09-16):                                       ║
+# ║   - **增強日誌**: 為金鑰自動驗證流程添加更詳細的日誌記錄，以便追蹤   ║
+# ║     執行狀態並診斷潛在問題。                                       ║
 # ║ - V28 更新日誌 (2025-09-16):                                         ║
 # ║   - **修復金鑰驗證**: 調整金鑰驗證時的子程序環境，解決高階硬體上     ║
 # ║     因環境變數不完整而導致的驗證失敗問題。                         ║
@@ -12,7 +15,7 @@
 # ║                                                                      ║
 # ╚══════════════════════════════════════════════════════════════════╝
 
-#@title ✨🐺 善狼一鍵啟動器 (v28) - 終極簡化版 🐺 { vertical-output: true, display-mode: "form" }
+#@title ✨🐺 善狼一鍵啟動器 (v28.1) - 終極簡化版 🐺 { vertical-output: true, display-mode: "form" }
 #@markdown ---
 #@markdown ### **核心設定**
 #@markdown > **請確認以下兩個核心設定。**
@@ -135,7 +138,7 @@ class DisplayManager:
         self._thread = threading.Thread(target=self._run, daemon=True)
 
     def _build_output_buffer(self) -> list[str]:
-        output_buffer = ["✨🐺 善狼一鍵啟動器 (v28) 🐺", ""]
+        output_buffer = ["✨🐺 善狼一鍵啟動器 (v28.1) 🐺", ""]
         logs_to_display = self._log_manager.get_display_logs()
         for log in logs_to_display:
             ts = log['timestamp'].strftime('%H:%M:%S')
@@ -409,23 +412,32 @@ class ServerManager:
                     install_requirements(large_requirements, "功能與模型")
                     self._log_manager.log("SUCCESS", "[背景] ✅ 所有大型任務依賴均已成功安裝！")
 
-                    # --- JULES (2025-09-16): 自動觸發金鑰重新驗證 ---
-                    self._log_manager.log("INFO", "[背景] 所有依賴已就緒，準備自動觸發金鑰重新驗證...")
+                    # --- JULES (2025-09-16): 自動觸發金鑰重新驗證 (V2 增強版) ---
+                    self._log_manager.log("INFO", "[背景][驗證V2] 進入自動金鑰重新驗證區塊...")
+                    try:
+                        self._log_manager.log("INFO", "[背景][驗證V2] 正在等待伺服器就緒 (最長 60 秒)...")
+                        server_is_ready = self.server_ready_event.wait(timeout=60)
 
-                    # 等待主伺服器就緒
-                    if self.server_ready_event.wait(timeout=60):
-                        validation_url = f"http://127.0.0.1:{self.port}/api/keys/validate"
-                        self._log_manager.log("INFO", f"[背景] 正在向 {validation_url} 發送重新驗證請求...")
-                        try:
-                            response = requests.post(validation_url, timeout=180) # 驗證可能耗時較長
-                            if response.status_code == 200:
-                                self._log_manager.log("SUCCESS", "[背景] ✅ 自動重新驗證請求成功！請在主介面查看金鑰狀態。")
+                        if server_is_ready:
+                            self._log_manager.log("SUCCESS", "[背景][驗證V2] 伺服器已就緒！")
+                            if not self.port:
+                                self._log_manager.log("ERROR", "[背景][驗證V2] 伺服器已就緒但埠號 (port) 未設定，無法驗證。")
                             else:
-                                self._log_manager.log("WARN", f"[背景] 自動重新驗證請求失敗，狀態碼: {response.status_code}，回應: {response.text}")
-                        except Exception as req_e:
-                            self._log_manager.log("ERROR", f"[背景] 自動重新驗證請求時發生錯誤: {req_e}")
-                    else:
-                        self._log_manager.log("WARN", "[背景] 等待伺服器就緒超時，無法自動觸發金鑰驗證。")
+                                validation_url = f"http://127.0.0.1:{self.port}/api/keys/validate"
+                                self._log_manager.log("INFO", f"[背景][驗證V2] 正在向 {validation_url} 發送 POST 請求...")
+                                try:
+                                    response = requests.post(validation_url, timeout=180)
+                                    self._log_manager.log("SUCCESS", f"[背景][驗證V2] 請求完成，狀態碼: {response.status_code}")
+                                    if response.status_code != 200:
+                                        self._log_manager.log("WARN", f"[背景][驗證V2] 伺服器回應: {response.text}")
+                                except Exception as req_e:
+                                    self._log_manager.log("ERROR", f"[背景][驗證V2] 發送驗證請求時發生網路層錯誤: {req_e}", "requests")
+                        else:
+                            self._log_manager.log("WARN", "[背景][驗證V2] 等待伺服器就緒超時，無法自動觸發金鑰驗證。")
+                    except Exception as e_outer:
+                        self._log_manager.log("CRITICAL", f"[背景][驗證V2] 金鑰驗證區塊發生未預期的嚴重錯誤: {e_outer}")
+                    finally:
+                        self._log_manager.log("INFO", "[背景][驗證V2] 自動金鑰驗證區塊執行完畢。")
 
                 except Exception as e:
                     self._log_manager.log("CRITICAL", f"[背景] 大型依賴安裝失敗: {e}")
