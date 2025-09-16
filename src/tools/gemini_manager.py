@@ -1,19 +1,28 @@
 import logging
 import json
 import time
+import sys
 import threading
-from collections import deque
+from collections import deque, defaultdict
+from pathlib import Path
 from typing import List, Optional, Dict, Any
+
+# --- 路徑修正 ---
+SRC_DIR = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(SRC_DIR))
 
 try:
     import google.generativeai as genai
     from google.generativeai.types import GenerationConfig
     from PIL import Image
-except ImportError:
-    logging.warning("google-generativeai or pillow not found. AI analysis will be disabled.")
+    # JULES: 匯入 quota_manager 以讀取流量限制
+    from db import quota_manager
+except ImportError as e:
+    logging.warning(f"匯入模組時發生錯誤: {e}。AI 分析功能可能受限。")
     genai = None
     Image = None
     GenerationConfig = None
+    quota_manager = None
 
 class ApiKey:
     """一個簡單的類別，用於儲存 API 金鑰及其名稱。"""
@@ -24,72 +33,114 @@ class ApiKey:
 class GeminiManager:
     """
     管理與 Google Gemini API 的所有互動。
-    支援多金鑰輪換、冷卻機制和自動重試機制。
+    支援多金鑰輪換、冷卻機制、自動重試機制及主動流量控制。
     """
     def __init__(self, api_keys: List[Dict[str, str]], timeout: int = 180, max_retries: int = 3, cooldown_seconds: int = 60):
         if not genai:
             raise ImportError("GeminiManager 無法初始化，因為 google.generativeai 模組未安裝。")
         if not api_keys:
             raise ValueError("API 金鑰列表不可為空。")
+        if not quota_manager:
+            raise ImportError("GeminiManager 無法初始化，因為 db.quota_manager 模組無法匯入。")
 
         self.key_pool = deque([ApiKey(key_value=k['value'], name=k['name']) for k in api_keys])
-        self._key_map = {k.key: k for k in self.key_pool} # 預先建立金鑰對應表
-        self.cooldown_keys: Dict[str, float] = {}  # key_value -> cooldown_end_timestamp
+        self._key_map = {k.key: k for k in self.key_pool}
+        self.cooldown_keys: Dict[str, float] = {}
         self.cooldown_seconds = cooldown_seconds
 
         self.timeout = timeout
         self.max_retries = max_retries
         self._lock = threading.Lock()
-        logging.info(f"Gemini 管理器已初始化，共載入 {len(self.key_pool)} 組 API 金鑰。冷卻時間: {cooldown_seconds} 秒。")
+
+        # JULES: 新增流量控制相關屬性
+        self.quotas: Dict[str, Dict[str, Any]] = self._load_quotas()
+        self.request_timestamps: Dict[str, deque] = defaultdict(deque)
+
+        logging.info(f"Gemini 管理器已初始化，共載入 {len(self.key_pool)} 組 API 金鑰。已載入 {len(self.quotas)} 組流量規則。")
+
+    def _load_quotas(self) -> Dict[str, Dict[str, Any]]:
+        """從資料庫載入流量限制規則。"""
+        try:
+            all_quotas = quota_manager.get_all_quotas()
+            # 將列表轉換為以 model_name 為鍵的字典，以便快速查詢
+            return {q['model_name']: q for q in all_quotas}
+        except Exception as e:
+            logging.error(f"從資料庫載入流量限制規則時發生錯誤: {e}", exc_info=True)
+            return {} # 發生錯誤時返回空字典，避免服務中斷
 
     def _activate_cooled_down_keys(self):
         """檢查冷卻中的金鑰，並將已到期的移回主金鑰池。"""
         now = time.time()
-        # 使用 list(self.cooldown_keys.items()) 來避免在迭代時修改字典
         for key_value, cooldown_end in list(self.cooldown_keys.items()):
             if now >= cooldown_end:
-                # 從冷卻池中移除
                 del self.cooldown_keys[key_value]
-                # 從預先建立的對應表中尋找 ApiKey 物件
                 key_obj = self._key_map.get(key_value)
                 if key_obj:
                     self.key_pool.append(key_obj)
                     logging.info(f"金鑰 '{key_obj.name}' 已結束冷卻，返回可用金鑰池。")
 
-    def list_available_models(self) -> List[str]:
+    def _enforce_rate_limit(self, model_name: str):
         """
-        列出所有支援 'generateContent' 方法的可用 Gemini 模型。
-        會使用金鑰池中的一個金鑰來進行查詢。
+        JULES: 實作流量「安全閥」。
+        在發送請求前檢查並執行 RPM (每分鐘請求數) 限制。
         """
-        if not genai:
-            logging.warning("無法列出模型，因為 google.generativeai 未安裝。")
-            return []
+        with self._lock:
+            # 獲取此模型的流量限制，如果找不到則使用一個較高的預設值
+            model_quota = self.quotas.get(model_name)
+            if not model_quota:
+                logging.warning(f"在資料庫中找不到模型 '{model_name}' 的流量限制規則，將不執行主動限流。")
+                return
 
+            rpm_limit = model_quota.get('rpm', 60) # 若規則中無 rpm，預設為 60
+            timestamp_deque = self.request_timestamps[model_name]
+            now = time.time()
+
+            # 步驟 1: 清理掉所有在一分鐘以前的舊時間戳
+            while timestamp_deque and now - timestamp_deque[0] > 60:
+                timestamp_deque.popleft()
+
+            # 步驟 2: 檢查目前佇列中的請求數是否已達上限
+            if len(timestamp_deque) >= rpm_limit:
+                # 計算需要等待的時間
+                oldest_timestamp = timestamp_deque[0]
+                time_to_wait = 60 - (now - oldest_timestamp)
+
+                if time_to_wait > 0:
+                    logging.warning(
+                        f"模型 '{model_name}' 已達到 RPM 上限 ({rpm_limit})。將主動暫停 {time_to_wait:.2f} 秒以避免 429 錯誤。"
+                    )
+                    # 在鎖之外睡眠，避免長時間持有鎖
+                    # 但這裡我們需要在鎖內完成所有判斷和操作，所以暫時在鎖內睡眠
+                    # 對於高併發場景，這裡可以優化為非同步等待
+                    time.sleep(time_to_wait)
+
+            # 步驟 3: 記錄本次請求的時間戳
+            timestamp_deque.append(time.time())
+
+
+    def list_available_models(self) -> List[str]:
+        """列出所有支援 'generateContent' 方法的可用 Gemini 模型。"""
+        # ... (此函式不涉及高頻率呼叫，暫不加入流量控制) ...
+        if not genai: return []
         with self._lock:
             self._activate_cooled_down_keys()
-            if not self.key_pool:
-                raise ValueError(f"無法列出模型，因為金鑰池是空的 (可能有 {len(self.cooldown_keys)} 個金鑰正在冷卻)。")
+            if not self.key_pool: raise ValueError("金鑰池為空")
             api_key = self.key_pool[0]
-
-        logging.info(f"正在使用金鑰 '{api_key.name}' 查詢可用的模型...")
         try:
             genai.configure(api_key=api_key.key)
-            available_models = []
-            for m in genai.list_models():
-                if 'generateContent' in m.supported_generation_methods:
-                    available_models.append(m.name)
-            logging.info(f"查詢成功，找到 {len(available_models)} 個可用模型。")
-            return available_models
+            return [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
         except Exception as e:
-            logging.error(f"使用金鑰 '{api_key.name}' 查詢模型時發生錯誤: {e}", exc_info=True)
+            logging.error(f"查詢模型時發生錯誤: {e}", exc_info=True)
             raise e
 
     def _api_call_wrapper(self, task_name: str, model_name: str, prompt_content: List[Any], output_format: str = 'json'):
         if not genai:
-            return None, "google.generativeai not installed", "N/A"
+            return None, "google.generativeai not installed", "N/A", 0
+
+        # JULES: 在所有操作之前，先執行流量控制檢查
+        self._enforce_rate_limit(model_name)
 
         last_error = None
-
         with self._lock:
             self._activate_cooled_down_keys()
             keys_to_try = list(self.key_pool)
@@ -106,14 +157,14 @@ class GeminiManager:
             try:
                 genai.configure(api_key=api_key.key)
             except Exception as e:
-                logging.error(f"[{tag}] 設定金鑰時發生錯誤: {e}，跳過此金鑰。")
+                logging.error(f"[{tag}] 設定金鑰時發生錯誤: {e}，跳過此金鑰。", exc_info=True)
                 last_error = e
                 continue
 
             generation_config = GenerationConfig(response_mime_type="application/json") if output_format == 'json' else None
 
             for attempt in range(self.max_retries):
-                logging.info(f"[{tag}] 正在執行第 {attempt + 1}/{self.max_retries} 次嘗試 (模型: {model_name}, 格式: {output_format})...")
+                logging.info(f"[{tag}] 正在執行第 {attempt + 1}/{self.max_retries} 次嘗試...")
                 try:
                     model = genai.GenerativeModel(model_name)
                     response = model.generate_content(
@@ -131,18 +182,7 @@ class GeminiManager:
                             self.key_pool.append(api_key)
 
                     logging.info(f"[{tag}] API 請求成功。")
-                    # 嘗試獲取 token 使用量，採用更具防禦性的寫法
-                    token_usage = 0 # 預設為 0
-                    try:
-                        if hasattr(response, 'usage_metadata') and response.usage_metadata: # 確保 usage_metadata 存在且不為 None
-                            # 優先嘗試直接存取屬性
-                            if hasattr(response.usage_metadata, 'total_token_count'):
-                                token_usage = response.usage_metadata.total_token_count
-                            # 如果是舊版或不同格式，再嘗試 .get() 方法
-                            elif hasattr(response.usage_metadata, 'get'):
-                                token_usage = response.usage_metadata.get('total_token_count', 0)
-                    except Exception as e:
-                        logging.warning(f"無法從 usage_metadata 中獲取 token 消耗: {e}")
+                    token_usage = response.usage_metadata.total_token_count if hasattr(response, 'usage_metadata') and hasattr(response.usage_metadata, 'total_token_count') else 0
 
                     if output_format == 'json':
                         if raw_text.strip().startswith("```json"):
@@ -158,8 +198,6 @@ class GeminiManager:
                 except Exception as e:
                     last_error = e
                     last_error_str = f"{type(e).__name__}: {e}".lower()
-
-                    is_permanent_error = any(s in last_error_str for s in ["permission_denied", "invalid_api_key", "invalid_argument"])
                     is_rate_limit_error = any(s in last_error_str for s in ["quota", "resourceexhausted", "429"])
 
                     if is_rate_limit_error:
@@ -168,9 +206,9 @@ class GeminiManager:
                             if api_key in self.key_pool:
                                 self.key_pool.remove(api_key)
                                 self.cooldown_keys[api_key.key] = time.time() + self.cooldown_seconds
-                        break # 跳出內層重試迴圈，嘗試下一個金鑰
+                        break
 
-                    if is_permanent_error:
+                    if any(s in last_error_str for s in ["permission_denied", "invalid_api_key", "invalid_argument"]):
                         logging.error(f"[{tag}] 遭遇永久性錯誤: {last_error_str}。將立即嘗試下一個金鑰。")
                         break
 
@@ -179,59 +217,18 @@ class GeminiManager:
                         logging.warning(f"[{tag}] 遭遇暫時性錯誤: {last_error_str}，{wait_time} 秒後重試...");
                         time.sleep(wait_time)
                         continue
-
                     break
-
         logging.error(f"[{task_name}] 在嘗試了 {len(keys_to_try)} 組金鑰後，API 請求最終失敗。最後一個錯誤: {last_error}")
         return None, last_error, "all_keys_failed", 0
 
-    def prompt_for_json(self, prompt: str, model_name: str = "gemini-2.0-flash") -> Optional[Dict]:
-        """
-        使用自訂提示詞執行請求，並期望回傳一個 JSON 物件。
-        適用於第一階段的結構化資料提取。
-        """
-        # 說明：修改回傳值，使其從只回傳 result，變為回傳完整的 (result, error, used_key) 元組。
-        # 這是為了解決下游函式無法正確接收到錯誤狀態的問題。
+    def prompt_for_json(self, prompt: str, model_name: str = "gemini-2.0-flash") -> tuple:
         return self._api_call_wrapper(
-            task_name="PromptForJson",
-            model_name=model_name,
-            prompt_content=[prompt],
-            output_format='json'
+            task_name="PromptForJson", model_name=model_name,
+            prompt_content=[prompt], output_format='json'
         )
 
-    def prompt_for_text(self, prompt: str, model_name: str = "gemini-1.5-pro-latest") -> Optional[str]:
-        """
-        使用自訂提示詞執行請求，並期望回傳純文字 (例如 HTML)。
-        適用於第二階段的報告生成。
-        """
-        # 說明：同樣修改回傳值，使其回傳完整的 (result, error, used_key) 元組。
+    def prompt_for_text(self, prompt: str, model_name: str = "gemini-1.5-pro-latest") -> tuple:
         return self._api_call_wrapper(
-            task_name="PromptForText",
-            model_name=model_name,
-            prompt_content=[prompt],
-            output_format='text'
+            task_name="PromptForText", model_name=model_name,
+            prompt_content=[prompt], output_format='text'
         )
-
-    def analyze_text(self, text_content: str, model_name: str = "gemini-1.5-flash-latest") -> Optional[Dict]:
-        """【舊版，可選刪除】分析文字並回傳摘要和關鍵字。"""
-        prompt = f"你是一位專業的內容分析師。請閱讀以下文章，並以 JSON 格式回傳包含以下兩個鍵的物件：1. `summary` (string): 對文章內容的簡短摘要。2. `keywords` (list of strings): 從文章中提取的 3-5 個核心關鍵字。\\n\\n文章內容如下：\\n---\\n{text_content}\\n---\\n請直接回傳 JSON 物件，不要包含任何額外的解釋或 Markdown 標記。"
-        return self.prompt_for_json(prompt, model_name)
-
-    def describe_image(self, image_path: str, model_name: str = "gemini-1.5-flash-latest") -> Optional[Dict]:
-        """【舊版，可選刪除】描述圖片內容。"""
-        if not Image:
-            return None
-        try:
-            img = Image.open(image_path)
-        except Exception as e:
-            logging.error(f"無法開啟圖片檔案 '{image_path}': {e}")
-            return None
-
-        prompt = "你是一位圖像分析專家。請描述這張圖片的內容。如果它是一張圖表，請說明它的類型以及它可能在傳達的資訊。\\n請以 JSON 格式回傳包含以下兩個鍵的物件：1. `description` (string): 對圖片內容的詳細描述。2. `chart_type` (string): 如果是圖表，請指出其類型（例如 '長條圖', '折線圖', '圓餅圖'）。如果不是圖表，則回傳 '非圖表'。"
-        result, _, _ = self._api_call_wrapper(
-            task_name="DescribeImage",
-            model_name=model_name,
-            prompt_content=[prompt, img],
-            output_format='json'
-        )
-        return result
