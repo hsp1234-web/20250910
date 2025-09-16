@@ -22,7 +22,9 @@ from db.database import get_db_connection
 from core import key_manager, prompt_manager
 from core.time_utils import get_current_taipei_date_str
 from tools.gemini_manager import GeminiManager
-from tools.quantitative_analyzer import is_ticker_valid
+# JULES: 替換為新的全域驗證/尋找函式
+from tools.quantitative_analyzer import find_valid_yfinance_symbol
+from tools.taiwan_stock_suffix_helper import SUFFIX_HELPER # JULES: 導入新的輔助工具
 
 # --- 常數與設定 ---
 log = logging.getLogger(__name__)
@@ -105,10 +107,18 @@ def _run_stage1_blocking_task(task_id: int, file_id: int, model_name: str, queue
         if error:
             raise error
 
-        # 4. 【新增】驗證 AI 提取出的股票代號
-        symbol = structured_data.get("symbol")
-        if not is_ticker_valid(symbol):
-            error_message = f"AI 提取的股票代號 '{symbol}' 無法通過 yfinance 驗證，可能已下市或無效。"
+        # 4. 【JULES: 重構驗證流程】
+        raw_symbol = structured_data.get("symbol")
+
+        # 步驟 4.1: 優先使用台灣專用的輔助工具進行校正
+        corrected_for_tw_symbol = SUFFIX_HELPER.get_corrected_symbol(raw_symbol)
+
+        # 步驟 4.2: 使用新的全域尋找/驗證函式 (包含後綴重試邏輯)
+        valid_symbol = find_valid_yfinance_symbol(corrected_for_tw_symbol)
+
+        if not valid_symbol:
+            # 如果最終還是找不到，記錄詳細的錯誤訊息
+            error_message = f"AI 提取的股票代號 '{raw_symbol}' (經台灣後綴校正後為 '{corrected_for_tw_symbol}') 無法通過 yfinance 驗證，也無法在國際市場中找到對應代號。"
             log.warning(f"任務 {task_id}: {error_message}")
             DB_CLIENT.update_analysis_task(
                 task_id=task_id,
@@ -118,13 +128,17 @@ def _run_stage1_blocking_task(task_id: int, file_id: int, model_name: str, queue
                     "stage1_error_log": error_message
                 }
             )
-            # 雖然驗證失敗，但我們仍然儲存 JSON 以供除錯
+            # 儲存包含原始(錯誤)代號的 JSON 以供除錯
             json_filename = f"stage1_{task_id}_{uuid.uuid4().hex[:8]}_INVALID.json"
             json_path = TEMP_JSON_DIR / json_filename
             with open(json_path, "w", encoding="utf-8") as f:
                 json.dump(structured_data, f, ensure_ascii=False, indent=2)
             DB_CLIENT.update_analysis_task(task_id=task_id, updates={"stage1_json_path": str(json_path)})
             return # 終止此任務的後續流程
+
+        # JULES: 將最終找到的有效代號存回 structured_data，以便後續階段使用
+        log.info(f"任務 {task_id}: 原始代號 '{raw_symbol}' 最終被校正並驗證為 '{valid_symbol}'。")
+        structured_data['symbol'] = valid_symbol
 
         # 5. 儲存 JSON 結果到檔案
         json_filename = f"stage1_{task_id}_{uuid.uuid4().hex[:8]}.json"

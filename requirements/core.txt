@@ -9,3 +9,5 @@ python-dateutil==2.9.0.post0
 google-generativeai==0.8.5
 python-multipart==0.0.20
 Pillow==11.3.0
+twstock
+lxml
