@@ -134,6 +134,25 @@ textarea {
     margin: 0 0 10px 0;
 }
 
+/* --- Overview Page Specific --- */
+.filter-container {
+    display: flex;
+    align-items: center;
+    gap: 15px; /* Spacing between items */
+    flex-wrap: wrap; /* Allow wrapping on smaller screens */
+    margin-bottom: 20px;
+}
+
+.filter-container label {
+    font-weight: 500;
+}
+
+.filter-container input[type="date"] {
+    padding: 8px;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+}
+
 /* --- Ingestion Page Specific --- */
 .ingestion-buttons {
     display: flex;

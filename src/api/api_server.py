@@ -136,25 +136,45 @@ async def notification_broadcaster(app: FastAPI):
 
 def install_system_fonts():
     """
-    檢查並安裝系統級的字型，特別是支援 CJK 的字型。
+    [POC] 檢查並安裝系統級的 Noto CJK 字型，並強制更新字體快取。
     這對於確保 Matplotlib 等工具能正確呈現中文至關重要。
     """
-    log.info("正在檢查並安裝系統字型 (fonts-noto-cjk)...")
+    font_package = "fonts-noto-cjk"
+    log.info(f"--- [字體安裝 POC 開始] ---")
+    log.info(f"目標：安裝 '{font_package}' 以解決缺字問題。")
+
+    # 指令分為兩部分：安裝和更新快取
+    install_command = f"sudo apt-get update && sudo apt-get install -y {font_package}"
+    cache_command = "sudo fc-cache -fv"
+
     try:
-        # 首先更新套件列表，然後安裝字型
-        # 使用 -y 參數來自動確認安裝
-        subprocess.run(
-            "sudo apt-get update && sudo apt-get install -y fonts-noto-cjk",
-            shell=True, check=True, capture_output=True, text=True
+        log.info(f"執行安裝指令: `{install_command}`")
+        # 增加 timeout 以避免指令卡住
+        install_result = subprocess.run(
+            install_command, shell=True, check=True, capture_output=True, text=True, timeout=300
         )
-        log.info("✅ 系統字型 (fonts-noto-cjk) 已成功安裝或已是最新版本。")
+        log.info(f"✅ 字型套件 '{font_package}' 安裝成功。")
+        log.debug(f"   - 安裝程序輸出:\n{install_result.stdout.strip()}")
+
+        log.info(f"執行字體快取更新指令: `{cache_command}`")
+        cache_result = subprocess.run(
+            cache_command, shell=True, check=True, capture_output=True, text=True, timeout=120
+        )
+        log.info("✅ 系統字體快取已成功更新。")
+        log.debug(f"   - 快取更新程序輸出:\n{cache_result.stdout.strip()}")
+
+    except subprocess.TimeoutExpired as e:
+        log.error(f"❌ 執行 '{e.cmd}' 時發生超時錯誤。")
+        log.error("   - 這可能是因為網路緩慢或系統資源不足。")
     except subprocess.CalledProcessError as e:
-        log.error(f"❌ 安裝系統字型時發生錯誤。返回碼: {e.returncode}")
-        log.error(f"   - Stderr: {e.stderr.strip()}")
-        log.error(f"   - Stdout: {e.stdout.strip()}")
-        # 即使失敗，也繼續執行，但警告圖表可能無法正確顯示
+        log.error(f"❌ 執行 '{e.cmd}' 時發生錯誤。返回碼: {e.returncode}")
+        log.error(f"   - Stderr:\n{e.stderr.strip()}")
+        log.error(f"   - Stdout:\n{e.stdout.strip()}")
+        log.warning("字型安裝失敗，後續的圖表或PDF生成可能會有缺字或亂碼問題。")
     except Exception as e:
         log.error(f"❌ 執行字型安裝時發生未預期的例外: {e}", exc_info=True)
+    finally:
+        log.info("--- [字體安裝 POC 結束] ---")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

@@ -155,20 +155,37 @@ def save_urls_to_db(parsed_data: list[dict], source_text: str, conn: Optional[sq
     try:
         with db_conn:
             cursor = db_conn.cursor()
-            created_at_iso = get_current_taipei_time_iso()
 
-            # 準備要插入的多筆資料，現在包含作者、訊息日期和時間
+            # --- 步驟 1: 獲取資料庫中所有現存的 URL ---
+            cursor.execute("SELECT url FROM extracted_urls")
+            existing_urls = {row[0] for row in cursor.fetchall()}
+            log.info(f"資料庫中已存在 {len(existing_urls)} 個獨立的網址。")
+
+            # --- 步驟 2: 過濾掉已經存在的 URL ---
+            new_items = []
+            for item in parsed_data:
+                if item['url'] not in existing_urls:
+                    new_items.append(item)
+                    existing_urls.add(item['url']) # 也加入到集合中，以處理當前批次內的重複
+
+            if not new_items:
+                log.info("所有解析出的網址都已存在於資料庫中，無需新增。")
+                return
+
+            log.info(f"過濾後，有 {len(new_items)} 筆新網址需要儲存。")
+
+            # --- 步驟 3: 準備並插入新資料 ---
+            created_at_iso = get_current_taipei_time_iso()
             data_to_insert = [
                 (item['url'], item['author'], item['date'], item['time'], source_text, created_at_iso)
-                for item in parsed_data
+                for item in new_items
             ]
 
-            # 使用 executemany 來高效地插入多筆記錄
             cursor.executemany(
                 "INSERT INTO extracted_urls (url, author, message_date, message_time, source_text, created_at, status) VALUES (?, ?, ?, ?, ?, ?, 'pending')",
                 data_to_insert
             )
-        log.info(f"成功將 {len(parsed_data)} 筆解析資料儲存到資料庫。")
+        log.info(f"成功將 {len(data_to_insert)} 筆新的解析資料儲存到資料庫。")
     except sqlite3.Error as e:
         log.error(f"儲存解析資料到資料庫時發生錯誤: {e}", exc_info=True)
     finally:
