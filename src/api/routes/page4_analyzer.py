@@ -107,6 +107,10 @@ def _run_stage1_blocking_task(task_id: int, file_id: int, model_name: str, queue
         if error:
             raise error
 
+        # JULES: 記錄此金鑰的 token 使用量
+        if used_key and token_usage > 0:
+            key_manager.record_token_usage(key_name=used_key, tokens_used=token_usage)
+
         # 4. 【JULES: 重構驗證流程】
         raw_symbol = structured_data.get("symbol")
 
@@ -201,9 +205,13 @@ def _run_date_inference_blocking_task(task_id: int, model_name: str, queue: asyn
             today_date=get_current_taipei_date_str()
         )
 
-        inferred_date_str, error, _, token_usage = gemini.prompt_for_text(prompt=date_prompt, model_name=model_name)
+        inferred_date_str, error, used_key, token_usage = gemini.prompt_for_text(prompt=date_prompt, model_name=model_name)
         if error:
             raise error
+
+        # JULES: 記錄此金鑰的 token 使用量
+        if used_key and token_usage > 0:
+            key_manager.record_token_usage(key_name=used_key, tokens_used=token_usage)
 
         # 4. 驗證並儲存結果
         try:
@@ -337,6 +345,10 @@ def _run_stage2_blocking_task(task_id: int, model_name: str, queue: asyncio.Queu
         # 同樣，檢查並直接 raise 例外物件
         if error:
             raise error
+
+        # JULES: 記錄此金鑰的 token 使用量
+        if used_key and token_usage > 0:
+            key_manager.record_token_usage(key_name=used_key, tokens_used=token_usage)
 
         # 4. 儲存報告
         report_filename = f"report_{task_id}_{uuid.uuid4().hex[:8]}.html"
