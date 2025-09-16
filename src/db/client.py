@@ -172,17 +172,18 @@ class DBClient:
     def clear_all_tasks(self) -> bool:
         return self._send_request("clear_all_tasks")
 
-# --- 單例模式 ---
-# 這個模式保持不變，以確保整個應用程式共享同一個 DBClient 實例，
-# 從而有效地利用 httpx 的連線池。
-_client_instance = None
-
-def get_client():
-    """
-    提供一個單例的 DBClient 實例。
-    """
-    global _client_instance
-    if _client_instance is None:
-        log.info("正在建立一個新的 DBClient 實例...")
-        _client_instance = DBClient()
-    return _client_instance
+# --- V4 計畫書優化 (2025-09-18) ---
+#
+# 移除了舊有的 get_client() 單例模式。
+#
+# 原因：
+# 當使用 FastAPI 等現代化的依賴注入框架時，在模組級別維護一個全域單例物件
+# 是一種反模式。它使得依賴關係變得隱晦，且難以進行單元測試。
+#
+# 正確的作法是：
+# 1. 在應用程式的主進入點 (例如 api_server.py) 建立一個 DBClient 的實例。
+# 2. 透過 FastAPI 的依賴注入系統 (Depends)，將這個共享的實例提供給所有需要它的 API 路由。
+#
+# 這樣做可以讓 FastAPI 來管理物件的生命週期，使程式碼更清晰、更易於維護和測試。
+# 原本由 get_client() 提供的「正在建立一個新的 DBClient 實例...」日誌訊息，
+# 現在應該只會在 api_server.py 啟動時出現一次，這才是預期的行為。

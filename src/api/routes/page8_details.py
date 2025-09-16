@@ -15,12 +15,17 @@ SRC_DIR = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(SRC_DIR))
 
 # --- 核心模組匯入 ---
-from db.client import get_client
+# V4 優化：移除 get_client，改為依賴注入
+# from db.client import get_client
+from db.client import DBClient
+from ..api_server import get_db
+from fastapi import Depends
 
 # --- 常數與設定 ---
 log = logging.getLogger(__name__)
 router = APIRouter()
-DB_CLIENT = get_client()
+# V4 優化：移除在模組加載時建立的客戶端實例。
+# DB_CLIENT = get_client()
 # 為了安全性，定義允許存取的目錄
 ALLOWED_DIRS = [
     str(SRC_DIR.parent / "temp_json"),
@@ -30,33 +35,30 @@ ALLOWED_DIRS = [
 # --- API 端點 ---
 
 @router.get("/details/{file_hash}")
-async def get_file_details_by_hash(file_hash: str):
+async def get_file_details_by_hash(file_hash: str, db: DBClient = Depends(get_db)):
     """
-    根據檔案雜湊值，獲取檔案的完整生命週期資訊。
+    (V4 優化後) 根據檔案雜湊值，獲取檔案的完整生命週期資訊。
     """
     log.info(f"正在查詢 file_hash 為 {file_hash} 的詳細資訊...")
 
-    # 1. 根據 hash 獲取所有出現的紀錄
-    all_occurrences = DB_CLIENT.get_urls_by_hash(file_hash)
+    # V4 優化：使用透過 Depends 注入的共享 db 實例
+    all_occurrences = db.get_urls_by_hash(file_hash)
 
     if not all_occurrences:
         raise HTTPException(status_code=404, detail=f"找不到雜湊值為 {file_hash} 的檔案紀錄。")
 
-    # 2. 從第一筆紀錄中獲取 file_id，用以查詢分析任務
-    #    因為同一個 hash 對應的 file_id 應該是相同的
     primary_record = all_occurrences[0]
     file_id = primary_record.get("id")
 
     analysis_task = None
     if file_id:
-        analysis_task = DB_CLIENT.get_analysis_task_by_file_id(file_id)
+        analysis_task = db.get_analysis_task_by_file_id(file_id)
 
-    # 3. 組合回傳結果
     response_data = {
         "file_hash": file_hash,
-        "primary_record": primary_record, # 顯示主要的檔案資訊
-        "all_occurrences": all_occurrences, # 顯示所有來源
-        "analysis_task": analysis_task # 顯示 AI 分析狀態
+        "primary_record": primary_record,
+        "all_occurrences": all_occurrences,
+        "analysis_task": analysis_task
     }
 
     return response_data
