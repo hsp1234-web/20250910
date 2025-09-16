@@ -183,8 +183,11 @@ async def lifespan(app: FastAPI):
     負責在啟動時初始化資源，在關閉時進行清理。
     """
     # --- 應用程式啟動時 ---
-    # 0. 安裝必要的系統級字型 (JULES FIX 2025-09-15)
-    install_system_fonts()
+    # 0. (非同步) 安裝必要的系統級字型 (JULES FIX 2025-09-16)
+    # 將耗時的字型安裝操作移至背景執行緒，避免阻塞伺服器啟動
+    log.info("排程背景字型安裝任務...")
+    font_thread = threading.Thread(target=install_system_fonts, daemon=True)
+    font_thread.start()
 
     # 1. 設定資料庫日誌
     setup_database_logging()
