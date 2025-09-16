@@ -87,8 +87,8 @@
                 if (params.toString()) {
                     exportUrl += `?${params.toString()}`;
                 }
-                // 在父級視窗中導航到匯出頁面
-                window.parent.location.href = exportUrl;
+                // 在父級 iframe 中載入匯出頁面以保留主導覽列
+                window.parent.document.querySelector('[name="content-frame"]').src = exportUrl;
             });
 
             // 初始載入所有資料
