@@ -21,7 +21,8 @@ sys.path.insert(0, str(SRC_DIR))
 # from db.client import get_client
 from db.client import DBClient
 from ..dependencies import get_db
-from db.database import get_db_connection
+# V4 優化：移除 get_db_connection
+# from db.database import get_db_connection
 from core import key_manager, prompt_manager
 from core.time_utils import get_current_taipei_date_str
 from tools.gemini_manager import GeminiManager
@@ -560,29 +561,31 @@ async def start_stage2_analysis(request: Request, payload: Stage2Request, backgr
 @router.get("/files_for_stage1")
 async def get_files_for_stage1(db: DBClient = Depends(get_db)):
     """(V4 優化後) 獲取所有已處理、可供第一階段分析的檔案列表。"""
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT id, local_path, file_hash FROM extracted_urls WHERE status = 'processed' ORDER BY created_at DESC")
-    processed_files = cursor.fetchall()
-    conn.close()
+    try:
+        processed_files = db.get_urls_by_statuses(statuses=['processed'])
 
-    if not processed_files:
-        return []
+        if not processed_files:
+            return []
 
-    results = []
-    for file_row in processed_files:
-        file_id = file_row['id']
-        filename = Path(file_row['local_path']).name if file_row['local_path'] else f"未知檔案_{file_id}"
-        file_hash = file_row['file_hash']
+        results = []
+        for file_row in processed_files:
+            file_id = file_row['id']
+            filename = Path(file_row['local_path']).name if file_row['local_path'] else f"未知檔案_{file_id}"
+            file_hash = file_row['file_hash']
 
-        task_data = db.create_or_get_analysis_task(file_id=file_id, filename=filename)
+            task_data = db.create_or_get_analysis_task(file_id=file_id, filename=filename)
 
-        if task_data:
-            task_data['source_document_id'] = file_id
-            task_data['file_hash'] = file_hash
-            results.append(task_data)
+            if task_data:
+                task_data['source_document_id'] = file_id
+                task_data['file_hash'] = file_hash
+                results.append(task_data)
 
-    return results
+        return results
+    except Exception as e:
+        log.error(f"API: 獲取待分析檔案列表時出錯: {e}", exc_info=True)
+        if isinstance(e, (ConnectionError, RuntimeError)):
+             raise HTTPException(status_code=503, detail=f"資料庫服務通訊失敗: {e}")
+        raise HTTPException(status_code=500, detail="獲取待分析檔案列表時發生伺服器內部錯誤。")
 
 @router.get("/files_for_date_inference")
 async def get_files_for_date_inference(db: DBClient = Depends(get_db)):

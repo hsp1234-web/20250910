@@ -746,7 +746,70 @@ def update_url(url_id: int, updates: dict) -> bool:
         if conn:
             conn.close()
 
+
+def get_urls_by_statuses(statuses: list[str]) -> list[dict]:
+    """根據狀態列表獲取所有相關的 URL 紀錄。"""
+    if not statuses:
+        return []
+
+    conn = get_db_connection()
+    if not conn: return []
+
+    try:
+        # 為 IN 子句建立一個佔位符字串
+        placeholders = ','.join(['?'] * len(statuses))
+        # 2025-09-18 V4 優化：查詢所有欄位以滿足不同頁面的需求
+        sql = f"SELECT * FROM extracted_urls WHERE status IN ({placeholders}) ORDER BY created_at DESC"
+
+        cursor = conn.cursor()
+        cursor.execute(sql, statuses)
+        rows = cursor.fetchall()
+        return [dict(row) for row in rows]
+    except sqlite3.Error as e:
+        log.error(f"❌ 根據 statuses {statuses} 查詢 URLs 時發生錯誤: {e}", exc_info=True)
+        return []
+    finally:
+        if conn:
+            conn.close()
+
+
 # --- 結束 ---
+
+
+def get_performance_dashboard_data() -> list[dict]:
+    """
+    (V4 優化新增) 獲取績效儀表板所需的所有數據。
+    使用 JOIN 查詢以避免 N+1 問題。
+    """
+    sql = """
+        SELECT
+            at.id,
+            at.stage1_json_path,
+            eu.author,
+            eu.message_date
+        FROM
+            analysis_tasks at
+        JOIN
+            extracted_urls eu ON at.file_id = eu.id
+        WHERE
+            at.performance_status = 'completed' AND at.stage1_json_path IS NOT NULL
+        ORDER BY
+            at.created_at DESC
+    """
+    conn = get_db_connection()
+    if not conn: return []
+
+    try:
+        cursor = conn.cursor()
+        cursor.execute(sql)
+        rows = cursor.fetchall()
+        return [dict(row) for row in rows]
+    except sqlite3.Error as e:
+        log.error(f"獲取儀表板數據時發生錯誤: {e}", exc_info=True)
+        return []
+    finally:
+        if conn:
+            conn.close()
 
 
 # --- 新增：檔案總覽頁面專用函式 (2025-09-13) ---
@@ -781,6 +844,97 @@ def get_analysis_task_by_file_id(file_id: int) -> dict | None:
     except sqlite3.Error as e:
         log.error(f"❌ 根據 file_id {file_id} 查詢分析任務時發生錯誤: {e}", exc_info=True)
         return None
+    finally:
+        if conn:
+            conn.close()
+
+
+def add_new_urls(parsed_data: list[dict], source_text: str) -> int:
+    """
+    (V4 優化新增) 將解析後的結構化資料儲存到資料庫，並進行去重。
+    返回新增的紀錄數量。
+    """
+    if not parsed_data:
+        log.info("沒有要儲存的資料，跳過資料庫操作。")
+        return 0
+
+    conn = get_db_connection()
+    if not conn:
+        log.error("無法建立資料庫連線，資料儲存失敗。")
+        return 0
+
+    try:
+        with conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT url FROM extracted_urls")
+            existing_urls = {row[0] for row in cursor.fetchall()}
+
+            new_items = []
+            for item in parsed_data:
+                if item['url'] not in existing_urls:
+                    new_items.append(item)
+                    existing_urls.add(item['url'])
+
+            if not new_items:
+                log.info("所有解析出的網址都已存在於資料庫中，無需新增。")
+                return 0
+
+            # 延遲匯入以避免循環依賴
+            from core.time_utils import get_current_taipei_time_iso
+            created_at_iso = get_current_taipei_time_iso()
+            data_to_insert = [
+                (item['url'], item['author'], item['date'], item['time'], source_text, created_at_iso)
+                for item in new_items
+            ]
+
+            cursor.executemany(
+                "INSERT INTO extracted_urls (url, author, message_date, message_time, source_text, created_at, status) VALUES (?, ?, ?, ?, ?, ?, 'pending')",
+                data_to_insert
+            )
+
+        count = len(data_to_insert)
+        log.info(f"成功將 {count} 筆新的解析資料儲存到資料庫。")
+        return count
+    except sqlite3.Error as e:
+        log.error(f"儲存解析資料到資料庫時發生錯誤: {e}", exc_info=True)
+        return 0
+    finally:
+        if conn:
+            conn.close()
+
+
+def get_filtered_urls(start_date: str = None, end_date: str = None) -> list[dict]:
+    """
+    (V4 優化新增) 根據日期範圍獲取 URL 紀錄。
+    """
+    query = "SELECT id, url, author, message_date FROM extracted_urls"
+    filters = []
+    params = []
+
+    if start_date:
+        filters.append("message_date >= ?")
+        params.append(start_date)
+    if end_date:
+        filters.append("message_date <= ?")
+        params.append(end_date)
+
+    if filters:
+        query += " WHERE " + " AND ".join(filters)
+
+    query += " ORDER BY created_at DESC"
+
+    conn = get_db_connection()
+    if not conn: return []
+
+    try:
+        cursor = conn.cursor()
+        cursor.execute(query, params)
+        rows = cursor.fetchall()
+        # 前端需要 'date' 鍵，所以在回傳時進行轉換
+        return [{"id": r["id"], "url": r["url"], "author": r["author"], "date": r["message_date"]} for r in rows]
+    except sqlite3.Error as e:
+        log.error(f"查詢總覽資料時發生錯誤: {e}", exc_info=True)
+        return []
     finally:
         if conn:
             conn.close()
