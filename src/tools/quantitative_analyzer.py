@@ -57,14 +57,13 @@ def to_float(value: any) -> float | None:
 def _generate_performance_chart_matplotlib(stock_df: pd.DataFrame, benchmark_df: pd.DataFrame) -> str:
     """
     使用 Matplotlib 產生權益曲線圖，並以 Base64 編碼的 PNG 格式回傳。
+    [2025-09-16] 為了解決字體缺字問題，所有標籤已改為英文。
     """
     log.info("正在使用 Matplotlib 生成績效圖表...")
 
-    # --- 字型設定 ---
-    # 為支援中文，使用 'Noto Sans TC'。需確保此字型存在於系統中。
-    # 另一種方式是讓 matplotlib 自動尋找可用字體，但可能不穩定。
-    plt.rcParams['font.sans-serif'] = ['Noto Sans TC', 'sans-serif']
-    plt.rcParams['axes.unicode_minus'] = False # 解決負號顯示問題
+    # 為避免潛在的環境問題，重設為預設值
+    plt.rcdefaults()
+    matplotlib.rcParams['axes.unicode_minus'] = False # 解決負號顯示問題
 
     fig, ax = plt.subplots(figsize=(10, 5), dpi=100)
 
@@ -72,17 +71,17 @@ def _generate_performance_chart_matplotlib(stock_df: pd.DataFrame, benchmark_df:
     stock_cumulative_return = (1 + stock_df['daily_return']).cumprod()
 
     # 繪製策略權益曲線
-    ax.plot(stock_cumulative_return.index, stock_cumulative_return, label='策略權益曲線', color='royalblue', linewidth=2)
+    ax.plot(stock_cumulative_return.index, stock_cumulative_return, label='Strategy', color='royalblue', linewidth=2)
 
     # 繪製大盤指數權益曲線
     if not benchmark_df.empty:
         benchmark_cumulative_return = (1 + benchmark_df['daily_return']).cumprod()
-        ax.plot(benchmark_cumulative_return.index, benchmark_cumulative_return, label='大盤指數 (^TWII)', color='grey', linestyle='--', linewidth=2)
+        ax.plot(benchmark_cumulative_return.index, benchmark_cumulative_return, label='Market Benchmark (^TWII)', color='grey', linestyle='--', linewidth=2)
 
-    # --- 圖表美化 ---
-    ax.set_title('策略權益曲線 vs. 大盤指數', fontsize=16, fontweight='bold')
-    ax.set_xlabel('日期', fontsize=12)
-    ax.set_ylabel('累積報酬', fontsize=12)
+    # --- 圖表美化 (英文) ---
+    ax.set_title('Strategy vs. Market Benchmark', fontsize=16, fontweight='bold')
+    ax.set_xlabel('Date', fontsize=12)
+    ax.set_ylabel('Cumulative Return', fontsize=12)
     ax.legend(loc='upper left', fontsize=10)
     ax.grid(True, linestyle='--', alpha=0.6)
     fig.autofmt_xdate() # 自動旋轉日期標籤

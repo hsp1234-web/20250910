@@ -60,15 +60,17 @@ async def get_overview_data(
     end_date: Optional[str] = Query(None),
     count_only: bool = Query(False)
 ):
-    query = "SELECT id, url, author, date FROM extracted_urls"
+    # 修正：將 'date' 欄位更正為 'message_date'
+    query = "SELECT id, url, author, message_date as date FROM extracted_urls"
     filters = []
     params = []
 
+    # 修正：篩選條件也應使用 'message_date'
     if start_date:
-        filters.append("date >= ?")
+        filters.append("message_date >= ?")
         params.append(start_date)
     if end_date:
-        filters.append("date <= ?")
+        filters.append("message_date <= ?")
         params.append(end_date)
 
     if filters:
@@ -99,19 +101,20 @@ async def export_data(
     start_date: Optional[str] = Query(None),
     end_date: Optional[str] = Query(None)
 ):
-    query = "SELECT date, time, author, url FROM extracted_urls"
+    # 修正：將 'date' 和 'time' 欄位更正為 'message_date' 和 'message_time'
+    query = "SELECT message_date, message_time, author, url FROM extracted_urls"
     filters = []
     params = []
     if start_date and start_date != '未設定':
-        filters.append("date >= ?")
+        filters.append("message_date >= ?")
         params.append(start_date)
     if end_date and end_date != '未設定':
-        filters.append("date <= ?")
+        filters.append("message_date <= ?")
         params.append(end_date)
     if filters:
         query += " WHERE " + " AND ".join(filters)
 
-    query += " ORDER BY date, time"
+    query += " ORDER BY message_date, message_time"
 
     try:
         with get_db_connection() as conn:
@@ -138,9 +141,10 @@ async def export_data(
             headers={"Content-Disposition": "attachment; filename=export.csv"}
         )
     else:
-        content = f"此為 {format} 格式的預留位置匯出。\n\n篩選範圍:\n開始日期: {start_date}\n結束日期: {end_date}\n\n資料內容:\n{df.to_string()}"
+        # 對於純文字預留位置，明確使用 utf-8-sig 編碼以包含BOM，防止在 Windows 上出現亂碼
+        content = f"此為 {format} 格式的預留位置匯出。\n\n篩選範圍:\n開始日期: {start_date or '未設定'}\n結束日期: {end_date or '未設定'}\n\n資料內容:\n{df.to_string()}"
         return Response(
-            content=content,
-            media_type="text/plain",
+            content=content.encode('utf-8-sig'),
+            media_type="text/plain; charset=utf-8",
             headers={"Content-Disposition": f"attachment; filename=export.{format}.txt"}
         )
