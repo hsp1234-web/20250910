@@ -344,13 +344,30 @@ class ServerManager:
                     # 根據 force_pip 決定是否嘗試使用 uv
                     use_uv = not force_pip and Path("./uv").is_file()
                     if use_uv:
-                        pip_command = [sys.executable, "-m", "uv", "pip", "install", "--system", "-q", "-r", str(temp_req_path)]
+                        # 移除 -q 參數以獲取詳細日誌
+                        pip_command = [sys.executable, "-m", "uv", "pip", "install", "--system", "-r", str(temp_req_path)]
                         self._log_manager.log("INFO", f"[{log_prefix}] 使用 'uv' 進行快速安裝...")
                     else:
-                        pip_command = [sys.executable, "-m", "pip", "install", "-q", "--progress-bar", "off", "-r", str(temp_req_path)]
+                        # 移除 -q 和 --progress-bar off 參數以獲取詳細日誌
+                        pip_command = [sys.executable, "-m", "pip", "install", "-r", str(temp_req_path)]
                         self._log_manager.log("INFO", f"[{log_prefix}] 使用 'pip' 進行安裝。")
 
-                    subprocess.check_call(pip_command)
+                    # 改用 subprocess.run 以便捕獲錯誤輸出
+                    result = subprocess.run(pip_command, capture_output=True, text=True, encoding='utf-8')
+
+                    # 無論成功或失敗，都記錄 stdout
+                    if result.stdout and result.stdout.strip():
+                        self._log_manager.log("DEBUG", f"[{log_prefix}] pip stdout:\n{result.stdout}", "Installer")
+
+                    if result.returncode != 0:
+                        # 如果安裝失敗，記錄詳細的錯誤日誌
+                        error_log = f"pip install 失敗！返回碼: {result.returncode}\n"
+                        if result.stderr and result.stderr.strip():
+                            error_log += f"STDERR:\n{result.stderr}\n"
+                        self._log_manager.log("ERROR", error_log, "Installer")
+                        # 重新引發異常，讓上層知道安裝失敗了
+                        raise subprocess.CalledProcessError(result.returncode, pip_command, output=result.stdout, stderr=result.stderr)
+
                     self._log_manager.log("SUCCESS", f"✅ [{log_prefix}] 依賴安裝完成。")
                     self._log_manager.log("INFO", f"--- [{log_prefix}] 安裝耗時: {time.monotonic() - install_start_time:.2f} 秒 ---")
                 except subprocess.CalledProcessError as e:
