@@ -36,10 +36,17 @@
             const fetchAndDisplayData = async (startDate = '', endDate = '') => {
                 let url = '/api/page1/overview_data';
                 const params = new URLSearchParams();
-                if (startDate) params.append('start_date', startDate);
-                if (endDate) params.append('end_date', endDate);
-                if (params.toString()) {
-                    url += `?${params.toString()}`;
+                // 只有在日期有值時才加入查詢參數
+                if (startDate) {
+                    params.append('start_date', startDate);
+                }
+                if (endDate) {
+                    params.append('end_date', endDate);
+                }
+
+                const queryString = params.toString();
+                if (queryString) {
+                    url += `?${queryString}`;
                 }
 
                 try {
@@ -87,8 +94,8 @@
                 if (params.toString()) {
                     exportUrl += `?${params.toString()}`;
                 }
-                // 在父級視窗中導航到匯出頁面
-                window.parent.location.href = exportUrl;
+                // 在父級 iframe 中載入匯出頁面以保留主導覽列
+                window.parent.document.querySelector('[name="content-frame"]').src = exportUrl;
             });
 
             // 初始載入所有資料
