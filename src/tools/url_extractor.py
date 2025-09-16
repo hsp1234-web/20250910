@@ -37,11 +37,11 @@ log = logging.getLogger('url_extractor')
 
 def parse_chat_log(text: str) -> list[dict]:
     """
-    從給定的 LINE 聊天紀錄文字中，解析出日期、時間、作者和連結。
+    從給定的 LINE 聊天紀錄文字中，解析出日期、時間、作者和連結，並去除重複的網址。
     這個實作是根據使用者提供的聊天紀錄範例所設計。
 
     :param text: 包含 LINE 聊天紀錄的來源文字。
-    :return: 一個字典列表，每個字典包含 'date', 'time', 'author', 'url'。
+    :return: 一個字典列表，每個字典包含 'date', 'time', 'author', 'url'，且網址不會重複。
     """
     # 偵測 LINE 聊天紀錄中的關鍵模式
     # 1. 日期行: e.g., "2025/5/6（週二）"
@@ -54,6 +54,7 @@ def parse_chat_log(text: str) -> list[dict]:
     url_pattern = re.compile(r'https?://\S+')
 
     results = []
+    seen_urls = set()  # 用於追蹤已經出現過的網址，以進行去重
     current_date = None
     last_message_info = None
 
@@ -89,12 +90,14 @@ def parse_chat_log(text: str) -> list[dict]:
             url_match_in_line = url_pattern.search(line)
             if url_match_in_line:
                 url = url_match_in_line.group(0)
-                results.append({
-                    'date': current_date,
-                    'time': time,
-                    'author': author,
-                    'url': url
-                })
+                if url not in seen_urls:
+                    seen_urls.add(url)
+                    results.append({
+                        'date': current_date,
+                        'time': time,
+                        'author': author,
+                        'url': url
+                    })
                 last_message_info = None # 處理完畢，重置以避免重複關聯
             continue
 
@@ -104,15 +107,17 @@ def parse_chat_log(text: str) -> list[dict]:
         url_match = url_pattern.fullmatch(line)
         if url_match and last_message_info:
             url = url_match.group(0)
-            results.append({
-                'date': current_date,
-                'time': last_message_info['time'],
-                'author': last_message_info['author'],
-                'url': url
-            })
+            if url not in seen_urls:
+                seen_urls.add(url)
+                results.append({
+                    'date': current_date,
+                    'time': last_message_info['time'],
+                    'author': last_message_info['author'],
+                    'url': url
+                })
             last_message_info = None # 處理完畢，重置
 
-    log.info(f"從聊天紀錄中解析出 {len(results)} 筆有效的作者-網址配對。")
+    log.info(f"從聊天紀錄中解析出 {len(results)} 筆不重複的作者-網址配對。")
     return results
 
 
