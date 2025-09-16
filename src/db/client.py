@@ -1,38 +1,51 @@
 # db/client.py
-import socket
+#
+# --- 說明 (由 Jules 於 2025-09-17 重構) ---
+#
+# 本檔案定義了與 DB Manager API 進行通訊的客戶端。
+# 它已從原生的 socket 通訊升級為使用 httpx 函式庫，以實現更穩定、高效的 HTTP 通訊。
+#
+# httpx 客戶端會自動管理連線池與 HTTP Keep-Alive，
+# 這意味著它可以在多個請求之間重複使用 TCP 連線，大幅減少延遲並提升效能。
+#
+import httpx
 import json
 import logging
-import time
 import os
-from pathlib import Path
 
 # --- 日誌設定 ---
 log = logging.getLogger('DBClient')
 
-# --- 客戶端設定 ---
-PORT_FILE = Path(__file__).parent / "db_manager.port"
-RETRY_TIMEOUT = 10  # 秒
-
 class DBClient:
     """
-    與 DBManagerServer 進行通訊的客戶端。
+    與 DB Manager API 進行通訊的 HTTP 客戶端。
     """
-    def __init__(self):
-        self.host = "127.0.0.1"
+    def __init__(self, timeout: float = 60.0):
+        """
+        初始化客戶端。
+
+        Args:
+            timeout (float): 請求的預設超時時間（秒）。
+        """
         self.port = self._get_server_port()
+        self.base_url = f"http://127.0.0.1:{self.port}"
+        # 初始化一個 httpx.Client 實例。
+        # 這個 Client 物件會管理連線池，並在多個請求中重複使用連線。
+        self._client = httpx.Client(base_url=self.base_url, timeout=timeout)
+        log.info(f"DBClient 已初始化，將連線至 {self.base_url}")
 
     def _get_server_port(self) -> int:
         """
-        從環境變數或預設值獲取資料庫管理者伺服器的埠號。
+        從環境變數獲取 DB Manager 伺服器的埠號。
+        這是為了與 orchestrator 的動態埠號分配機制相容。
         """
-        # JULES'S FIX (2025-08-31): 從環境變數讀取埠號，以支援動態埠號
-        port = int(os.getenv('DB_MANAGER_PORT', 50001))
-        log.info(f"使用 DB Manager 埠號: {port} ({'來自環境變數' if 'DB_MANAGER_PORT' in os.environ else '預設值'})")
+        port = int(os.getenv('DB_MANAGER_PORT', 50001)) # 保留預設值以防萬一
+        log.info(f"讀取到 DB Manager 埠號: {port} ({'來自環境變數' if 'DB_MANAGER_PORT' in os.environ else '使用預設值'})")
         return port
 
     def _send_request(self, action: str, params: dict = None) -> dict:
         """
-        一個私有的輔助方法，用於發送請求並接收回應。
+        一個私有的輔助方法，用於向 /execute 端點發送請求並接收回應。
         """
         if params is None:
             params = {}
@@ -43,55 +56,42 @@ class DBClient:
         }
 
         try:
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-                sock.connect((self.host, self.port))
+            # 使用 httpx Client 發送 POST 請求。
+            # httpx 會自動處理 JSON 的序列化。
+            response = self._client.post("/execute", json=request_data)
 
-                # 序列化請求並發送
-                request_bytes = json.dumps(request_data).encode('utf-8')
-                request_header = len(request_bytes).to_bytes(4, 'big')
-                sock.sendall(request_header + request_bytes)
+            # 檢查 HTTP 狀態碼。如果狀態碼是 4xx 或 5xx，此行會引發 httpx.HTTPStatusError。
+            response.raise_for_status()
 
-                # 接收回應
-                response_header = sock.recv(4)
-                if not response_header:
-                    raise ConnectionError("與伺服器的連線已中斷，未能收到回應標頭。")
+            # 解析 JSON 回應
+            response_data = response.json()
 
-                response_len = int.from_bytes(response_header, 'big')
+            # 根據新的 API 格式，直接回傳 "data" 欄位的內容
+            if response_data.get("status") == "success":
+                return response_data.get("data")
+            else:
+                # 理論上 raise_for_status 已經處理了錯誤，但作為雙重保險
+                error_message = response_data.get("detail", "API 回傳未知錯誤")
+                log.error(f"API 在處理 action '{action}' 時回傳錯誤: {error_message}")
+                raise RuntimeError(f"DB Manager API Error: {error_message}")
 
-                # --- JULES' FIX: Loop to receive all data ---
-                response_chunks = []
-                bytes_received = 0
-                while bytes_received < response_len:
-                    chunk = sock.recv(min(response_len - bytes_received, 4096))
-                    if not chunk:
-                        raise ConnectionError("與伺服器的連線已中斷，資料接收不完整。")
-                    response_chunks.append(chunk)
-                    bytes_received += len(chunk)
+        except httpx.HTTPStatusError as e:
+            # 捕獲 HTTP 錯誤（例如 404 Not Found, 500 Internal Server Error）
+            # e.response.text 包含了伺服器返回的詳細錯誤訊息
+            log.error(f"請求 action '{action}' 失敗，HTTP 狀態碼: {e.response.status_code}，伺服器回應: {e.response.text}")
+            raise RuntimeError(f"HTTP Error {e.response.status_code}: {e.response.text}") from e
+        except httpx.RequestError as e:
+            # 捕獲網路層級的錯誤（例如連線被拒絕、DNS 查詢失敗）
+            log.error(f"與 DB Manager API ({self.base_url}) 通訊時發生網路錯誤: {e}")
+            raise ConnectionError(f"無法連線至 DB Manager API: {e}") from e
+        except json.JSONDecodeError as e:
+            log.error(f"無法解析來自伺服器的回應，可能不是有效的 JSON: {e}")
+            raise ValueError("伺服器回應格式錯誤") from e
 
-                response_bytes = b"".join(response_chunks)
-                # --- END FIX ---
-
-                response = json.loads(response_bytes.decode('utf-8'))
-
-                # 檢查回應狀態
-                if response.get("status") == "error":
-                    error_message = response.get("message", "未知錯誤")
-                    log.error(f"伺服器在處理 action '{action}' 時回傳錯誤: {error_message}")
-                    # 根據需求，可以選擇拋出一個例外
-                    raise RuntimeError(f"DB Manager Server Error: {error_message}")
-
-                return response.get("data")
-
-        except ConnectionRefusedError:
-            log.error(f"連線被拒絕。請確保 DB 管理者伺服器正在 {self.host}:{self.port} 上運行。")
-            raise
-        except Exception as e:
-            log.error(f"與 DB 管理者伺服器通訊時發生未預期錯誤: {e}", exc_info=True)
-            raise
 
     # --- 公開 API 方法 ---
-    # 這些方法模仿了 db/database.py 中的函式簽名，
-    # 使得從舊的直接呼叫模式遷移到新的客戶端模式變得非常簡單。
+    # 這些方法的簽名和功能保持不變，它們的改動僅在於底層的 _send_request 實現。
+    # 這確保了對外介面的穩定性。
 
     def add_task(self, task_id: str, payload: str, task_type: str = 'transcribe', depends_on: str = None) -> bool:
         return self._send_request("add_task", {
@@ -128,88 +128,53 @@ class DBClient:
         return self._send_request("get_all_tasks")
 
     def get_all_analysis_tasks(self) -> list[dict]:
-        """
-        獲取所有 AI 分析任務的列表。
-        """
         return self._send_request("get_all_analysis_tasks")
 
     def create_or_get_analysis_task(self, file_id: int, filename: str) -> dict:
-        """
-        根據 file_id 建立或獲取一個分析任務。
-        """
         return self._send_request("create_or_get_analysis_task", {"file_id": file_id, "filename": filename})
 
     def update_analysis_task(self, task_id: int, updates: dict) -> dict:
-        """
-        更新一個分析任務的特定欄位。
-        """
         return self._send_request("update_analysis_task", {"task_id": task_id, "updates": updates})
 
     def get_analysis_task(self, task_id: int) -> dict | None:
-        """
-        根據 ID 獲取單一分析任務的詳細資訊。
-        """
         return self._send_request("get_analysis_task", {"task_id": task_id})
 
     def get_urls_by_hash(self, file_hash: str) -> list[dict]:
-        """根據檔案雜湊值獲取所有相關的 URL 紀錄。"""
         return self._send_request("get_urls_by_hash", {"file_hash": file_hash})
 
     def get_analysis_task_by_file_id(self, file_id: int) -> dict | None:
-        """根據 file_id 獲取單一分析任務。"""
         return self._send_request("get_analysis_task_by_file_id", {"file_id": file_id})
 
-    # --- extracted_urls methods (2025-09-13) ---
     def get_url_by_id(self, url_id: int) -> dict | None:
-        """根據 ID 獲取單一 URL 紀錄。"""
         return self._send_request("get_url_by_id", {"url_id": url_id})
 
     def update_url(self, url_id: int, updates: dict) -> bool:
-        """更新一個 URL 紀錄的特定欄位。"""
         return self._send_request("update_url", {"url_id": url_id, "updates": updates})
-    # --- 結束 ---
 
     def get_system_logs(self, levels: list[str] = None, sources: list[str] = None) -> list[dict]:
-        """
-        從資料庫獲取系統日誌，可選擇性地按等級和來源篩選。
-        """
         return self._send_request("get_system_logs", {
             "levels": levels or [],
             "sources": sources or []
         })
 
     def find_dependent_task(self, parent_task_id: str) -> str | None:
-        """
-        尋找依賴於某個父任務的任務。
-        """
         return self._send_request("find_dependent_task", {"parent_task_id": parent_task_id})
 
-    # JULES'S NEW FEATURE: App State methods
     def get_app_state(self, key: str) -> str | None:
-        """
-        從資料庫獲取一個應用程式狀態值。
-        """
         return self._send_request("get_app_state", {"key": key})
 
     def set_app_state(self, key: str, value: str) -> bool:
-        """
-        在資料庫中設定一個應用程式狀態值。
-        """
         return self._send_request("set_app_state", {"key": key, "value": value})
 
     def get_all_app_states(self) -> dict[str, str]:
-        """
-        從資料庫獲取所有應用程式狀態值。
-        """
         return self._send_request("get_all_app_states")
 
     def clear_all_tasks(self) -> bool:
-        """
-        [僅供測試] 清空資料庫中的所有任務。
-        """
         return self._send_request("clear_all_tasks")
 
-# 可選：提供一個簡單的方式來獲取客戶端實例
+# --- 單例模式 ---
+# 這個模式保持不變，以確保整個應用程式共享同一個 DBClient 實例，
+# 從而有效地利用 httpx 的連線池。
 _client_instance = None
 
 def get_client():

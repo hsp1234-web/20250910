@@ -87,42 +87,58 @@ def main():
         log.info(f"已向外部監聽器提前報告代理 URL: {proxy_url}")
         # --- POC 優化結束 ---
 
-        # 1. 啟動資料庫管理者
-        log.info("🔧 正在啟動資料庫管理者...")
-        db_manager_port_list = []
-        db_manager_cmd = [sys.executable, "-m", "db.manager"]
+        # 1. 啟動資料庫管理者 (已升級至 FastAPI/Uvicorn)
+        log.info("🔧 正在啟動基於 Uvicorn 的資料庫管理器...")
+
+        # 為 DB 管理器分配一個可用埠號
+        db_manager_port = find_free_port()
+        os.environ['DB_MANAGER_PORT'] = str(db_manager_port)
+        log.info(f"已為資料庫管理器分配埠號: {db_manager_port}")
+
+        # 使用 Uvicorn 啟動 FastAPI 應用
+        db_manager_cmd = [
+            sys.executable, "-m", "uvicorn",
+            "src.db.manager:app",
+            "--host", "127.0.0.1",
+            "--port", str(db_manager_port),
+            "--log-level", "info"
+        ]
 
         # 建立一個包含正確 PYTHONPATH 的環境
         proc_env = os.environ.copy()
         python_path = proc_env.get("PYTHONPATH", "")
         proc_env["PYTHONPATH"] = str(SRC_DIR) + os.pathsep + python_path
 
+        # 設定就緒信號
+        db_ready_event = threading.Event()
+        # Uvicorn 應用啟動完成後會打印此訊息
+        uvicorn_ready_signal = "Application startup complete"
+
         db_manager_proc = subprocess.Popen(db_manager_cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8', env=proc_env)
         processes.append(db_manager_proc)
-        log.info(f"資料庫管理者程序已啟動，PID: {db_manager_proc.pid}")
+        log.info(f"資料庫管理器程序已啟動，PID: {db_manager_proc.pid}")
 
+        # 啟動一個執行緒來讀取輸出並監聽就緒信號
         db_stdout_thread = threading.Thread(
             target=stream_reader,
             args=(db_manager_proc.stdout, 'db_manager'),
-            kwargs={'port_list': db_manager_port_list, 'port_regex': r"DB_MANAGER_PORT: (\d+)"}
+            kwargs={'ready_event': db_ready_event, 'ready_signal': uvicorn_ready_signal}
         )
         db_stdout_thread.daemon = True
         threads.append(db_stdout_thread)
         db_stdout_thread.start()
 
-        # 等待資料庫管理者回報埠號
-        start_time = time.time()
-        while not db_manager_port_list:
-            if time.time() - start_time > 30: # 30 秒超時
-                raise RuntimeError("等待資料庫管理者埠號超時。")
-            # 檢查子程序是否意外終止
-            if db_manager_proc.poll() is not None:
-                raise RuntimeError(f"資料庫管理者程序在啟動期間意外終止，返回碼: {db_manager_proc.returncode}")
-            time.sleep(0.1) # 短暫等待，避免 CPU 資源浪費
+        # 等待 Uvicorn 發出就緒信號
+        log.info(f"等待資料庫管理器發出就緒信號 ('{uvicorn_ready_signal}')...")
+        ready = db_ready_event.wait(timeout=30) # 30 秒超時
+        if not ready:
+            raise RuntimeError("等待資料庫管理器就緒超時。")
 
-        db_manager_port = db_manager_port_list[0]
-        os.environ['DB_MANAGER_PORT'] = str(db_manager_port)
-        log.info(f"✅ 資料庫管理者已就緒，監聽於埠號: {db_manager_port}")
+        # 檢查子程序是否意外終止
+        if db_manager_proc.poll() is not None:
+            raise RuntimeError(f"資料庫管理器程序在啟動期間意外終止，返回碼: {db_manager_proc.returncode}")
+
+        log.info(f"✅ 資料庫管理器 API 已在埠號 {db_manager_port} 上就緒。")
 
         # 2. 初始化 DB 客戶端
         db_client = get_client()
