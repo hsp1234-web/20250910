@@ -19,6 +19,19 @@ import sys
 import os
 import argparse
 from pathlib import Path
+import importlib.util
+
+# --- (WORKAROUND) Python 3.10+ Compatibility Shim for 'importlib.abc' ---
+# 在 Python 3.10+ 中, 'importlib.abc' 被移出頂層 'importlib' 模組.
+# 此補丁手動將其加回, 以支援可能使用舊路徑的較舊依賴項。
+if not hasattr(importlib, 'abc'):
+    spec = importlib.util.find_spec('importlib.abc')
+    if spec:
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        setattr(importlib, 'abc', module)
+        sys.modules['importlib.abc'] = module
+# --- End of WORKAROUND ---
 
 # --- 路徑設定，確保可以正確匯入專案模組 ---
 try:
@@ -65,13 +78,12 @@ def handle_auto_mode(count: int):
                 print(f"🟡 未找到名為 '{key_name}' 的金鑰，跳過。")
                 continue
 
-            print(f"🔄  正在處理金鑰 '{key_name}'...")
-            result = key_manager.add_key(key_value, key_name)
-            if result.get("is_valid"):
-                print(f"✅  成功新增並驗證金鑰 '{key_name}'。")
-                added_count += 1
-            else:
-                print(f"❌  金鑰 '{key_name}' 新增失敗：未能通過有效性驗證。")
+            print(f"🔄  正在新增金鑰 '{key_name}' (稍後驗證)...")
+            # 解決競爭條件：在啟動時只新增金鑰，不立即驗證。
+            # 驗證將由使用者在 UI 介面或 API 觸發，此時依賴已全部安裝。
+            key_manager.add_key(key_value, key_name, validate=False)
+            print(f"✅  成功新增金鑰 '{key_name}' 至設定檔。")
+            added_count += 1
 
         except ValueError as e:
             print(f"🟡  跳過金鑰 '{key_name}'：{e}")
@@ -99,14 +111,12 @@ def handle_manual_mode(keys_string: str):
     added_count = 0
     for i, key_value in enumerate(keys):
         key_name = f"Manual-Key-{i+1}"
-        print(f"🔄  正在處理第 {i+1} 把手動金鑰...")
+        print(f"🔄  正在新增第 {i+1} 把手動金鑰 (稍後驗證)...")
         try:
-            result = key_manager.add_key(key_value, key_name)
-            if result.get("is_valid"):
-                print(f"✅  成功新增並驗證金鑰 '{key_name}'。")
-                added_count += 1
-            else:
-                print(f"❌  金鑰 '{key_name}' 新增失敗：未能通過有效性驗證。")
+            # 解決競爭條件：在啟動時只新增金鑰，不立即驗證。
+            key_manager.add_key(key_value, key_name, validate=False)
+            print(f"✅  成功新增金鑰 '{key_name}' 至設定檔。")
+            added_count += 1
         except ValueError as e:
             print(f"🟡  跳過第 {i+1} 把手動金鑰：{e}")
         except Exception as e:

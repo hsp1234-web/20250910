@@ -4,6 +4,7 @@ import hashlib
 import os
 import sys
 import subprocess
+import time
 from pathlib import Path
 from typing import List, Dict, Optional, Any
 from datetime import datetime
@@ -46,23 +47,47 @@ def _hash_key(key: str) -> str:
 def _validate_single_key(api_key: str) -> bool:
     """
     呼叫 gemini_processor.py 工具來驗證單一金鑰的有效性。
-    此驗證強制執行，不論是否處於模擬模式，以確保金鑰的真實性。
+    此函式包含重試機制，以應對偶發性的網路或 API 錯誤。
     """
-    # 核心安全修正：移除 if IS_MOCK_MODE 條件。
-    # 金鑰驗證是關鍵路徑，不應被模擬，以防止無效金鑰污染系統。
     tool_script_path = ROOT_DIR / "src" / "tools" / "gemini_processor.py"
     cmd = [sys.executable, str(tool_script_path), "--command=validate_key"]
 
-    minimal_env = {
-        "PATH": os.environ.get("PATH", ""),
-        "GOOGLE_API_KEY": api_key,
-        "SYSTEMROOT": os.environ.get("SYSTEMROOT", "")
-    }
-    try:
-        result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', env=minimal_env, check=False)
-        return result.returncode == 0
-    except Exception:
-        return False
+    env = os.environ.copy()
+    env["GOOGLE_API_KEY"] = api_key
+
+    max_retries = 3
+    retry_delay_seconds = 2
+
+    for attempt in range(max_retries):
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                encoding='utf-8',
+                env=env,
+                check=False,
+                timeout=45  # 為每個驗證子程序設定45秒超時
+            )
+            if result.returncode == 0:
+                # 驗證成功，立即返回 True
+                return True
+
+            # 如果失敗，記錄錯誤以供偵錯，然後準備重試
+            error_details = result.stderr or result.stdout or "無可用輸出。"
+            print(f"金鑰驗證嘗試 {attempt + 1}/{max_retries} 失敗。返回碼: {result.returncode}。錯誤: {error_details.strip()}", file=sys.stderr)
+
+        except subprocess.TimeoutExpired:
+            print(f"金鑰驗證嘗試 {attempt + 1}/{max_retries} 超時。", file=sys.stderr)
+        except Exception as e:
+            print(f"金鑰驗證嘗試 {attempt + 1}/{max_retries} 發生未預期的例外: {e}", file=sys.stderr)
+
+        # 如果不是最後一次嘗試，則等待後重試
+        if attempt < max_retries - 1:
+            time.sleep(retry_delay_seconds)
+
+    # 所有重試均告失敗
+    return False
 
 def get_all_keys() -> List[Dict[str, Any]]:
     """獲取所有金鑰，但不包含金鑰本身，只包含其雜湊值和狀態。"""
@@ -77,8 +102,12 @@ def get_all_keys() -> List[Dict[str, Any]]:
         } for i, key in enumerate(keys)
     ]
 
-def add_key(key_value: str, key_name: Optional[str] = None) -> Dict[str, Any]:
-    """新增一個金鑰到金鑰池，並立即進行驗證。"""
+def add_key(key_value: str, key_name: Optional[str] = None, validate: bool = True) -> Dict[str, Any]:
+    """
+    新增一個金鑰到金鑰池。可選擇是否立即進行驗證。
+
+    :param validate: 如果為 True，則立即驗證金鑰。如果為 False，則將其標記為未驗證。
+    """
     if not key_value or not key_value.strip():
         raise ValueError("API 金鑰不可為空。")
 
@@ -88,9 +117,12 @@ def add_key(key_value: str, key_name: Optional[str] = None) -> Dict[str, Any]:
     if any(k["key_hash"] == key_hash for k in keys):
         raise ValueError("此 API 金鑰已存在。")
 
-    # 立即驗證金鑰
-    is_valid = _validate_single_key(key_value)
-    validation_time = datetime.now().isoformat()
+    is_valid = False
+    validation_time = None
+    if validate:
+        # 立即驗證金鑰
+        is_valid = _validate_single_key(key_value)
+        validation_time = datetime.now().isoformat()
 
     new_key = {
         "name": key_name or f"Key-{len(keys) + 1}",
