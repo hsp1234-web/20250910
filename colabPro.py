@@ -206,6 +206,67 @@ class ServerManager:
                 self._log_manager.log("WARN", "安裝 'uv' 失敗，將退回使用 'pip'。")
                 return False
 
+    def _inject_keys_background(self, project_path: Path):
+        """
+        [背景執行] 負責從 Colab Secrets 獲取金鑰並透過腳本注入。
+        """
+        self._log_manager.log("INFO", "[背景] 開始執行金鑰注入...")
+        try:
+            # --- (中文註解) 核心金鑰注入邏輯（v2 修正版） ---
+            # 根本原因：在子程序中呼叫 google.colab.userdata.get() 會因缺少前端上下文而失敗。
+            # 解決方案：在擁有完整上下文的主程序中獲取所有金鑰，
+            # 然後將金鑰內容透過 `--mode manual` 安全地傳遞給子程序。
+            key_injector_script = project_path / "scripts" / "colab_key_injector.py"
+            if not key_injector_script.is_file():
+                self._log_manager.log("WARN", f"[背景] 未找到金鑰注入腳本 '{key_injector_script}'，跳過金鑰載入。")
+                return
+
+            from google.colab import userdata
+            self._log_manager.log("INFO", "[背景] 正在從 Colab Secrets 獲取金鑰...")
+
+            base_key_name = "GOOGLE_API_KEY"
+            target_key_names = [base_key_name]
+            if KEY_LOAD_COUNT_LIMIT > 0:
+                target_key_names.extend([f"{base_key_name}_{i}" for i in range(1, KEY_LOAD_COUNT_LIMIT + 1)])
+
+            keys_to_inject = []
+            for key_name in target_key_names:
+                key_value = userdata.get(key_name)
+                if key_value and key_value.strip():
+                    keys_to_inject.append(key_value)
+                    self._log_manager.log("INFO", f"[背景] ✅ 已成功獲取金鑰 '{key_name}'。")
+                else:
+                    self._log_manager.log("INFO", f"[背景] 🟡 未在 Colab Secrets 中找到金鑰 '{key_name}'，跳過。")
+
+            if not keys_to_inject:
+                 self._log_manager.log("WARN", "[背景] 未從 Colab Secrets 中獲取到任何金鑰，跳過注入。")
+                 return
+
+            keys_string = "\n".join(keys_to_inject)
+            command = [
+                sys.executable, str(key_injector_script.resolve()),
+                "--mode", "manual", "--manual-keys", keys_string
+            ]
+
+            # 使用 Popen 以非阻塞方式執行，並透過 stream_reader 處理日誌
+            process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8')
+            for line in iter(process.stdout.readline, ''):
+                self._log_manager.log("INFO", f"[背景] {line.strip()}", "KeyInjector")
+            process.wait()
+
+            if process.returncode == 0:
+                self._log_manager.log("SUCCESS", "[背景] ✅ 金鑰注入腳本執行完畢。")
+            else:
+                self._log_manager.log("WARN", f"[背景] 金鑰注入腳本執行結束，但返回碼為 {process.returncode}。")
+
+        except ImportError:
+            self._log_manager.log("WARN", "[背景] 無法匯入 google.colab.userdata，可能並非在 Colab 環境。跳過金鑰注入。")
+        except Exception as e:
+            self._log_manager.log("ERROR", f"[背景] 執行金鑰注入時發生未預期的錯誤: {e}")
+        finally:
+            self._log_manager.log("INFO", "[背景] 金鑰注入執行緒結束。")
+
+
     def _run(self):
         try:
             self._log_manager.log("BATTLE", "=== 啟動器核心流程開始 ===")
@@ -239,64 +300,10 @@ class ServerManager:
             initialize_database()
             add_system_log("colab_setup", "INFO", "Git repository cloned successfully.")
 
-            # --- (中文註解) 核心金鑰注入邏輯（v2 修正版） ---
-            # 根本原因：在子程序中呼叫 google.colab.userdata.get() 會因缺少前端上下文而失敗。
-            # 解決方案：在擁有完整上下文的主程序中獲取所有金鑰，
-            # 然後將金鑰內容透過 `--mode manual` 安全地傳遞給子程序。
-            self._log_manager.log("INFO", "正在準備執行金鑰注入...")
-            key_injector_script = project_path / "scripts" / "colab_key_injector.py"
-            if key_injector_script.is_file():
-                try:
-                    from google.colab import userdata
-                    self._log_manager.log("INFO", "正在從 Colab Secrets 獲取金鑰...")
-
-                    base_key_name = "GOOGLE_API_KEY"
-                    target_key_names = [base_key_name]
-                    if KEY_LOAD_COUNT_LIMIT > 0:
-                        # KEY_LOAD_COUNT_LIMIT = 2 會產生 _1, _2
-                        target_key_names.extend([f"{base_key_name}_{i}" for i in range(1, KEY_LOAD_COUNT_LIMIT + 1)])
-
-                    keys_to_inject = []
-                    for key_name in target_key_names:
-                        key_value = userdata.get(key_name)
-                        if key_value and key_value.strip():
-                            keys_to_inject.append(key_value)
-                            self._log_manager.log("INFO", f"✅ 已成功獲取金鑰 '{key_name}'。")
-                        else:
-                            self._log_manager.log("INFO", f"🟡 未在 Colab Secrets 中找到金鑰 '{key_name}'，跳過。")
-
-                    if not keys_to_inject:
-                         self._log_manager.log("WARN", "未從 Colab Secrets 中獲取到任何金鑰，跳過注入。")
-                    else:
-                        # 將金鑰列表轉換為以換行符分隔的單一字串
-                        keys_string = "\n".join(keys_to_inject)
-
-                        # 使用 manual 模式將金鑰傳遞給子程序
-                        command = [
-                            sys.executable,
-                            str(key_injector_script.resolve()),
-                            "--mode", "manual",
-                            "--manual-keys", keys_string
-                        ]
-
-                        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8')
-                        for line in iter(process.stdout.readline, ''):
-                            self._log_manager.log("INFO", line.strip(), "KeyInjector")
-                        process.wait()
-
-                        if process.returncode == 0:
-                            self._log_manager.log("SUCCESS", "✅ 金鑰注入腳本執行完畢。")
-                        else:
-                            self._log_manager.log("WARN", f"金鑰注入腳本執行結束，但返回碼為 {process.returncode}。")
-
-                except ImportError:
-                    self._log_manager.log("WARN", "無法匯入 google.colab.userdata，可能並非在 Colab 環境。跳過金鑰注入。")
-                except Exception as e:
-                    self._log_manager.log("ERROR", f"執行金鑰注入時發生未預期的錯誤: {e}")
-            else:
-                self._log_manager.log("WARN", f"未找到金鑰注入腳本 '{key_injector_script}'，跳過金鑰載入。")
-            # --- 金鑰注入邏輯結束 ---
-
+            # --- JULES'S FIX (2025-09-16): 非同步化金鑰注入 ---
+            # 將耗時的金鑰注入操作移至背景執行緒，使其與依賴安裝並行
+            key_thread = threading.Thread(target=self._inject_keys_background, args=(project_path,), daemon=True)
+            key_thread.start()
 
             # --- JULES: 重構為兩階段依賴安裝 ---
             use_uv = self._ensure_uv_installed()

@@ -76,6 +76,17 @@ def main():
     try:
         log.info("--- [協調器啟動] ---")
 
+        # --- POC 優化：提前回報 URL ---
+        # 1. 預先決定 API 埠號
+        api_port = args.port if args.port else find_free_port()
+        proxy_url = f"http://127.0.0.1:{api_port}"
+
+        # 2. 立即向外部監聽器（如 colabPro.py）報告 URL
+        # 這是整個優化流程的關鍵，它將 URL 的可用性與後端服務的完全就緒脫鉤。
+        print(f"PROXY_URL: {proxy_url}", flush=True)
+        log.info(f"已向外部監聽器提前報告代理 URL: {proxy_url}")
+        # --- POC 優化結束 ---
+
         # 1. 啟動資料庫管理者
         log.info("🔧 正在啟動資料庫管理者...")
         db_manager_port_list = []
@@ -119,7 +130,7 @@ def main():
 
         # 3. 啟動 API 伺服器
         log.info("🔧 正在啟動 API 伺服器...")
-        api_port = args.port if args.port else find_free_port()
+        # 此處的 api_port 已在函數開頭的 POC 優化區塊中定義
         api_server_cmd = [sys.executable, "-m", "api.api_server", "--port", str(api_port)]
         if args.mock:
             api_server_cmd.append("--mock")
@@ -132,16 +143,9 @@ def main():
         python_path = api_env.get("PYTHONPATH", "")
         api_env["PYTHONPATH"] = str(SRC_DIR) + os.pathsep + python_path
 
-        # 使用固定埠號，因為 Playwright 測試需要一個可預測的 URL
-        proxy_url = f"http://127.0.0.1:{api_port}"
-
         api_proc = subprocess.Popen(api_server_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding='utf-8', env=api_env)
         processes.append(api_proc)
         log.info(f"API 伺服器程序已啟動，PID: {api_proc.pid}，埠號: {api_port}")
-
-        # JULES'S FIX: 向外部監聽器報告 PROXY_URL，這是與 Colabpro 等啟動器對接的關鍵
-        print(f"PROXY_URL: {proxy_url}", flush=True)
-        log.info(f"已向外部監聽器報告代理 URL: {proxy_url}")
 
         api_stdout_thread = threading.Thread(target=stream_reader, args=(api_proc.stdout, 'api_server', None, None))
         api_stderr_thread = threading.Thread(target=stream_reader, args=(api_proc.stderr, 'api_server_stderr', None, None))
