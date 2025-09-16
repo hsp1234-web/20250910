@@ -44,6 +44,7 @@ try:
 
     from google.colab import userdata
     from src.core import key_manager
+    from src.db.database import initialize_database
     print("✅ 成功匯入 Colab userdata 和 key_manager 模組。")
 except ImportError:
     print("❌ 錯誤：此腳本似乎並非在 Google Colab 環境中執行，或專案結構不完整。")
@@ -79,11 +80,14 @@ def handle_auto_mode(count: int):
                 continue
 
             print(f"🔄  正在新增金鑰 '{key_name}' (稍後驗證)...")
-            # 解決競爭條件：在啟動時只新增金鑰，不立即驗證。
-            # 驗證將由使用者在 UI 介面或 API 觸發，此時依賴已全部安裝。
-            key_manager.add_key(key_value, key_name, validate=False)
-            print(f"✅  成功新增金鑰 '{key_name}' 至設定檔。")
-            added_count += 1
+            # 使用重構後的 KeyManager 實例來手動新增金鑰
+            # 注意：key_manager 模組中的全域實例也叫做 key_manager
+            success = key_manager.key_manager.add_key_manually(key_name=key_name, key_value=key_value)
+            if success:
+                print(f"✅  成功將金鑰 '{key_name}' 注入系統。")
+                added_count += 1
+            else:
+                print(f"💥  注入金鑰 '{key_name}' 時發生錯誤。")
 
         except ValueError as e:
             print(f"🟡  跳過金鑰 '{key_name}'：{e}")
@@ -113,10 +117,13 @@ def handle_manual_mode(keys_string: str):
         key_name = f"Manual-Key-{i+1}"
         print(f"🔄  正在新增第 {i+1} 把手動金鑰 (稍後驗證)...")
         try:
-            # 解決競爭條件：在啟動時只新增金鑰，不立即驗證。
-            key_manager.add_key(key_value, key_name, validate=False)
-            print(f"✅  成功新增金鑰 '{key_name}' 至設定檔。")
-            added_count += 1
+            # 使用重構後的 KeyManager 實例來手動新增金鑰
+            success = key_manager.key_manager.add_key_manually(key_name=key_name, key_value=key_value)
+            if success:
+                print(f"✅  成功將金鑰 '{key_name}' 注入系統。")
+                added_count += 1
+            else:
+                print(f"💥  注入金鑰 '{key_name}' 時發生錯誤。")
         except ValueError as e:
             print(f"🟡  跳過第 {i+1} 把手動金鑰：{e}")
         except Exception as e:
@@ -129,6 +136,11 @@ def handle_manual_mode(keys_string: str):
 
 def main():
     """主執行函式，解析參數並分派任務。"""
+    # 在執行任何操作之前，先確保資料庫及其所有資料表都已建立。
+    print("ℹ️  正在執行資料庫初始化檢查...")
+    initialize_database()
+    print("✅  資料庫初始化檢查完成。")
+
     parser = argparse.ArgumentParser(description="Colab 金鑰注入器，支援自動與手動模式。")
     parser.add_argument("--mode", type=str, choices=['auto', 'manual'], required=True, help="金鑰載入模式：'auto' 或 'manual'")
     parser.add_argument("--count", type=int, default=0, help="在自動模式下，要載入的金鑰數量 (0-20)。")

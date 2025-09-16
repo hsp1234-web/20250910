@@ -68,56 +68,60 @@ class Stage2Request(BaseModel):
 def _run_stage1_blocking_task(task_id: int, file_id: int, model_name: str, queue: asyncio.Queue, loop: asyncio.AbstractEventLoop):
     """
     執行第一階段 AI 分析的同步阻塞部分。
-    現在透過 queue 和 loop 來發送非同步通知。
-    【修改】: 已移除自動執行的量化分析。
+    【新增】支援讀取和寫入快取。
     """
     log.info(f"第一階段任務實際執行開始：task_id={task_id}, file_id={file_id}, model={model_name}")
     try:
-        # 1. 初始化 Gemini Manager
-        # JULES (2025-09-15): 新增超時處理
-        from core.config_manager import get_config_value
-        api_timeout = get_config_value("api_timeout_seconds", 35)
-
-        all_prompts = prompt_manager.get_all_prompts()
-        prompt_template = all_prompts.get("stage_1_extraction_prompt")
-        if not prompt_template:
-            raise ValueError("在提示詞庫中找不到 'stage_1_extraction_prompt'。")
-
-        valid_keys = key_manager.get_all_valid_keys_for_manager()
-        if not valid_keys:
-            raise ValueError("在金鑰池中找不到任何有效的 API 金鑰。")
-        gemini = GeminiManager(api_keys=valid_keys, timeout=api_timeout)
-
-        # 2. 從資料庫獲取檔案內容
+        # --- 快取檢查 ---
         analysis_task_data = DB_CLIENT.get_analysis_task(task_id=task_id)
-        if not analysis_task_data or not analysis_task_data['file_content_for_analysis']:
-            raise ValueError(f"分析任務 {task_id} 中找不到可供分析的檔案內容 (file_content_for_analysis)。")
-        text_content = analysis_task_data['file_content_for_analysis']
+        if analysis_task_data and analysis_task_data.get('stage1_raw_json'):
+            log.info(f"任務 {task_id}: 發現快取結果，將直接使用。")
+            cached_json_str = analysis_task_data['stage1_raw_json']
+            structured_data = json.loads(cached_json_str)
+            # 因為使用快取，所以 token 使用量為 0
+            token_usage = 0
+        else:
+            # --- 快取未命中，執行正常流程 ---
+            log.info(f"任務 {task_id}: 未發現快取，執行即時 AI 分析。")
+            # 1. 初始化 Gemini Manager (已更新為新版)
+            from core.config_manager import get_config_value
+            api_timeout = get_config_value("api_timeout_seconds", 35)
 
-        # 3. 執行 AI 資料提取
-        prompt = prompt_template.format(document_text=text_content)
+            # 不再需要手動傳遞金鑰，KeyManager 會自動管理
+            gemini = GeminiManager(timeout=api_timeout)
 
-        # 新增：在呼叫 API 前發送一個更細緻的狀態更新
-        DB_CLIENT.update_analysis_task(task_id=task_id, updates={"stage1_status": "gemini_processing"})
-        notification_msg = {"type": "analysis_update", "task_id": task_id, "status": "gemini_processing", "stage": 1, "result": DB_CLIENT.get_analysis_task(task_id)}
-        asyncio.run_coroutine_threadsafe(queue.put(notification_msg), loop)
+            all_prompts = prompt_manager.get_all_prompts()
+            prompt_template = all_prompts.get("stage_1_extraction_prompt")
+            if not prompt_template:
+                raise ValueError("在提示詞庫中找不到 'stage_1_extraction_prompt'。")
 
-        structured_data, error, used_key, token_usage = gemini.prompt_for_json(prompt=prompt, model_name=model_name)
+            # 2. 從資料庫獲取檔案內容
+            if not analysis_task_data or not analysis_task_data['file_content_for_analysis']:
+                raise ValueError(f"分析任務 {task_id} 中找不到可供分析的檔案內容 (file_content_for_analysis)。")
+            text_content = analysis_task_data['file_content_for_analysis']
 
-        if error:
-            raise error
+            # 3. 執行 AI 資料提取
+            prompt = prompt_template.format(document_text=text_content)
+            DB_CLIENT.update_analysis_task(task_id=task_id, updates={"stage1_status": "gemini_processing"})
+            notification_msg = {"type": "analysis_update", "task_id": task_id, "status": "gemini_processing", "stage": 1, "result": DB_CLIENT.get_analysis_task(task_id)}
+            asyncio.run_coroutine_threadsafe(queue.put(notification_msg), loop)
 
-        # 4. 【JULES: 重構驗證流程】
+            # 更新呼叫以接收 5 個回傳值，包含原始 JSON 字串
+            structured_data, raw_json_response, error, used_key, token_usage = gemini.prompt_for_json(prompt=prompt, model_name=model_name)
+
+            if error:
+                raise error # 將錯誤向上拋出，由外層的 try-except 統一處理
+
+            # --- 儲存快取 ---
+            DB_CLIENT.update_analysis_task(task_id=task_id, updates={"stage1_raw_json": raw_json_response})
+            log.info(f"任務 {task_id}: 已成功將原始 JSON 回應寫入快取。")
+
+        # --- 後續處理 (無論是來自快取還是即時分析) ---
         raw_symbol = structured_data.get("symbol")
-
-        # 步驟 4.1: 優先使用台灣專用的輔助工具進行校正
         corrected_for_tw_symbol = SUFFIX_HELPER.get_corrected_symbol(raw_symbol)
-
-        # 步驟 4.2: 使用新的全域尋找/驗證函式 (包含後綴重試邏輯)
         valid_symbol = find_valid_yfinance_symbol(corrected_for_tw_symbol)
 
         if not valid_symbol:
-            # 如果最終還是找不到，記錄詳細的錯誤訊息
             error_message = f"AI 提取的股票代號 '{raw_symbol}' (經台灣後綴校正後為 '{corrected_for_tw_symbol}') 無法通過 yfinance 驗證，也無法在國際市場中找到對應代號。"
             log.warning(f"任務 {task_id}: {error_message}")
             DB_CLIENT.update_analysis_task(
@@ -128,25 +132,21 @@ def _run_stage1_blocking_task(task_id: int, file_id: int, model_name: str, queue
                     "stage1_error_log": error_message
                 }
             )
-            # 儲存包含原始(錯誤)代號的 JSON 以供除錯
             json_filename = f"stage1_{task_id}_{uuid.uuid4().hex[:8]}_INVALID.json"
             json_path = TEMP_JSON_DIR / json_filename
             with open(json_path, "w", encoding="utf-8") as f:
                 json.dump(structured_data, f, ensure_ascii=False, indent=2)
             DB_CLIENT.update_analysis_task(task_id=task_id, updates={"stage1_json_path": str(json_path)})
-            return # 終止此任務的後續流程
+            return
 
-        # JULES: 將最終找到的有效代號存回 structured_data，以便後續階段使用
         log.info(f"任務 {task_id}: 原始代號 '{raw_symbol}' 最終被校正並驗證為 '{valid_symbol}'。")
         structured_data['symbol'] = valid_symbol
 
-        # 5. 儲存 JSON 結果到檔案
         json_filename = f"stage1_{task_id}_{uuid.uuid4().hex[:8]}.json"
         json_path = TEMP_JSON_DIR / json_filename
         with open(json_path, "w", encoding="utf-8") as f:
             json.dump(structured_data, f, ensure_ascii=False, indent=2)
 
-        # 6. 更新任務狀態為「完成」，並記錄 token 使用量
         DB_CLIENT.update_analysis_task(
             task_id=task_id,
             updates={
@@ -156,8 +156,6 @@ def _run_stage1_blocking_task(task_id: int, file_id: int, model_name: str, queue
             }
         )
         log.info(f"第一階段任務成功：task_id={task_id}，JSON 已儲存至 {json_path}")
-
-        # JULES (2025-09-15): 日期推斷已拆分為獨立階段，此處移除。
 
     except Exception as e:
         error_message = f"錯誤: {type(e).__name__}: {str(e)}"
@@ -332,7 +330,7 @@ def _run_stage2_blocking_task(task_id: int, model_name: str, queue: asyncio.Queu
 
 
         # 同樣，確保能接收到完整的元組，包含 token 使用量
-        report_html, error, used_key, token_usage = gemini.prompt_for_text(prompt=prompt, model_name=model_name)
+        report_html, _, error, used_key, token_usage = gemini.prompt_for_text(prompt=prompt, model_name=model_name)
 
         # 同樣，檢查並直接 raise 例外物件
         if error:
