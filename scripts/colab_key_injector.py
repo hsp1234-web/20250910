@@ -19,6 +19,19 @@ import sys
 import os
 import argparse
 from pathlib import Path
+import importlib.util
+
+# --- (WORKAROUND) Python 3.10+ Compatibility Shim for 'importlib.abc' ---
+# 在 Python 3.10+ 中, 'importlib.abc' 被移出頂層 'importlib' 模組.
+# 此補丁手動將其加回, 以支援可能使用舊路徑的較舊依賴項。
+if not hasattr(importlib, 'abc'):
+    spec = importlib.util.find_spec('importlib.abc')
+    if spec:
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        setattr(importlib, 'abc', module)
+        sys.modules['importlib.abc'] = module
+# --- End of WORKAROUND ---
 
 # --- 路徑設定，確保可以正確匯入專案模組 ---
 try:
