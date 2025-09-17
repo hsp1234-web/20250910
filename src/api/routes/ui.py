@@ -44,6 +44,10 @@ async def serve_page4_stage2(request: Request):
 async def serve_page4_stage3(request: Request):
     return templates.TemplateResponse("page4_stage3_report.html", {"request": request})
 
+@router.get("/page4_stage4_download", response_class=HTMLResponse)
+async def serve_page4_stage4(request: Request):
+    return templates.TemplateResponse("page4_stage4_download.html", {"request": request})
+
 @router.get("/page5", response_class=HTMLResponse)
 async def serve_page5(request: Request):
     return templates.TemplateResponse("page5_backup.html", {"request": request})

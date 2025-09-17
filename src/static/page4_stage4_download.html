@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI 分析 - 階段四 Word 報告下載</title>
+    <link rel="stylesheet" href="/static/css/nav.css">
+    <link rel="stylesheet" href="/static/css/common.css">
+    <link rel="stylesheet" href="/static/css/page4.css">
+</head>
+<body>
+    <nav class="top-nav">
+        <ul>
+            <li><a href="/">鳳凰主頁</a></li>
+            <li><a href="/page1">網址提取</a></li>
+            <li><a href="/page2">批次下載</a></li>
+            <li><a href="/page3">檔案處理</a></li>
+            <li><a href="/page4_stage1_ai" class="active">AI 分析</a></li>
+            <li><a href="/page5">備份管理</a></li>
+            <li><a href="/page6">金鑰管理</a></li>
+            <li><a href="/page7">提示詞管理</a></li>
+            <li><a href="/page9">績效儀表板</a></li>
+        </ul>
+    </nav>
+
+    <div class="content">
+        <h1>AI 分析流程</h1>
+
+        <div class="sub-nav">
+            <a href="/page4_stage1_ai" class="sub-nav-button">1. AI 分析</a>
+            <a href="/page4_stage1_5_date" class="sub-nav-button">1.5. 日期推斷</a>
+            <a href="/page4_stage2_performance" class="sub-nav-button">2. 績效分析</a>
+            <a href="/page4_stage3_report" class="sub-nav-button">3. 報告生成</a>
+            <a href="/page4_stage4_download" class="sub-nav-button active">4. Word 報告下載</a>
+        </div>
+
+        <div class="panel">
+            <h2>階段四：Word 報告下載</h2>
+            <p>此處顯示所有已完成績效分析的任務。勾選後即可下載包含所選報告的 Word (.docx) 文件。</p>
+
+            <div class="action-bar">
+                <div class="action-group">
+                    <button id="select-all-button">全選</button>
+                    <button id="deselect-all-button">取消全選</button>
+                </div>
+                <div class="action-group">
+                    <button id="download-report-btn" class="primary-action">📄 下載 Word 報告</button>
+                </div>
+            </div>
+
+            <!-- 卡片容器 -->
+            <div id="file-cards-container">
+                <p>正在載入已完成的任務...</p>
+            </div>
+        </div>
+
+        <div class="panel">
+            <div class="panel-header">
+                <h2>狀態日誌</h2>
+                <button id="copy-log-button" class="copy-button" title="複製日誌">複製</button>
+            </div>
+            <div id="status-area"></div>
+        </div>
+    </div>
+
+    <script>
+    document.addEventListener('DOMContentLoaded', () => {
+        // --- DOM Element Cache ---
+        const fileCardsContainer = document.getElementById('file-cards-container');
+        const selectAllButton = document.getElementById('select-all-button');
+        const deselectAllButton = document.getElementById('deselect-all-button');
+        const statusArea = document.getElementById('status-area');
+        const copyLogButton = document.getElementById('copy-log-button');
+        const downloadReportBtn = document.getElementById('download-report-btn');
+
+        // --- Utility Functions ---
+        const logStatus = (message, color = 'black') => {
+            const timestamp = new Date().toLocaleTimeString('zh-TW', { hour12: false });
+            statusArea.insertAdjacentHTML('afterbegin', `<p style="color: ${color};">[${timestamp}] ${message}</p>`);
+        };
+
+        // --- Core Render Functions ---
+        const renderTaskList = async () => {
+            try {
+                logStatus('正在從後端獲取可供下載的報告列表...');
+                const response = await fetch('/api/analyzer/files_for_stage2');
+                if (!response.ok) throw new Error(`無法獲取任務 (HTTP ${response.status})`);
+                const tasks = await response.json();
+                logStatus(`成功獲取 ${tasks.length} 個任務的資訊。`, 'green');
+
+                if (tasks.length === 0) {
+                    fileCardsContainer.innerHTML = '<p>目前沒有可下載的報告。請先完成績效分析。</p>';
+                    return;
+                }
+
+                const statusMap = {
+                    'completed': '✅ 可供下載',
+                    'failed': '❌ 分析失敗',
+                    'pending': '待處理',
+                    'processing': '處理中'
+                };
+
+                let cardsHtml = '';
+                tasks.forEach(task => {
+                    const statusText = statusMap[task.performance_status] || task.performance_status;
+                    const isDownloadable = task.performance_status === 'completed';
+                    const taskId = task.id;
+
+                    cardsHtml += `
+                        <div class="file-card status-${isDownloadable ? 'completed' : 'pending'}">
+                            <div class="card-header">
+                                <input type="checkbox" class="task-checkbox" value="${taskId}" ${!isDownloadable ? 'disabled' : ''}>
+                                <h3 class="filename" title="${task.filename}">${task.filename}</h3>
+                            </div>
+                            <div class="card-body">
+                                <div class="info-grid">
+                                    <div class="info-item"><strong>報告狀態:</strong> <span class="status-badge">${statusText}</span></div>
+                                    <div class="info-item"><strong>檔案ID:</strong> <span>${task.file_id}</span></div>
+                                </div>
+                            </div>
+                             <div class="card-footer">
+                                <a href="/page8?hash=${task.file_hash}" class="action-btn btn-details" ${!task.file_hash ? 'style="display:none;"' : ''}>詳細資料</a>
+                            </div>
+                        </div>
+                    `;
+                });
+                fileCardsContainer.innerHTML = cardsHtml;
+
+            } catch (error) {
+                logStatus(`載入任務列表失敗: ${error.message}`, 'red');
+                fileCardsContainer.innerHTML = `<p style="color:red;">載入任務列表失敗: ${error.message}</p>`;
+            }
+        };
+
+        // --- API Call Functions ---
+        const downloadReport = async (taskIds) => {
+            if (taskIds.length === 0) {
+                return alert('請至少選擇一個任務來產生報告。');
+            }
+
+            downloadReportBtn.disabled = true;
+            downloadReportBtn.textContent = '報告生成中...';
+            logStatus(`正在為 ${taskIds.length} 個任務請求 Word 報告...`, 'blue');
+
+            try {
+                const response = await fetch('/api/analyzer/generate_report', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ task_ids: taskIds }),
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json().catch(() => ({ detail: '未知的伺服器錯誤' }));
+                    throw new Error(errorData.detail || `HTTP ${response.status}`);
+                }
+
+                const blob = await response.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.style.display = 'none';
+                a.href = url;
+
+                const disposition = response.headers.get('content-disposition');
+                let filename = 'report.docx';
+                if (disposition && disposition.indexOf('attachment') !== -1) {
+                    const filenameRegex = /filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/;
+                    const matches = filenameRegex.exec(disposition);
+                    if (matches != null && matches[1]) {
+                        filename = matches[1].replace(/['"]/g, '');
+                    }
+                }
+
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(url);
+                logStatus('報告下載成功！', 'green');
+
+            } catch (error) {
+                logStatus(`產生報告失敗: ${error.message}`, 'red');
+                alert(`產生報告失敗: ${error.message}`);
+            } finally {
+                downloadReportBtn.disabled = false;
+                downloadReportBtn.textContent = '📄 下載 Word 報告';
+            }
+        };
+
+        // --- Event Listeners ---
+        downloadReportBtn.addEventListener('click', () => {
+            const selectedIds = Array.from(document.querySelectorAll('.task-checkbox:checked'))
+                                     .map(cb => parseInt(cb.value, 10));
+            downloadReport(selectedIds);
+        });
+
+        selectAllButton.addEventListener('click', () => document.querySelectorAll('.task-checkbox:not(:disabled)').forEach(cb => cb.checked = true));
+        deselectAllButton.addEventListener('click', () => document.querySelectorAll('.task-checkbox:checked').forEach(cb => cb.checked = false));
+
+        copyLogButton.addEventListener('click', () => {
+            navigator.clipboard.writeText(statusArea.innerText).then(() => {
+                const originalText = copyLogButton.innerText;
+                copyLogButton.innerText = '已複製 ✅';
+                setTimeout(() => { copyLogButton.innerText = originalText; }, 2000);
+            });
+        });
+
+        const setupWebSocket = () => {
+            const ws = new WebSocket(`${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/api/ws`);
+            ws.onopen = () => logStatus('WebSocket 狀態更新連線成功。', 'blue');
+            ws.onclose = () => {
+                logStatus('WebSocket 連線已中斷。5 秒後嘗試重新連線...', 'orange');
+                setTimeout(setupWebSocket, 5000);
+            };
+            ws.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    // 當績效分析或報告生成完成時，刷新此頁面
+                    if (data.task_type === 'analysis_stage_performance' || data.task_type === 'analysis_stage_2') {
+                         logStatus(`收到任務 #${data.task_id} 狀態更新: ${data.status}。正在刷新列表...`, 'purple');
+                         renderTaskList();
+                    }
+                } catch (err) {
+                    logStatus(`處理 WebSocket 訊息時發生錯誤: ${err}`, 'red');
+                }
+            };
+        };
+
+        (async () => {
+            logStatus('頁面載入完成，正在初始化...');
+            await renderTaskList();
+            setupWebSocket();
+            logStatus('初始化完成，等待操作。', 'green');
+        })();
+    });
+    </script>
+</body>
+</html>
