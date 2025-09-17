@@ -5,6 +5,45 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>資料總覽</title>
     <link rel="stylesheet" href="/static/css/page1_unified.css">
+    <!-- Jules @ 2025-09-17: 為卡片模式新增樣式 -->
+    <style>
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            /* margin-bottom: 1rem; */ /* 從 .card-body 繼承 */
+        }
+        .item-id {
+            font-size: 0.9em;
+            color: #6c757d;
+        }
+        .item-status {
+            font-size: 0.85em;
+            font-weight: bold;
+            padding: 3px 8px;
+            border-radius: 12px;
+            text-transform: uppercase;
+        }
+        .status-pending { color: #856404; background-color: #fff3cd; }
+        .status-downloading { color: #0c5460; background-color: #d1ecf1; }
+        .status-completed { color: #155724; background-color: #d4edda; }
+        .status-failed, .status-download_failed { color: #721c24; background-color: #f8d7da; }
+        .status-unknown { color: #383d41; background-color: #e2e3e5; }
+        .url-link {
+            color: #007bff;
+            text-decoration: none;
+            word-break: break-all;
+        }
+        .url-link:hover {
+            text-decoration: underline;
+        }
+        .card-body p {
+            margin-bottom: 0.5rem;
+        }
+        .card-body p:last-child {
+            margin-bottom: 0;
+        }
+    </style>
 </head>
 <body>
     <div class="content">
@@ -57,12 +96,23 @@
                     data.forEach(item => {
                         const card = document.createElement('div');
                         card.className = 'card';
+                        // Jules @ 2025-09-17: 豐富卡片內容，使其與頁面二的樣式和資訊對齊
+                        const title = item.title || '無標題';
+                        const date = item.message_date || 'N/A';
+                        const time = item.message_time || '';
+                        const status = item.status || '未知';
+                        const statusClass = `status-${status.toLowerCase()}`;
+
                         card.innerHTML = `
-                            <div class="card-header">卡片 ${item.id}</div>
+                            <div class="card-header">
+                                <span class="item-id">ID: ${item.id}</span>
+                                <span class="item-status ${statusClass}">${status}</span>
+                            </div>
                             <div class="card-body">
-                                <p><strong>網址:</strong> <a href="${item.url}" target="_blank">${item.url}</a></p>
-                                <p><strong>作者:</strong> ${item.author || 'N/A'}</p>
-                                <p><strong>日期:</strong> ${item.date || 'N/A'}</p>
+                                <p><strong>標題:</strong> ${title}</p>
+                                <p><strong>作者:</strong> ${item.author || '---'}</p>
+                                <p><strong>時間:</strong> ${date} ${time}</p>
+                                <p><strong>連結:</strong> <a href="${item.url}" title="${item.url}" target="_blank" class="url-link">${item.url}</a></p>
                             </div>
                         `;
                         cardContainer.appendChild(card);

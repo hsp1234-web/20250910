@@ -147,6 +147,8 @@ def initialize_database(conn: sqlite3.Connection = None):
             )
             ''')
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_url ON extracted_urls (url)")
+            # Jules @ 2025-09-17: 為狀態查詢優化新增索引
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_extracted_urls_status ON extracted_urls (status)")
 
             # --- 新增 AI 分析報告歷史紀錄資料表 ---
             cursor.execute('''
@@ -778,7 +780,19 @@ def get_urls_by_statuses(statuses: list[str]) -> list[dict]:
         # 為 IN 子句建立一個佔位符字串
         placeholders = ','.join(['?'] * len(statuses))
         # 2025-09-18 V4 優化：查詢所有欄位以滿足不同頁面的需求
-        sql = f"SELECT * FROM extracted_urls WHERE status IN ({placeholders}) ORDER BY created_at DESC"
+        # 2025-09-17 Jules 修正：明確指定欄位，排除大型的 source_text 欄位以優化效能
+        sql = f"""
+            SELECT
+                id, url, created_at, status, status_message, local_path,
+                file_hash, extracted_image_paths, extracted_text, author,
+                message_date, message_time, title, retry_count, last_error_details
+            FROM
+                extracted_urls
+            WHERE
+                status IN ({placeholders})
+            ORDER BY
+                created_at DESC
+        """
 
         cursor = conn.cursor()
         cursor.execute(sql, statuses)
@@ -925,8 +939,10 @@ def add_new_urls(parsed_data: list[dict], source_text: str) -> int:
 def get_filtered_urls(start_date: str = None, end_date: str = None) -> list[dict]:
     """
     (V4 優化新增) 根據日期範圍獲取 URL 紀錄。
+    (Jules @ 2025-09-17) 修改以回傳卡片所需的所有欄位。
     """
-    query = "SELECT id, url, author, message_date FROM extracted_urls"
+    # Jules @ 2025-09-17: 新增 title, message_time, 和 status 欄位以支援卡片模式
+    query = "SELECT id, url, author, message_date, message_time, title, status FROM extracted_urls"
     filters = []
     params = []
 
@@ -949,8 +965,8 @@ def get_filtered_urls(start_date: str = None, end_date: str = None) -> list[dict
         cursor = conn.cursor()
         cursor.execute(query, params)
         rows = cursor.fetchall()
-        # 前端需要 'date' 鍵，所以在回傳時進行轉換
-        return [{"id": r["id"], "url": r["url"], "author": r["author"], "date": r["message_date"]} for r in rows]
+        # Jules @ 2025-09-17: 直接回傳完整的字典，讓前端處理
+        return [dict(row) for row in rows]
     except sqlite3.Error as e:
         log.error(f"查詢總覽資料時發生錯誤: {e}", exc_info=True)
         return []

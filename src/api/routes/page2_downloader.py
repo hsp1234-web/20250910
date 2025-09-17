@@ -45,6 +45,7 @@ async def get_pending_urls(db: DBClient = Depends(get_db)):
                 "author": row['author'],
                 "message_date": row['message_date'],
                 "message_time": row['message_time'],
+                "title": row['title'] # Jules @ 2025-09-17: 修正 API，將 title 欄位加入回傳的 JSON 中
             }
             for row in rows
         ]
