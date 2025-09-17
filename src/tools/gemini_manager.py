@@ -23,11 +23,11 @@ class GeminiManager:
                 一個包含 API 金鑰資訊的字典列表。
                 每個字典應包含 'value' (金鑰值) 和 'name' (金鑰的可讀名稱)。
         """
-        if not api_keys:
-            raise ValueError("API 金鑰列表不可為空。")
-
         self.api_keys = [ApiKey(key_value=k['value'], name=k['name']) for k in api_keys]
-        logging.info(f"Gemini 管理器已初始化，共載入 {len(self.api_keys)} 組 API 金鑰。")
+        if not self.api_keys:
+            logging.warning("Gemini 管理器已初始化，但未提供任何 API 金鑰。")
+        else:
+            logging.info(f"Gemini 管理器已初始化，共載入 {len(self.api_keys)} 組 API 金鑰。")
 
     def get_all_keys(self) -> List[ApiKey]:
         """
