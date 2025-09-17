@@ -236,7 +236,8 @@ async def process_batch_async():
         return
 
     # 1. 收集任務
-    pending_files = db_client.get_files_by_status('pending')
+    # JULES-FIX-26.22: 修正錯誤的函式名稱，並將參數改為列表
+    pending_files = db_client.get_urls_by_statuses(['pending'])
     if not pending_files:
         log.info("[非同步批次處理] 沒有待處理的檔案，任務結束。")
         return
