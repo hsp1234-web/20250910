@@ -681,3 +681,52 @@ async def get_stage2_result(task_id: int, db: DBClient = Depends(get_db)):
 
 # --- 已棄用的舊版分析流程 ---
 # 移除了 /analysis_status 和 /processed_files 端點，由新的專用端點取代
+
+# JULES (2025-09-17): 新增用於生成 Word 報告的 API 端點
+from fastapi.responses import FileResponse
+from tools.report_generator_docx import create_docx_report
+import os
+
+class GenerateReportRequest(BaseModel):
+    task_ids: List[int]
+
+@router.post("/generate_report", response_class=FileResponse)
+async def generate_report_endpoint(
+    payload: GenerateReportRequest,
+    background_tasks: BackgroundTasks,
+    db: DBClient = Depends(get_db)
+):
+    """
+    接收一個或多個分析任務 ID，呼叫服務層生成一份包含這些報告的 Word (.docx) 文件，
+    並將其作為檔案下載回傳。
+    """
+    if not payload.task_ids:
+        raise HTTPException(status_code=400, detail="任務 ID 列表不可為空。")
+
+    try:
+        # 步驟 1: 呼叫服務層函式來生成報告
+        task_ids_str = ", ".join(map(str, payload.task_ids))
+        log.info(f"API 層：正在為任務 {task_ids_str} 調用報告生成服務...")
+
+        report_path = create_docx_report(task_ids=payload.task_ids, db_client=db)
+
+        log.info(f"API 層：報告生成服務完成，檔案位於 {report_path}")
+
+        # 步驟 2: 設定一個背景任務，在檔案回傳後將其刪除
+        background_tasks.add_task(os.remove, report_path)
+
+        # 步驟 3: 使用 FileResponse 回傳檔案
+        download_filename = f"綜合績效報告_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.docx"
+
+        return FileResponse(
+            path=report_path,
+            filename=download_filename,
+            media_type='application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+        )
+
+    except FileNotFoundError as e:
+        log.error(f"生成報告時發生錯誤：找不到必要的檔案。{e}", exc_info=True)
+        raise HTTPException(status_code=404, detail=f"找不到生成報告所需的資料檔案：{e}")
+    except Exception as e:
+        log.error(f"生成報告時發生未預期的伺服器錯誤: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"生成報告時發生內部錯誤: {e}")
