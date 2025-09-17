@@ -123,3 +123,83 @@ def test_file_processing_pipeline_simulation(simulated_docx_path, temp_test_dir)
     print(f"  - 原始 DOCX: {simulated_docx_path}")
     print(f"  - 提取的圖片: {extracted_image_path} (大小: {original_size} 位元組)")
     print(f"  - 壓縮後圖片: {compressed_path} (大小: {compressed_size} 位元組)")
+
+
+# --- JULES-ADD-26.22-TEST: 為 gemini_processor.py 的 CLI 新增測試 ---
+# 匯入我們要測試的目標模組和函式
+from tools import gemini_processor
+import asyncio
+from unittest.mock import MagicMock
+
+# 為了避免在測試中真的去呼叫耗時的網路或檔案處理，我們使用 mock
+@pytest.mark.asyncio
+async def test_gemini_processor_cli(monkeypatch, capsys, temp_test_dir):
+    """
+    測試 gemini_processor.py 的命令列介面 (CLI)。
+    - 使用 monkeypatch 來模擬 sys.argv 和外部函式。
+    - 使用 capsys 來捕獲標準輸出/錯誤。
+    """
+    # 1. 模擬 (Mock) 會產生外部效應的函式
+    # 我們不希望測試真的去呼叫 Google API 或執行轉錄
+    monkeypatch.setattr(gemini_processor, '_validate_key', lambda api_key: True)
+    monkeypatch.setattr(gemini_processor, '_list_models', lambda api_key: [{"id": "mock-model", "name": "Mock Model"}])
+
+    # JULES-FIX-26.22-TEST-Hotfix: 採用更穩健的 Mock 策略
+    # 直接模擬整個 Transcriber 類別，而不是其方法，以避免因條件式匯入造成的 NoneType 錯誤
+    mock_transcriber_instance = MagicMock()
+    # 讓 .transcribe() 方法回傳一個固定的字串
+    mock_transcriber_instance.transcribe.return_value = "這是模擬的逐字稿。"
+    # 當 gemini_processor.py 試圖 `Transcriber(...)` 時，讓它回傳我們的模擬實例
+    monkeypatch.setattr(gemini_processor, 'Transcriber', lambda *args, **kwargs: mock_transcriber_instance)
+
+    # 模擬報告生成函式
+    monkeypatch.setattr(gemini_processor, '_generate_report_from_transcript', lambda *args, **kwargs: "這是模擬的報告。")
+
+
+    # 2. 測試 'validate_key' 指令
+    monkeypatch.setattr(sys, 'argv', ['gemini_processor.py', '--command=validate_key', '--api-key=DUMMY_KEY'])
+    with pytest.raises(SystemExit) as e:
+        await gemini_processor.main()
+    assert e.value.code == 0 # 驗證程式是否以成功狀態碼 0 退出
+    captured = capsys.readouterr()
+    assert "金鑰驗證成功" in captured.out
+
+
+    # 3. 測試 'list_models' 指令
+    monkeypatch.setattr(sys, 'argv', ['gemini_processor.py', '--command=list_models', '--api-key=DUMMY_KEY'])
+    with pytest.raises(SystemExit) as e:
+        await gemini_processor.main()
+    assert e.value.code == 0
+    captured = capsys.readouterr()
+    # 驗證輸出是否為我們模擬的 JSON
+    assert '{"id": "mock-model", "name": "Mock Model"}' in captured.out
+
+
+    # 4. 測試 'process' 指令 - 缺少必要參數
+    monkeypatch.setattr(sys, 'argv', ['gemini_processor.py', '--command=process']) # 故意不提供 --audio-file
+    with pytest.raises(SystemExit) as e:
+        await gemini_processor.main()
+    assert e.value.code == 1 # 應以失敗狀態碼 1 退出
+    captured = capsys.readouterr()
+    assert "audio_file is required" in captured.err # 錯誤訊息應輸出到 stderr
+
+
+    # 5. 測試 'process' 指令 - 成功執行
+    # 我們需要一個假的音訊檔案路徑
+    dummy_audio_path = Path(temp_test_dir) / "dummy.mp3"
+    dummy_audio_path.touch() # 建立一個空檔案即可
+
+    monkeypatch.setattr(sys, 'argv', [
+        'gemini_processor.py',
+        '--command=process',
+        f'--audio-file={dummy_audio_path}',
+        '--api-key=DUMMY_KEY'
+        # 其他參數使用預設值
+    ])
+    with pytest.raises(SystemExit) as e:
+        await gemini_processor.main()
+    assert e.value.code == 0 # 應以成功狀態碼 0 退出
+    captured = capsys.readouterr()
+    # 驗證最終的成功 JSON 輸出
+    assert '"status": "success"' in captured.out
+    assert f'"transcript_path":' in captured.out

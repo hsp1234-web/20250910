@@ -2,21 +2,32 @@
 import asyncio
 import json
 import logging
+import os
+import sys
 import time
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple, List
+
+# --- 路徑修正 ---
+# 確保即使從命令列執行，也能找到 src 目錄
+SRC_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if SRC_DIR not in sys.path:
+    sys.path.insert(0, SRC_DIR)
 
 try:
     import google.generativeai as genai
     from google.api_core import exceptions as google_exceptions
     from google.generativeai.types import GenerationConfig
-except ImportError:
-    logging.warning("缺少 google-generativeai 模組，AI 分析功能將被停用。")
+    from tools.transcriber import Transcriber  # 匯入我們自己的轉錄器
+except ImportError as e:
+    logging.warning(f"缺少必要的模組 ({e})，AI 分析功能可能受限。")
     genai = None
     GenerationConfig = None
     google_exceptions = None
+    Transcriber = None
 
 # 專為此模組設定日誌
 log = logging.getLogger(__name__)
+
 
 class GeminiProcessor:
     """
@@ -116,77 +127,189 @@ class GeminiProcessor:
         log.info("內容分析成功完成。")
         return result, None
 
-# 備註：保留此區塊是為了展示如果此檔案需要作為獨立腳本執行時的範例。
-# 在目前的專案架構中，此檔案主要作為模組被 Orchestrator 匯入和使用。
+# --- 命令列介面 (CLI) 輔助函式 ---
+
+def _validate_key(api_key: str) -> bool:
+    """
+    透過嘗試列出模型來驗證 API 金鑰的有效性。
+    這是一個輕量級的操作，足以確認金鑰是否有效。
+    """
+    try:
+        genai.configure(api_key=api_key)
+        # 列出模型是一個相對快速且低成本的驗證方法
+        list(genai.list_models())
+        return True
+    except Exception as e:
+        # 捕獲所有可能的例外，例如權限錯誤、格式錯誤等
+        log.error(f"金鑰驗證失敗: {e}")
+        return False
+
+def _list_models(api_key: str) -> List[Dict[str, str]]:
+    """
+    獲取所有可用的生成模型列表。
+    """
+    try:
+        genai.configure(api_key=api_key)
+        models = [
+            {"id": m.name, "name": m.display_name}
+            for m in genai.list_models()
+            if 'generateContent' in m.supported_generation_methods
+        ]
+        return models
+    except Exception as e:
+        log.error(f"獲取模型列表時發生錯誤: {e}")
+        # 以防萬一，回傳一個空列表
+        return []
+
+def _generate_report_from_transcript(transcript: str, video_title: str, tasks: str, model: str, api_key: str) -> str:
+    """
+    根據逐字稿生成摘要或執行其他 AI 任務。
+    """
+    # 這裡可以根據 `tasks` 參數擴充更多功能
+    # 目前僅實作摘要
+    prompt = f"""
+你是一個專業的報告分析師。
+這是一段來自 YouTube 影片的逐字稿，影片標題是「{video_title}」。
+請根據以下逐字稿，生成一份包含「摘要」和「重點」的報告。
+
+逐字稿內容：
+---
+{transcript}
+---
+
+請以 JSON 格式輸出，包含以下欄位：
+- "summary": (string) 影片內容的簡潔摘要。
+- "highlights": (list of strings) 條列式的重點。
+"""
+    genai.configure(api_key=api_key)
+    gemini_model = genai.GenerativeModel(model)
+    response = gemini_model.generate_content(prompt)
+    return response.text
+
+
 async def main():
     """
-    提供一個命令列介面來測試 GeminiProcessor。
+    提供一個命令列介面來執行不同的 Gemini 相關任務。
     """
     import argparse
-    from rich.console import Console
-    from rich.panel import Panel
+    import pathlib
 
-    parser = argparse.ArgumentParser(description="非同步 Gemini 內容分析工具。")
-    parser.add_argument("file_path", type=str, help="包含待分析內容的文字檔案路徑。")
+    parser = argparse.ArgumentParser(description="Gemini 處理工具。")
+    parser.add_argument(
+        "--command",
+        type=str,
+        required=True,
+        choices=['validate_key', 'list_models', 'process'],
+        help="要執行的命令。"
+    )
     parser.add_argument("--api-key", type=str, help="Google API 金鑰 (或使用 GOOGLE_API_KEY 環境變數)。")
     parser.add_argument("--model", type=str, default="gemini-1.5-flash-latest", help="要使用的 Gemini 模型。")
+    parser.add_argument("--audio-file", type=str, help="要處理的音訊檔案路徑 (僅 'process' 命令需要)。")
+    parser.add_argument("--output-dir", type=str, default=".", help="報告和逐字稿的輸出目錄。")
+    parser.add_argument("--video-title", type=str, default="未命名影片", help="影片的標題。")
+    parser.add_argument("--tasks", type=str, default="summary,transcript", help="要執行的任務列表，以逗號分隔。")
+    parser.add_argument("--output-format", type=str, default="html", choices=['html', 'txt'], help="報告的輸出格式。")
+    # JULES-FIX-26.22-Hotfix-3: 新增缺失的 language 和 beam_size 參數
+    parser.add_argument("--language", type=str, default=None, help="[transcribe] 音訊的語言。")
+    parser.add_argument("--beam_size", type=int, default=5, help="[transcribe] 解碼時使用的光束大小。")
+
 
     args = parser.parse_args()
 
-    console = Console()
-
     api_key = args.api_key or os.environ.get("GOOGLE_API_KEY")
-    if not api_key:
-        console.print("[bold red]錯誤：[/bold red] 必須透過 --api-key 參數或 GOOGLE_API_KEY 環境變數提供 API 金鑰。")
-        return
+    if not api_key and args.command != 'process':
+        # 對於 process 命令，金鑰可能在 payload 中提供，所以這裡不立即退出
+        print(json.dumps({"error": "API Key not found", "error_code": "API_KEY_MISSING"}), file=sys.stderr)
+        sys.exit(1)
 
-    try:
-        with open(args.file_path, 'r', encoding='utf-8') as f:
-            content = f.read()
-    except FileNotFoundError:
-        console.print(f"[bold red]錯誤：[/bold red] 找不到檔案 '{args.file_path}'。")
-        return
-    except Exception as e:
-        console.print(f"[bold red]錯誤：[/bold red] 讀取檔案時發生錯誤: {e}")
-        return
+    # --- 根據命令執行對應的邏輯 ---
 
-    # 簡單的範例提示詞模板
-    prompt_template = """
-    你是一位專業的金融分析師。請閱讀以下財報文字，並以 JSON 格式回傳以下資訊：
-    1. `company_name` (string): 公司名稱。
-    2. `fiscal_year` (string): 財報的會計年度。
-    3. `net_income` (number): 純利金額。
-    4. `summary` (string): 少於 100 字的財報重點摘要。
+    if args.command == "validate_key":
+        if _validate_key(api_key):
+            print("金鑰驗證成功。")
+            sys.exit(0)
+        else:
+            print("金鑰驗證失敗。", file=sys.stderr)
+            sys.exit(1)
 
-    文章內容如下：
-    ---
-    {content}
-    ---
-    請直接回傳 JSON 物件，不要包含任何額外的解釋或 Markdown 標記。
-    """
+    elif args.command == "list_models":
+        models = _list_models(api_key)
+        if models:
+            print(json.dumps(models, ensure_ascii=False))
+            sys.exit(0)
+        else:
+            print("無法獲取模型列表。", file=sys.stderr)
+            sys.exit(1)
 
-    console.print(Panel(f"正在使用模型 [bold cyan]{args.model}[/bold cyan] 分析檔案 [bold yellow]{args.file_path}[/bold yellow]...", title="[bold green]分析開始[/bold green]"))
+    elif args.command == "process":
+        if not args.audio_file:
+            print(json.dumps({"error": "audio_file is required for process command"}), file=sys.stderr)
+            sys.exit(1)
+        if not Transcriber:
+            print(json.dumps({"error": "Transcriber module not available"}), file=sys.stderr)
+            sys.exit(1)
 
-    processor = GeminiProcessor(api_key=api_key, model_name=args.model)
-    result, error = await processor.analyze_content(content, prompt_template)
+        output_dir = pathlib.Path(args.output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        transcript_path = output_dir / f"{pathlib.Path(args.audio_file).stem}_transcript.txt"
 
-    if error:
-        console.print(Panel(f"分析失敗：\n[bold red]{error}[/bold red]", title="[bold red]分析失敗[/bold red]"))
-    else:
-        console.print(Panel(json.dumps(result, indent=2, ensure_ascii=False), title="[bold green]分析結果 (JSON)[/bold green]"))
+        try:
+            # 步驟 1: 轉錄音訊檔案
+            print(f"開始轉錄音訊檔案: {args.audio_file}...")
+            transcriber = Transcriber(model_size='base') # JULES-FIX-26.22-Hotfix: 使用正確的參數 'model_size'
+            # JULES-FIX-26.22-Hotfix-2: 修正 transcribe 方法的呼叫 (移除 await, 修正方法名稱, 傳遞參數)
+            transcript_text = transcriber.transcribe(args.audio_file, language=args.language, beam_size=args.beam_size)
+            with open(transcript_path, "w", encoding="utf-8") as f:
+                f.write(transcript_text)
+            print(f"逐字稿已儲存至: {transcript_path}")
+
+            # 步驟 2: 根據逐字稿生成報告
+            print("開始生成 AI 報告...")
+            report_content = _generate_report_from_transcript(
+                transcript=transcript_text,
+                video_title=args.video_title,
+                tasks=args.tasks,
+                model=args.model,
+                api_key=api_key
+            )
+            print("AI 報告生成完畢。")
+
+            # 步驟 3: 儲存報告
+            report_path = output_dir / f"{pathlib.Path(args.audio_file).stem}_report.{args.output_format}"
+            with open(report_path, "w", encoding="utf-8") as f:
+                # 簡單處理，未來可擴充為 HTML 模板
+                f.write(report_content)
+            print(f"報告已儲存至: {report_path}")
+
+            # 最終輸出 JSON 結果給呼叫者
+            final_result = {
+                "status": "success",
+                "output_path": str(report_path),
+                "transcript_path": str(transcript_path),
+                "video_title": args.video_title
+            }
+            print(json.dumps(final_result, ensure_ascii=False))
+            sys.exit(0)
+
+        except Exception as e:
+            log.error(f"處理程序中發生錯誤: {e}", exc_info=True)
+            print(json.dumps({"error": str(e)}), file=sys.stderr)
+            sys.exit(1)
 
 
 if __name__ == "__main__":
-    # 為了能從命令列執行此腳本進行測試
-    import os
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
-    # 檢查是否有名為 "GOOGLE_API_KEY" 的環境變數
-    if not os.environ.get("GOOGLE_API_KEY"):
-        print("警告: GOOGLE_API_KEY 環境變數未設定。如果需要，請透過 --api-key 參數提供。")
-
-    # 在 Windows 上設定正確的事件迴圈策略
     if os.name == 'nt':
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
-    asyncio.run(main())
+    # 使用 try-except 區塊來確保即使發生錯誤，也能正常退出
+    try:
+        asyncio.run(main())
+    except SystemExit as e:
+        # 捕捉 sys.exit()，這是正常的退出方式
+        sys.exit(e.code)
+    except Exception as e:
+        # 捕捉其他未預期的錯誤
+        print(json.dumps({"error": f"未預期的腳本錯誤: {e}"}), file=sys.stderr)
+        sys.exit(1)
