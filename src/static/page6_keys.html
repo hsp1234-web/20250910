@@ -438,6 +438,25 @@
             const overlay = document.getElementById('readiness-overlay');
             const buttons = document.querySelectorAll('button, a.button, input[type="button"], input[type="submit"]');
 
+            // 輔助函數：啟用UI
+            function enableUI() {
+                overlay.style.display = 'none';
+                buttons.forEach(btn => {
+                    btn.disabled = false;
+                });
+                console.log('系統已就緒，UI 已啟用。');
+            }
+
+            // 檢查 sessionStorage 中是否已有就緒標記
+            if (sessionStorage.getItem('isSystemReady') === 'true') {
+                enableUI();
+                const overlayText = overlay.querySelector('p');
+                if(overlayText) {
+                    overlayText.innerText = '系統已就緒';
+                }
+                return; // 如果已就緒，則不執行後續的輪詢
+            }
+
             // 1. 預設禁用所有按鈕並顯示遮罩
             buttons.forEach(btn => {
                 if (!btn.closest('.navbar')) {
@@ -451,13 +470,10 @@
                 fetch('/api/health/ready')
                     .then(response => {
                         if (response.ok) {
-                            // 3. 一旦請求成功，啟用按鈕並隱藏遮罩
+                            // 3. 一旦請求成功，設定標記、啟用按鈕並隱藏遮罩
                             clearInterval(readinessInterval);
-                            overlay.style.display = 'none';
-                            buttons.forEach(btn => {
-                                btn.disabled = false;
-                            });
-                            console.log('系統已就緒，UI 已啟用。');
+                            sessionStorage.setItem('isSystemReady', 'true'); // 設定標記
+                            enableUI();
                         } else {
                             console.log('等待核心服務就緒...');
                         }
