@@ -36,23 +36,29 @@
         </div>
 
         <div class="panel">
-            <h2>階段 1.5：AI 日期推斷</h2>
-            <p>此處顯示已完成第一階段分析的任務。勾選後即可開始進行 AI 日期推斷。</p>
+            <h2>階段 1.5：日期校正工作台</h2>
+            <p>此處顯示已完成第一階段分析的任務。您可以手動校正日期，或使用 AI 進行推斷。</p>
 
-            <div class="form-group" style="margin-top: 20px;">
-                <label for="model-select">選擇分析模型 (建議使用與第一階段相同的模型):</label>
-                <select id="model-select" disabled>
-                    <option value="">正在檢查 API 金鑰...</option>
-                </select>
+            <div class="control-panel">
+                <div class="form-group">
+                    <label for="default-date-input">設定預設日期:</label>
+                    <input type="date" id="default-date-input">
+                    <button id="apply-default-date-btn">將預設套用至無日期項目</button>
+                </div>
+                <hr>
+                <div class="form-group">
+                    <label for="model-select">或使用 AI 推斷日期 (針對已勾選項目):</label>
+                    <select id="model-select" disabled>
+                        <option value="">正在檢查 API 金鑰...</option>
+                    </select>
+                    <button id="start-inference-btn" class="primary-action">⏰ 開始日期推斷</button>
+                </div>
             </div>
 
             <div class="action-bar">
                 <div class="action-group">
                     <button id="select-all-button">全選可推斷項</button>
                     <button id="deselect-all-button">取消全選</button>
-                </div>
-                <div class="action-group">
-                    <button id="start-inference-btn" class="primary-action">⏰ 開始日期推斷</button>
                 </div>
             </div>
 
@@ -81,6 +87,10 @@
         const statusArea = document.getElementById('status-area');
         const copyLogButton = document.getElementById('copy-log-button');
         const modelSelect = document.getElementById('model-select');
+        const defaultDateInput = document.getElementById('default-date-input');
+        const applyDefaultDateBtn = document.getElementById('apply-default-date-btn');
+
+        let tasksData = []; // 用於儲存任務數據以便排序
 
         // --- Utility Functions ---
         const logStatus = (message, color = 'black') => {
@@ -94,31 +104,39 @@
                 logStatus('正在從後端獲取任務列表...');
                 const response = await fetch('/api/analyzer/files_for_date_inference');
                 if (!response.ok) throw new Error(`無法獲取待處理任務 (HTTP ${response.status})`);
-                const tasks = await response.json();
-                logStatus(`成功獲取 ${tasks.length} 個任務的資訊。`, 'green');
+                tasksData = await response.json();
 
-                if (tasks.length === 0) {
+                // 按日期排序，無日期的排在前面
+                tasksData.sort((a, b) => {
+                    const dateA = a.inferred_publish_date ? new Date(a.inferred_publish_date) : new Date(0);
+                    const dateB = b.inferred_publish_date ? new Date(b.inferred_publish_date) : new Date(0);
+                    return dateB - dateA;
+                });
+
+                logStatus(`成功獲取 ${tasksData.length} 個任務的資訊，並按日期排序。`, 'green');
+
+                if (tasksData.length === 0) {
                     fileCardsContainer.innerHTML = '<p>目前沒有可進行日期推斷的任務。請先完成第一階段 AI 分析。</p>';
                     return;
                 }
 
                 const statusMap = {
-                    'pending': '待推斷',
+                    'pending': '待處理',
                     'processing': '佇列中...',
                     'gemini_processing': 'AI 推斷中...',
-                    'completed': '✅ 推斷完成',
-                    'failed': '❌ 推斷失敗'
+                    'completed': '✅ 完成',
+                    'failed': '❌ 失敗'
                 };
 
                 let cardsHtml = '';
-                tasks.forEach(task => {
-                    // JULES: 使用 'date_inference_status' 欄位，如果不存在則預設為 'pending'
+                tasksData.forEach(task => {
                     const status = task.date_inference_status || 'pending';
                     const statusText = statusMap[status] || status;
                     const isPending = status === 'pending';
                     const isCompleted = status === 'completed';
                     const isFailed = status === 'failed';
                     const taskId = task.id;
+                    const dateDisplay = task.inferred_publish_date || 'N/A';
 
                     cardsHtml += `
                         <div class="file-card status-${status}" data-task-id="${taskId}">
@@ -128,10 +146,10 @@
                             </div>
                             <div class="card-body">
                                 <div class="info-grid">
-                                    <div class="info-item"><strong>推斷狀態:</strong> <span class="status-badge">${statusText}</span></div>
-                                    <div class="info-item"><strong>推斷模型:</strong> <span class="model-name">${task.date_inference_model || 'N/A'}</span></div>
-                                    <div class="info-item"><strong>推斷日期:</strong> <span>${task.inferred_publish_date || 'N/A'}</span></div>
-                                    <div class="info-item"><strong>Token 耗用:</strong> <span class="token-usage">${task.date_inference_token_usage || 'N/A'}</span></div>
+                                    <div class="info-item"><strong>狀態:</strong> <span class="status-badge">${statusText}</span></div>
+                                    <div class="info-item"><strong>模型:</strong> <span class="model-name">${task.date_inference_model || 'N/A'}</span></div>
+                                    <div class="info-item"><strong>日期:</strong> <span class="editable-date" data-task-id="${taskId}">${dateDisplay}</span></div>
+                                    <div class="info-item"><strong>Token:</strong> <span class="token-usage">${task.date_inference_token_usage || 'N/A'}</span></div>
                                 </div>
                             </div>
                             <div class="card-footer">
@@ -152,6 +170,29 @@
         };
 
         // --- API Call Functions ---
+        const updateDates = async (updates) => {
+            const endpoint = updates.length > 1 ? '/api/analyzer/update_dates_batch' : '/api/analyzer/update_date_single';
+            const body = updates.length > 1 ? { updates: updates } : updates[0];
+
+            logStatus(`正在更新 ${updates.length} 個任務的日期...`, 'blue');
+            try {
+                const response = await fetch(endpoint, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(body)
+                });
+                const result = await response.json();
+                if (response.ok) {
+                    logStatus(`成功更新日期: ${result.message}`, 'green');
+                    await renderTaskList(); // 重新渲染以顯示更新
+                } else {
+                    throw new Error(result.detail || '未知錯誤');
+                }
+            } catch (error) {
+                logStatus(`更新日期失敗: ${error.message}`, 'red');
+            }
+        };
+
         const populateModelSelector = (models) => {
             modelSelect.innerHTML = '';
             const priorityOrder = ["models/gemini-2.0-flash-lite", "models/gemini-2.0-flash", "models/gemini-2.5-flash-lite", "models/gemini-2.5-flash"];
@@ -229,12 +270,49 @@
         };
 
         // --- Event Listeners ---
+        applyDefaultDateBtn.addEventListener('click', () => {
+            const defaultDate = defaultDateInput.value;
+            if (!defaultDate) {
+                alert('請先設定一個預設日期。');
+                return;
+            }
+            const updates = tasksData
+                .filter(task => !task.inferred_publish_date)
+                .map(task => ({ task_id: task.id, new_date: defaultDate }));
+
+            if (updates.length === 0) {
+                alert('沒有找到任何需要設定預設日期的項目。');
+                return;
+            }
+            updateDates(updates);
+        });
+
         startInferenceBtn.addEventListener('click', () => {
             const selectedIds = Array.from(document.querySelectorAll('.task-checkbox:checked')).map(cb => parseInt(cb.value, 10));
             startInferenceForTasks(selectedIds);
         });
 
         fileCardsContainer.addEventListener('click', async (e) => {
+            if (e.target.classList.contains('editable-date')) {
+                const span = e.target;
+                const current_date = span.textContent === 'N/A' ? '' : span.textContent;
+                const input = document.createElement('input');
+                input.type = 'date';
+                input.value = current_date;
+                span.replaceWith(input);
+                input.focus();
+
+                input.addEventListener('blur', async () => {
+                    const newDate = input.value;
+                    if (newDate && newDate !== current_date) {
+                        const taskId = parseInt(span.dataset.taskId, 10);
+                        await updateDates([{ task_id: taskId, new_date: newDate }]);
+                    } else {
+                        input.replaceWith(span); // Revert if no change
+                    }
+                }, { once: true });
+            }
+
             if (e.target.classList.contains('btn-json')) {
                 const button = e.target;
                 const card = button.closest('.file-card');
@@ -292,8 +370,8 @@
             ws.onmessage = (event) => {
                 try {
                     const data = JSON.parse(event.data);
-                    if (data.task_type === 'analysis_stage_date_inference') {
-                         logStatus(`收到日期推斷任務 #${data.task_id} 狀態更新: ${data.status}。正在刷新列表...`, 'purple');
+                    if (data.task_type === 'analysis_stage_date_inference' || (data.type === 'analysis_update' && data.stage === 'date_inference')) {
+                         logStatus(`收到日期任務 #${data.task_id} 狀態更新: ${data.status}。正在刷新列表...`, 'purple');
                          renderTaskList();
                     }
                 } catch (err) {
@@ -304,6 +382,8 @@
 
         (async () => {
             logStatus('頁面載入完成，正在初始化...');
+            const today = new Date().toISOString().split('T')[0];
+            defaultDateInput.value = today; // 設定預設日期為今天
             await Promise.all([
                 checkKeysAndLoadModels(),
                 renderTaskList()

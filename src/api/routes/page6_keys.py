@@ -125,34 +125,43 @@ async def test_api_key(payload: TestKeyRequest):
         # 即使是測試，也回傳一個明確的失敗狀態，而不是 500 錯誤
         return {"is_valid": False, "error": str(e)}
 
-# --- JULES (2025-09-15): 新增設定相關的 API 端點 ---
+# --- JULES (2025-09-17): 重構為通用的設定管理 API ---
 
-class TimeoutUpdateRequest(BaseModel):
-    timeout: int = Field(..., ge=5, le=300, description="API 請求的超時秒數，範圍 5-300。")
+class ConfigUpdateRequest(BaseModel):
+    value: float = Field(..., description="要更新的設定值。")
 
-@router.get("/config/timeout", summary="獲取 API 超時設定")
-async def get_api_timeout():
+@router.get("/config/{key}", summary="獲取指定的設定值")
+async def get_config_value_api(key: str):
     """
-    從設定檔中讀取並回傳目前的 API 超時秒數。
+    從設定檔中讀取並回傳指定鍵的值。
     """
     try:
-        timeout = config_manager.get_config_value("api_timeout_seconds", default=35)
-        return {"timeout": timeout}
+        value = config_manager.get_config_value(key)
+        if value is None:
+            raise HTTPException(status_code=404, detail=f"找不到設定鍵: {key}")
+        return {"key": key, "value": value}
     except Exception as e:
-        log.error(f"讀取超時設定時發生錯誤: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="無法讀取設定檔。")
+        log.error(f"讀取設定 '{key}' 時發生錯誤: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"無法讀取設定檔: {key}")
 
-@router.post("/config/timeout", summary="更新 API 超時設定")
-async def update_api_timeout(payload: TimeoutUpdateRequest):
+@router.post("/config/{key}", summary="更新指定的設定值")
+async def update_config_value_api(key: str, payload: ConfigUpdateRequest):
     """
-    更新設定檔中的 API 超時秒數。
+    更新設定檔中的指定鍵值對。
     """
     try:
-        success = config_manager.update_config_value("api_timeout_seconds", payload.timeout)
+        # 在此處可以加入對特定 key 的值進行驗證的邏輯
+        if key in ["api_timeout_seconds", "gemini_submission_delay", "gemini_rotation_delay"]:
+            if not (0 <= payload.value <= 300):
+                raise HTTPException(status_code=400, detail="設定值必須介於 0 到 300 之間。")
+
+        success = config_manager.update_config_value(key, payload.value)
         if success:
-            return {"message": "API 超時設定已成功更新。", "new_timeout": payload.timeout}
+            return {"message": f"設定 '{key}' 已成功更新。", "new_value": payload.value}
         else:
             raise HTTPException(status_code=500, detail="儲存設定檔時發生錯誤。")
+    except HTTPException as e:
+        raise e # 重新拋出 HTTP 例外
     except Exception as e:
-        log.error(f"更新超時設定時發生錯誤: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="更新設定時發生伺服器內部錯誤。")
+        log.error(f"更新設定 '{key}' 時發生錯誤: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"更新設定時發生伺服器內部錯誤: {key}")
