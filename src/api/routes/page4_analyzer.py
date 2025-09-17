@@ -167,18 +167,42 @@ def _run_stage1_blocking_task(task_id: int, file_id: int, model_name: str, queue
 def _run_date_inference_blocking_task(task_id: int, model_name: str, queue: asyncio.Queue, loop: asyncio.AbstractEventLoop, db_client: DBClient):
     """
     (V4 優化後) 執行 AI 日期推斷的同步阻塞部分。
+    (Jules @ 2025-09-17) 優化：優先使用資料庫中的 message_date，若無效或不存在才使用 AI。
     現在接收一個 db_client 實例。
     """
     log.info(f"AI 日期推斷任務實際執行開始：task_id={task_id}")
     try:
+        task_data = db_client.get_analysis_task(task_id=task_id)
+        if not task_data or not task_data.get("file_content_for_analysis"):
+             raise ValueError(f"任務 {task_id} 中找不到可供分析的檔案內容。")
+
+        url_record = db_client.get_url_by_id(task_data['file_id'])
+
+        # Jules's Change: 優先使用 message_date
+        if url_record and url_record.get("message_date"):
+            message_date = url_record["message_date"]
+            try:
+                datetime.datetime.strptime(message_date.strip(), '%Y-%m-%d')
+                log.info(f"任務 {task_id}: 找到並使用有效的 message_date: {message_date}，將跳過 AI 日期推斷。")
+                db_client.update_analysis_task(
+                    task_id=task_id,
+                    updates={
+                        "inferred_publish_date": message_date.strip(),
+                        "date_inference_status": "completed",
+                        "date_inference_model": "pre_existing", # 標記來源為既有資料
+                        "date_inference_token_usage": 0
+                    }
+                )
+                return # 直接結束函式
+            except (ValueError, TypeError):
+                log.warning(f"任務 {task_id}: 資料庫中的 message_date ('{message_date}') 格式無效，將繼續使用 AI 推斷。")
+        # End of Jules's Change
+
         all_prompts = prompt_manager.get_all_prompts()
         date_prompt_template = all_prompts.get("stage_1_5_date_inference_prompt")
         if not date_prompt_template:
             raise ValueError("在提示詞庫中找不到 'stage_1_5_date_inference_prompt'。")
 
-        task_data = db_client.get_analysis_task(task_id=task_id)
-        if not task_data or not task_data.get("file_content_for_analysis"):
-             raise ValueError(f"任務 {task_id} 中找不到可供分析的檔案內容。")
 
         from core.config_manager import get_config_value
         api_timeout = get_config_value("api_timeout_seconds", 35)
@@ -189,12 +213,13 @@ def _run_date_inference_blocking_task(task_id: int, model_name: str, queue: asyn
         gemini = GeminiManager(api_keys=valid_keys, timeout=api_timeout)
 
         text_content = task_data['file_content_for_analysis']
-        url_record = db_client.get_url_by_id(task_data['file_id'])
-        message_date = url_record.get("message_date", get_current_taipei_date_str())
+
+        # Fallback message_date if needed for the prompt itself
+        fallback_message_date = url_record.get("message_date", get_current_taipei_date_str()) if url_record else get_current_taipei_date_str()
 
         date_prompt = date_prompt_template.format(
             document_text=text_content,
-            message_date=message_date,
+            message_date=fallback_message_date,
             today_date=get_current_taipei_date_str()
         )
 
@@ -211,7 +236,7 @@ def _run_date_inference_blocking_task(task_id: int, model_name: str, queue: asyn
             log.info(f"任務 {task_id}: AI 成功推斷出日期: {inferred_date_to_save}")
         except ValueError:
             log.warning(f"任務 {task_id}: AI 回傳的日期格式無效 ('{inferred_date_str}')。將使用訊息日期作為後備。")
-            inferred_date_to_save = message_date
+            inferred_date_to_save = fallback_message_date
 
         db_client.update_analysis_task(
             task_id=task_id,
