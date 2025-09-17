@@ -177,6 +177,12 @@ class GeminiManager:
                             if api_key in self.key_pool:
                                 self.key_pool.remove(api_key)
                                 self.cooldown_keys[api_key.key] = time.time() + self.cooldown_seconds
+
+                        # Jules @ 2025-09-17: 增加一個可設定的延遲，避免在瞬間耗盡所有金鑰
+                        from core.config_manager import get_config_value
+                        delay = get_config_value("gemini_rotation_delay", 2.0)
+                        logging.info(f"[{tag}] 等待 {delay} 秒後嘗試下一個金鑰...")
+                        time.sleep(delay)
                         break # 跳出內層重試迴圈，立即嘗試下一個金鑰
 
                     if is_permanent_error:

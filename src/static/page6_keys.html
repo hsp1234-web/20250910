@@ -76,6 +76,26 @@
             <p class="help-text">設定所有對外部 API (Google Gemini, Yahoo Finance) 請求的等待上限。過低可能導致正常請求失敗，過高可能在網路問題時造成長時間等待。</p>
         </div>
 
+        <!-- JULES (2025-09-17): 新增 API 請求延遲設定 -->
+        <div class="panel">
+            <h2>API 請求延遲設定</h2>
+            <div class="form-group">
+                <label for="initial-submission-delay-input">初始任務提交間隔 (秒, 0-10)</label>
+                <input type="number" id="initial-submission-delay-input" placeholder="建議值 1" min="0" max="10" step="0.1">
+                <button id="save-submission-delay-btn">儲存</button>
+                <p class="help-text">在批次啟動 AI 分析時，每個任務之間的提交間隔時間。有助於避免瞬間請求過多導致 API 壅塞。</p>
+            </div>
+            <div id="submission-delay-status" class="status-message"></div>
+            <hr>
+            <div class="form-group">
+                <label for="key-rotation-delay-input">金鑰失敗輪換延遲 (秒, 0-10)</label>
+                <input type="number" id="key-rotation-delay-input" placeholder="建議值 2" min="0" max="10" step="0.1">
+                <button id="save-rotation-delay-btn">儲存</button>
+                 <p class="help-text">當一個金鑰因配額用盡而失敗時，在嘗試下一個金鑰前的等待時間。有助於減緩金鑰池的消耗速度。</p>
+            </div>
+            <div id="rotation-delay-status" class="status-message"></div>
+        </div>
+
         <div class="panel">
             <div class="panel-header">
                 <h2>金鑰池</h2>
@@ -340,48 +360,70 @@
         });
 
         // --- JULES (2025-09-15): 超時設定邏輯 ---
-        const fetchTimeout = async () => {
+        // --- JULES (2025-09-17): 重構為通用設定處理函式 ---
+        const submissionDelayInput = document.getElementById('initial-submission-delay-input');
+        const saveSubmissionDelayBtn = document.getElementById('save-submission-delay-btn');
+        const submissionDelayStatus = document.getElementById('submission-delay-status');
+
+        const rotationDelayInput = document.getElementById('key-rotation-delay-input');
+        const saveRotationDelayBtn = document.getElementById('save-rotation-delay-btn');
+        const rotationDelayStatus = document.getElementById('rotation-delay-status');
+
+        const fetchSetting = async (key, inputElement, statusElement) => {
             try {
-                const response = await fetch('/api/keys/config/timeout');
-                if (!response.ok) throw new Error('無法獲取超時設定');
+                const response = await fetch(`/api/config/${key}`);
+                 if (!response.ok) {
+                    if (response.status === 404) {
+                        renderStatus(statusElement, '尚未設定，將使用系統預設值。', false);
+                        return;
+                    }
+                    throw new Error(`無法獲取設定 (HTTP ${response.status})`);
+                }
                 const data = await response.json();
-                timeoutInput.value = data.timeout;
+                inputElement.value = data.value;
+                 renderStatus(statusElement, `目前設定值: ${data.value}`, false);
             } catch (error) {
-                renderStatus(timeoutStatus, `獲取設定失敗: ${error.message}`, true);
+                renderStatus(statusElement, `獲取設定失敗: ${error.message}`, true);
             }
         };
 
-        saveTimeoutBtn.addEventListener('click', async () => {
-            const timeoutValue = parseInt(timeoutInput.value, 10);
-            if (isNaN(timeoutValue) || timeoutValue < 5 || timeoutValue > 300) {
-                renderStatus(timeoutStatus, '請輸入 5 到 300 之間的有效秒數。', true);
+        const saveSetting = async (key, inputElement, statusElement, buttonElement) => {
+            const value = parseFloat(inputElement.value);
+            if (isNaN(value) || value < 0 || value > 300) { // 擴大範圍以通用
+                renderStatus(statusElement, '請輸入 0 到 300 之間的有效數字。', true);
                 return;
             }
 
-            saveTimeoutBtn.disabled = true;
-            saveTimeoutBtn.textContent = '儲存中...';
-            renderStatus(timeoutStatus, '正在儲存...', false);
+            buttonElement.disabled = true;
+            buttonElement.textContent = '儲存中...';
+            renderStatus(statusElement, '正在儲存...', false);
 
             try {
-                const response = await fetch('/api/keys/config/timeout', {
+                const response = await fetch(`/api/config/${key}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ timeout: timeoutValue })
+                    body: JSON.stringify({ value: value })
                 });
                 const result = await response.json();
                 if (!response.ok) throw new Error(result.detail || '儲存失敗');
-                renderStatus(timeoutStatus, `設定已儲存，新的超時為 ${result.new_timeout} 秒。`, false);
+                renderStatus(statusElement, `設定已儲存，新值為 ${result.new_value}。`, false);
             } catch (error) {
-                renderStatus(timeoutStatus, `儲存失敗: ${error.message}`, true);
+                renderStatus(statusElement, `儲存失敗: ${error.message}`, true);
             } finally {
-                saveTimeoutBtn.disabled = false;
-                saveTimeoutBtn.textContent = '儲存設定';
+                buttonElement.disabled = false;
+                buttonElement.textContent = '儲存';
             }
-        });
+        };
+
+        saveTimeoutBtn.addEventListener('click', () => saveSetting('api_timeout_seconds', timeoutInput, timeoutStatus, saveTimeoutBtn));
+        saveSubmissionDelayBtn.addEventListener('click', () => saveSetting('gemini_submission_delay', submissionDelayInput, submissionDelayStatus, saveSubmissionDelayBtn));
+        saveRotationDelayBtn.addEventListener('click', () => saveSetting('gemini_rotation_delay', rotationDelayInput, rotationDelayStatus, saveRotationDelayBtn));
 
         // --- 初始載入 ---
         fetchKeys();
-        fetchTimeout(); // 載入超時設定
+        fetchSetting('api_timeout_seconds', timeoutInput, timeoutStatus);
+        fetchSetting('gemini_submission_delay', submissionDelayInput, submissionDelayStatus);
+        fetchSetting('gemini_rotation_delay', rotationDelayInput, rotationDelayStatus);
 
         const centerActiveNavButton = () => {
             const activeNavButton = document.querySelector('.top-nav a.active');

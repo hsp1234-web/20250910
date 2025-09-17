@@ -167,18 +167,42 @@ def _run_stage1_blocking_task(task_id: int, file_id: int, model_name: str, queue
 def _run_date_inference_blocking_task(task_id: int, model_name: str, queue: asyncio.Queue, loop: asyncio.AbstractEventLoop, db_client: DBClient):
     """
     (V4 優化後) 執行 AI 日期推斷的同步阻塞部分。
+    (Jules @ 2025-09-17) 優化：優先使用資料庫中的 message_date，若無效或不存在才使用 AI。
     現在接收一個 db_client 實例。
     """
     log.info(f"AI 日期推斷任務實際執行開始：task_id={task_id}")
     try:
+        task_data = db_client.get_analysis_task(task_id=task_id)
+        if not task_data or not task_data.get("file_content_for_analysis"):
+             raise ValueError(f"任務 {task_id} 中找不到可供分析的檔案內容。")
+
+        url_record = db_client.get_url_by_id(task_data['file_id'])
+
+        # Jules's Change: 優先使用 message_date
+        if url_record and url_record.get("message_date"):
+            message_date = url_record["message_date"]
+            try:
+                datetime.datetime.strptime(message_date.strip(), '%Y-%m-%d')
+                log.info(f"任務 {task_id}: 找到並使用有效的 message_date: {message_date}，將跳過 AI 日期推斷。")
+                db_client.update_analysis_task(
+                    task_id=task_id,
+                    updates={
+                        "inferred_publish_date": message_date.strip(),
+                        "date_inference_status": "completed",
+                        "date_inference_model": "pre_existing", # 標記來源為既有資料
+                        "date_inference_token_usage": 0
+                    }
+                )
+                return # 直接結束函式
+            except (ValueError, TypeError):
+                log.warning(f"任務 {task_id}: 資料庫中的 message_date ('{message_date}') 格式無效，將繼續使用 AI 推斷。")
+        # End of Jules's Change
+
         all_prompts = prompt_manager.get_all_prompts()
         date_prompt_template = all_prompts.get("stage_1_5_date_inference_prompt")
         if not date_prompt_template:
             raise ValueError("在提示詞庫中找不到 'stage_1_5_date_inference_prompt'。")
 
-        task_data = db_client.get_analysis_task(task_id=task_id)
-        if not task_data or not task_data.get("file_content_for_analysis"):
-             raise ValueError(f"任務 {task_id} 中找不到可供分析的檔案內容。")
 
         from core.config_manager import get_config_value
         api_timeout = get_config_value("api_timeout_seconds", 35)
@@ -189,12 +213,13 @@ def _run_date_inference_blocking_task(task_id: int, model_name: str, queue: asyn
         gemini = GeminiManager(api_keys=valid_keys, timeout=api_timeout)
 
         text_content = task_data['file_content_for_analysis']
-        url_record = db_client.get_url_by_id(task_data['file_id'])
-        message_date = url_record.get("message_date", get_current_taipei_date_str())
+
+        # Fallback message_date if needed for the prompt itself
+        fallback_message_date = url_record.get("message_date", get_current_taipei_date_str()) if url_record else get_current_taipei_date_str()
 
         date_prompt = date_prompt_template.format(
             document_text=text_content,
-            message_date=message_date,
+            message_date=fallback_message_date,
             today_date=get_current_taipei_date_str()
         )
 
@@ -211,7 +236,7 @@ def _run_date_inference_blocking_task(task_id: int, model_name: str, queue: asyn
             log.info(f"任務 {task_id}: AI 成功推斷出日期: {inferred_date_to_save}")
         except ValueError:
             log.warning(f"任務 {task_id}: AI 回傳的日期格式無效 ('{inferred_date_str}')。將使用訊息日期作為後備。")
-            inferred_date_to_save = message_date
+            inferred_date_to_save = fallback_message_date
 
         db_client.update_analysis_task(
             task_id=task_id,
@@ -448,9 +473,19 @@ async def start_stage1_analysis(request: Request, payload: Stage1Request, backgr
             )
             coroutines.append(coro)
 
-        # 使用 asyncio.gather 來併發執行所有協程
-        await asyncio.gather(*coroutines)
-        log.info("所有透過 gather 派發的分析任務均已完成。")
+        # JULES (2025-09-17): 根據使用者需求，將併發改為可設定延遲的序列執行
+        from core.config_manager import get_config_value
+        delay = get_config_value("gemini_submission_delay", 1.0) # 預設延遲 1 秒
+        log.info(f"將以 {delay} 秒的間隔，依序執行 {len(coroutines)} 個分析任務...")
+
+        for i, coro in enumerate(coroutines):
+            log.info(f"正在提交第 {i+1}/{len(coroutines)} 個任務...")
+            await coro
+            if i < len(coroutines) - 1:
+                log.info(f"任務提交完畢，等待 {delay} 秒...")
+                await asyncio.sleep(delay)
+
+        log.info("所有序列任務均已提交執行。")
 
     # 步驟 3: 將這個統一的併發執行函式作為單一背景任務加入
     if tasks_to_run_params:
@@ -681,6 +716,58 @@ async def get_stage2_result(task_id: int, db: DBClient = Depends(get_db)):
 
 # --- 已棄用的舊版分析流程 ---
 # 移除了 /analysis_status 和 /processed_files 端點，由新的專用端點取代
+
+# JULES (2025-09-17): 為日期校正工作台新增後端 API
+class UpdateDateSingleRequest(BaseModel):
+    task_id: int
+    new_date: str
+
+class UpdateDatesBatchRequest(BaseModel):
+    updates: List[UpdateDateSingleRequest]
+
+@router.post("/update_date_single")
+async def update_date_single(payload: UpdateDateSingleRequest, db: DBClient = Depends(get_db)):
+    """手動更新單一任務的日期。"""
+    try:
+        success = db.update_analysis_task(
+            task_id=payload.task_id,
+            updates={
+                "inferred_publish_date": payload.new_date,
+                "date_inference_status": "completed",
+                "date_inference_model": "manual",
+                "date_inference_token_usage": 0
+            }
+        )
+        if success:
+            return {"message": f"任務 #{payload.task_id} 的日期已成功更新。"}
+        else:
+            raise HTTPException(status_code=500, detail="更新資料庫時發生錯誤。")
+    except Exception as e:
+        log.error(f"更新單一日期時出錯 (task_id: {payload.task_id}): {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/update_dates_batch")
+async def update_dates_batch(payload: UpdateDatesBatchRequest, db: DBClient = Depends(get_db)):
+    """批次更新多個任務的日期。"""
+    updated_count = 0
+    try:
+        for update in payload.updates:
+            success = db.update_analysis_task(
+                task_id=update.task_id,
+                updates={
+                    "inferred_publish_date": update.new_date,
+                    "date_inference_status": "completed",
+                    "date_inference_model": "manual_batch",
+                    "date_inference_token_usage": 0
+                }
+            )
+            if success:
+                updated_count += 1
+        return {"message": f"成功更新了 {updated_count} / {len(payload.updates)} 個任務的日期。"}
+    except Exception as e:
+        log.error(f"批次更新日期時出錯: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 # JULES (2025-09-17): 新增用於生成 Word 報告的 API 端點
 from fastapi.responses import FileResponse
