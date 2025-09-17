@@ -1374,6 +1374,30 @@ async def health_check():
     return {"status": "ok", "message": "API Server is running."}
 
 
+# V5.5 啟動優化: 新增完全就緒健康檢查端點
+@app.get("/api/health/ready")
+async def readiness_check():
+    """
+    檢查核心服務 (依賴安裝、金鑰驗證) 是否已完全準備就緒。
+    前端將輪詢此端點以決定何時啟用 UI。
+    """
+    # 這是由 orchestrator 在準備好後建立的信號檔案
+    readiness_signal_file = Path("/tmp/full_ready.signal")
+    if readiness_signal_file.exists():
+        # 如果檔案存在，表示核心服務已就緒
+        return JSONResponse(
+            status_code=200,
+            content={"status": "ready", "message": "系統核心服務已準備就緒。"}
+        )
+    else:
+        # 如果檔案不存在，表示仍在初始化
+        return JSONResponse(
+            status_code=503, # Service Unavailable
+            content={"status": "initializing", "message": "系統正在初始化核心服務，請稍候..."},
+            headers={"Retry-After": "5"} # 建議客戶端 5 秒後重試
+        )
+
+
 
 
 class AppStatePayload(BaseModel):

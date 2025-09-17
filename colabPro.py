@@ -394,56 +394,10 @@ class ServerManager:
             process_env['PYTHONPATH'] = f"{src_path_str}{os.pathsep}{process_env.get('PYTHONPATH', '')}".strip(os.pathsep)
             self.server_process = subprocess.Popen(launch_command, cwd=str(project_path), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8', preexec_fn=os.setsid, env=process_env)
 
-            # --- 階段 3: 在背景安裝大型依賴 (先裝 uv 再用 uv) ---
-            def background_install():
-                self._log_manager.log("INFO", "步驟 3/3: [背景] 開始安裝大型與功能性依賴...")
-                # 首先，在背景確保 uv 已安裝
-                self._log_manager.log("INFO", "[背景] 檢查並安裝 'uv' 加速器...")
-                self._ensure_uv_installed()
-
-                # 然後，安裝大型依賴 (這次會自動使用 uv)
-                large_requirements = [
-                    project_path / "requirements" / "features.txt",
-                    project_path / "requirements" / "transcriber.txt",
-                    project_path / "requirements" / "gemini.txt",
-                    project_path / "requirements" / "analysis.txt"
-                ]
-                try:
-                    install_requirements(large_requirements, "功能與模型")
-                    self._log_manager.log("SUCCESS", "[背景] ✅ 所有大型任務依賴均已成功安裝！")
-
-                    # --- JULES (2025-09-16): 自動觸發金鑰重新驗證 (V2 增強版) ---
-                    self._log_manager.log("INFO", "[背景][驗證V2] 進入自動金鑰重新驗證區塊...")
-                    try:
-                        self._log_manager.log("INFO", "[背景][驗證V2] 正在等待伺服器就緒 (最長 60 秒)...")
-                        server_is_ready = self.server_ready_event.wait(timeout=60)
-
-                        if server_is_ready:
-                            self._log_manager.log("SUCCESS", "[背景][驗證V2] 伺服器已就緒！")
-                            if not self.port:
-                                self._log_manager.log("ERROR", "[背景][驗證V2] 伺服器已就緒但埠號 (port) 未設定，無法驗證。")
-                            else:
-                                validation_url = f"http://127.0.0.1:{self.port}/api/keys/validate"
-                                self._log_manager.log("INFO", f"[背景][驗證V2] 正在向 {validation_url} 發送 POST 請求...")
-                                try:
-                                    response = requests.post(validation_url, timeout=180)
-                                    self._log_manager.log("SUCCESS", f"[背景][驗證V2] 請求完成，狀態碼: {response.status_code}")
-                                    if response.status_code != 200:
-                                        self._log_manager.log("WARN", f"[背景][驗證V2] 伺服器回應: {response.text}")
-                                except Exception as req_e:
-                                    self._log_manager.log("ERROR", f"[背景][驗證V2] 發送驗證請求時發生網路層錯誤: {req_e}", "requests")
-                        else:
-                            self._log_manager.log("WARN", "[背景][驗證V2] 等待伺服器就緒超時，無法自動觸發金鑰驗證。")
-                    except Exception as e_outer:
-                        self._log_manager.log("CRITICAL", f"[背景][驗證V2] 金鑰驗證區塊發生未預期的嚴重錯誤: {e_outer}")
-                    finally:
-                        self._log_manager.log("INFO", "[背景][驗證V2] 自動金鑰驗證區塊執行完畢。")
-
-                except Exception as e:
-                    self._log_manager.log("CRITICAL", f"[背景] 大型依賴安裝失敗: {e}")
-
-            bg_install_thread = threading.Thread(target=background_install, daemon=True)
-            bg_install_thread.start()
+            # --- 階段 3: [已停用] V5.5 之後，大型依賴的安裝由使用者在需要時觸發 ---
+            # 背景安裝執行緒已被移除，以支援新的「完全就緒」信號架構。
+            # 核心依賴 (features_core.txt) 的安裝與驗證已移至 orchestrator.py 中處理。
+            self._log_manager.log("INFO", "步驟 3/3: [V5.5] 大型依賴將在需要時由使用者手動安裝。")
 
             port_pattern = re.compile(r"PROXY_URL: http://127.0.0.1:(\d+)")
             uvicorn_ready_pattern = re.compile(r"Uvicorn running on")
