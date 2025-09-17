@@ -216,6 +216,7 @@ def initialize_database(conn: sqlite3.Connection = None):
                 "author": "TEXT", # 新增作者欄位
                 "message_date": "TEXT", # 訊息本身的日期
                 "message_time": "TEXT", # 訊息本身的時間
+                "title": "TEXT", # (Jules @ 2025-09-17) 新增標題欄位
                 "status": "TEXT DEFAULT 'pending'",
                 "status_message": "TEXT",
                 "local_path": "TEXT",
@@ -901,12 +902,12 @@ def add_new_urls(parsed_data: list[dict], source_text: str) -> int:
             from core.time_utils import get_current_taipei_time_iso
             created_at_iso = get_current_taipei_time_iso()
             data_to_insert = [
-                (item['url'], item['author'], item['date'], item['time'], source_text, created_at_iso)
+                (item['url'], item['author'], item['date'], item['time'], item.get('title', '無標題'), source_text, created_at_iso)
                 for item in new_items
             ]
 
             cursor.executemany(
-                "INSERT INTO extracted_urls (url, author, message_date, message_time, source_text, created_at, status) VALUES (?, ?, ?, ?, ?, ?, 'pending')",
+                "INSERT INTO extracted_urls (url, author, message_date, message_time, title, source_text, created_at, status) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')",
                 data_to_insert
             )
 
