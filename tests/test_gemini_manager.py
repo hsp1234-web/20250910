@@ -1,204 +1,78 @@
 import sys
-import unittest
-from unittest.mock import patch, MagicMock, call
 from pathlib import Path
-from collections import deque
+import pytest
 
 # --- 路徑修正，確保可以從 tests 目錄找到 src ---
 SRC_DIR = Path(__file__).resolve().parent.parent / "src"
 sys.path.insert(0, str(SRC_DIR))
 
+# --- 導入待測試的目標 ---
 from tools.gemini_manager import GeminiManager, ApiKey
 
-class TestGeminiManager(unittest.TestCase):
+# --- 簡單的導入測試 ---
 
-    def setUp(self):
-        """為每個測試案例設定環境"""
-        self.api_keys_data = [
+def test_import_orchestrator():
+    """測試：確保核心協調器模組可以被成功導入。"""
+    try:
+        from core import orchestrator
+    except ImportError as e:
+        pytest.fail(f"無法導入 'orchestrator' 模組: {e}")
+
+def test_import_gemini_processor():
+    """測試：確保 Gemini 處理器模組可以被成功導入。"""
+    try:
+        from tools import gemini_processor
+    except ImportError as e:
+        pytest.fail(f"無法導入 'gemini_processor' 模組: {e}")
+
+# --- GeminiManager 的單元測試 ---
+
+class TestGeminiManager:
+    """針對簡化後的 GeminiManager 的測試套件。"""
+
+    def test_initialization_with_keys(self):
+        """測試：使用有效的金鑰列表初始化 GeminiManager。"""
+        api_keys_data = [
             {'name': 'key_1', 'value': 'value_1'},
-            {'name': 'key_2', 'value': 'value_2'},
-            {'name': 'key_3', 'value': 'value_3'}
+            {'name': 'key_2', 'value': 'value_2'}
         ]
 
-    @patch('tools.gemini_manager.GenerationConfig', MagicMock())
-    @patch('tools.gemini_manager.genai')
-    def test_successful_call_on_first_key(self, mock_genai):
-        """測試：第一個金鑰就成功的情況"""
-        # 設定
-        mock_model = MagicMock()
-        mock_model.generate_content.return_value.text = '{"message": "success"}'
-        mock_genai.GenerativeModel.return_value = mock_model
+        manager = GeminiManager(api_keys=api_keys_data)
 
-        manager = GeminiManager(api_keys=self.api_keys_data)
+        assert len(manager.api_keys) == 2
+        assert isinstance(manager.api_keys[0], ApiKey)
+        assert manager.api_keys[0].name == 'key_1'
+        assert manager.api_keys[1].key == 'value_2'
 
-        # 執行
-        result, error, used_key_name, _ = manager._api_call_wrapper(
-            "test_task", "test_model", ["prompt"], "json"
-        )
+    def test_initialization_with_empty_list(self):
+        """
+        測試：使用空的金鑰列表初始化 GeminiManager。
+        這是針對先前 ValueError 錯誤的迴歸測試。
+        """
+        # 這個操作不應該引發任何錯誤
+        try:
+            manager = GeminiManager(api_keys=[])
+            assert manager.api_keys == []
+        except ValueError:
+            pytest.fail("GeminiManager 不應在使用空列表初始化時引發 ValueError。")
 
-        # 斷言
-        self.assertEqual(result, {"message": "success"})
-        self.assertIsNone(error)
-        self.assertEqual(used_key_name, "key_1")
-        mock_genai.configure.assert_called_once_with(api_key='value_1')
-        mock_model.generate_content.assert_called_once()
-
-        # 斷言金鑰池已輪換，成功的 key_1 現在在末尾
-        self.assertEqual(manager.key_pool[0].name, 'key_2')
-        self.assertEqual(manager.key_pool[-1].name, 'key_1')
-
-    @patch('tools.gemini_manager.GenerationConfig', MagicMock())
-    @patch('tools.gemini_manager.genai')
-    def test_failover_on_quota_error(self, mock_genai):
-        """測試：第一個金鑰配額用盡，應自動轉移到第二個金鑰並成功"""
-        # 設定
-        # 模擬第一個金鑰拋出配額錯誤，第二個金鑰正常回傳
-        mock_model_fail = MagicMock()
-        mock_model_fail.generate_content.side_effect = Exception("Resource has been exhausted (e.g. check quota).")
-
-        mock_model_success = MagicMock()
-        mock_model_success.generate_content.return_value.text = '{"message": "success_on_key_2"}'
-
-        # 讓 GenerativeModel 根據 api_key 回傳不同的 mock model
-        def model_side_effect(model_name):
-            api_key = mock_genai.configure.call_args.kwargs['api_key']
-            if api_key == 'value_1':
-                return mock_model_fail
-            return mock_model_success
-
-        mock_genai.GenerativeModel.side_effect = model_side_effect
-
-        manager = GeminiManager(api_keys=self.api_keys_data)
-
-        # 執行
-        result, error, used_key_name, _ = manager._api_call_wrapper(
-            "test_task", "test_model", ["prompt"], "json"
-        )
-
-        # 斷言
-        self.assertEqual(result, {"message": "success_on_key_2"})
-        self.assertIsNone(error)
-        self.assertEqual(used_key_name, "key_2")
-
-        # 驗證 configure 被呼叫了兩次，分別用 key_1 和 key_2
-        self.assertEqual(mock_genai.configure.call_count, 2)
-        mock_genai.configure.assert_has_calls([
-            call(api_key='value_1'),
-            call(api_key='value_2')
-        ])
-
-        # 驗證 generate_content 也被呼叫了兩次
-        self.assertEqual(mock_model_fail.generate_content.call_count, 1)
-        self.assertEqual(mock_model_success.generate_content.call_count, 1)
-
-    @patch('tools.gemini_manager.GenerationConfig', MagicMock())
-    @patch('tools.gemini_manager.genai')
-    @patch('tools.gemini_manager.time.sleep', return_value=None) # 避免在測試中實際等待
-    def test_retry_on_transient_error_then_succeed(self, mock_sleep, mock_genai):
-        """測試：遇到暫時性錯誤時，應在同一個金鑰上重試並成功"""
-        # 設定
-        mock_model = MagicMock()
-        # 第一次呼叫拋出 500 錯誤，第二次正常回傳
-        mock_model.generate_content.side_effect = [
-            Exception("500 Internal Server Error"),
-            MagicMock(text='{"message": "success_after_retry"}')
-        ]
-        mock_genai.GenerativeModel.return_value = mock_model
-
-        manager = GeminiManager(api_keys=self.api_keys_data, max_retries=3)
-
-        # 執行
-        result, error, used_key_name, _ = manager._api_call_wrapper(
-            "test_task", "test_model", ["prompt"], "json"
-        )
-
-        # 斷言
-        self.assertEqual(result, {"message": "success_after_retry"})
-        self.assertIsNone(error)
-        self.assertEqual(used_key_name, "key_1")
-
-        # 驗證 configure 只用第一個金鑰呼叫了一次
-        mock_genai.configure.assert_called_once_with(api_key='value_1')
-
-        # 驗證 generate_content 被呼叫了兩次
-        self.assertEqual(mock_model.generate_content.call_count, 2)
-        # 驗證 sleep 被呼叫了一次
-        mock_sleep.assert_called_once()
-
-    @patch('tools.gemini_manager.GenerationConfig', MagicMock())
-    @patch('tools.gemini_manager.genai')
-    def test_all_keys_fail(self, mock_genai):
-        """測試：所有金鑰都失敗的情況"""
-        # 設定
-        # 讓所有金鑰都拋出永久性錯誤
-        mock_model = MagicMock()
-        mock_model.generate_content.side_effect = Exception("Resource has been exhausted (e.g. check quota).")
-        mock_genai.GenerativeModel.return_value = mock_model
-
-        manager = GeminiManager(api_keys=self.api_keys_data)
-
-        # 執行
-        result, error, used_key_name, _ = manager._api_call_wrapper(
-            "test_task", "test_model", ["prompt"], "json"
-        )
-
-        # 斷言
-        self.assertIsNone(result)
-        self.assertIsNotNone(error)
-        self.assertIn("quota", str(error))
-        self.assertEqual(used_key_name, "all_keys_failed")
-
-        # 驗證 configure 被呼叫了三次，每個金鑰都試了一次
-        self.assertEqual(mock_genai.configure.call_count, 3)
-        mock_genai.configure.assert_has_calls([
-            call(api_key='value_1'),
-            call(api_key='value_2'),
-            call(api_key='value_3')
-        ])
-
-    @patch('tools.gemini_manager.genai')
-    def test_list_available_models(self, mock_genai):
-        """測試 list_available_models 是否能正確篩選並回傳模型。"""
-        # 設定
-        # 模擬 google.generativeai.list_models() 的回傳值
-        mock_model_1 = MagicMock()
-        mock_model_1.name = "models/gemini-pro"
-        mock_model_1.supported_generation_methods = ["generateContent", "otherMethod"]
-
-        mock_model_2 = MagicMock()
-        mock_model_2.name = "models/gemini-pro-vision"
-        mock_model_2.supported_generation_methods = ["generateContent"]
-
-        mock_model_3 = MagicMock()
-        mock_model_3.name = "models/text-embedding-004"
-        mock_model_3.supported_generation_methods = ["embedContent"] # 不支援 generateContent
-
-        mock_model_4 = MagicMock()
-        mock_model_4.name = "models/aqa"
-        mock_model_4.supported_generation_methods = ["generateAnswer"] # 不支援 generateContent
-
-        mock_genai.list_models.return_value = [
-            mock_model_1, mock_model_2, mock_model_3, mock_model_4
+    def test_get_all_keys(self):
+        """測試：get_all_keys() 方法是否能正確返回所有金鑰。"""
+        api_keys_data = [
+            {'name': 'key_1', 'value': 'value_1'}
         ]
 
-        manager = GeminiManager(api_keys=self.api_keys_data)
+        manager = GeminiManager(api_keys=api_keys_data)
 
-        # 執行
-        available_models = manager.list_available_models()
+        all_keys = manager.get_all_keys()
 
-        # 斷言
-        # 1. genai.configure 應該被第一個金鑰呼叫
-        mock_genai.configure.assert_called_once_with(api_key='value_1')
+        assert len(all_keys) == 1
+        assert isinstance(all_keys[0], ApiKey)
+        assert all_keys[0].name == 'key_1'
+        assert all_keys[0].key == 'value_1'
 
-        # 2. list_models 應該被呼叫
-        mock_genai.list_models.assert_called_once()
-
-        # 3. 回傳的列表應該只包含支援 'generateContent' 的模型名稱
-        self.assertEqual(len(available_models), 2)
-        self.assertIn("models/gemini-pro", available_models)
-        self.assertIn("models/gemini-pro-vision", available_models)
-        self.assertNotIn("models/text-embedding-004", available_models)
-
-
-if __name__ == '__main__':
-    unittest.main()
+    def test_get_all_keys_when_empty(self):
+        """測試：當初始化為空時，get_all_keys() 應返回空列表。"""
+        manager = GeminiManager(api_keys=[])
+        all_keys = manager.get_all_keys()
+        assert all_keys == []

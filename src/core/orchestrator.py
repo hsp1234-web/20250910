@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 import argparse
+import asyncio
+import itertools
+import json
 import logging
 import os
 import re
@@ -10,7 +13,9 @@ import sys
 import threading
 import time
 from pathlib import Path
-import requests # V5.5 新增導入
+from typing import Dict, Any, List
+
+import requests
 
 # --- 路徑修正 (必須在所有專案內部模組導入之前) ---
 SRC_DIR = Path(__file__).resolve().parent.parent
@@ -19,7 +24,10 @@ ROOT_DIR = SRC_DIR.parent
 
 # --- 現在可以安全地導入專案內部模組了 ---
 from db.client import DBClient
+from tools.gemini_manager import GeminiManager
+from tools.gemini_processor import GeminiProcessor
 
+# --- 日誌設定 ---
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -32,6 +40,24 @@ processes = []
 threads = []
 stop_event = threading.Event()
 db_client = None
+gemini_manager = None # 全域的 GeminiManager 實例
+
+# --- 設定 ---
+# 批次處理的相關設定
+BATCH_PROCESSING_INTERVAL_SECONDS = 60  # 每隔 60 秒執行一次批次處理
+MAX_CONCURRENT_TASKS = 5  # 同時執行的最大非同步任務數量
+GEMINI_API_TIMEOUT = 180 # API 請求的超時時間
+GEMINI_MODEL_NAME = "gemini-1.5-flash-latest" # 要使用的模型名稱
+# 從 prompts/default_prompts.json 讀取模板 (簡易版)
+# 在真實應用中，這應該由一個更健壯的設定管理器來處理
+try:
+    PROMPT_FILE = SRC_DIR / "prompts" / "default_prompts.json"
+    with open(PROMPT_FILE, 'r', encoding='utf-8') as f:
+        ANALYSIS_PROMPT_TEMPLATE = json.load(f).get("analyze_financial_report", "請分析以下內容：\n{content}")
+except Exception as e:
+    log.error(f"無法載入提示詞模板: {e}")
+    ANALYSIS_PROMPT_TEMPLATE = "請分析以下內容：\n{content}"
+
 
 # --- V5.5 啟動優化: 新增全域就緒信號 ---
 full_readiness_event = threading.Event()
@@ -111,8 +137,10 @@ def prepare_core_services(api_port: int, api_ready_event: threading.Event):
         log.info("[核心準備] 背景任務已啟動。")
 
         # 步驟 1: 安裝核心依賴
+        log.info("[核心準備] 正在安裝核心及轉錄器依賴...")
         core_req_path = ROOT_DIR / "requirements" / "features_core.txt"
-        _install_dependencies([core_req_path], log_prefix="核心服務")
+        transcriber_req_path = ROOT_DIR / "requirements" / "transcriber.txt"
+        _install_dependencies([core_req_path, transcriber_req_path], log_prefix="核心服務")
 
         # 步驟 2: 等待 API 伺服器就緒
         log.info("[核心準備] 等待 API 伺服器就緒...")
@@ -151,6 +179,141 @@ def prepare_core_services(api_port: int, api_ready_event: threading.Event):
              READINESS_SIGNAL_FILE.write_text(f"Error: {e}", encoding="utf-8")
 
 
+# --- 非同步批次處理核心邏輯 ---
+
+async def worker(file_to_process: Dict[str, Any], api_key, semaphore: asyncio.Semaphore) -> Dict[str, Any]:
+    """
+    單一檔案的非同步處理單元。
+
+    Args:
+        file_to_process (Dict): 從資料庫獲取的檔案記錄。
+        api_key: 用於此次處理的 ApiKey 物件。
+        semaphore: 用於控制併發的信號量。
+
+    Returns:
+        一個包含處理結果的字典。
+    """
+    file_id = file_to_process.get('id')
+    file_path = file_to_process.get('file_path')
+    log.info(f"[Worker] 開始處理檔案 ID: {file_id}，使用金鑰: {api_key.name}")
+
+    async with semaphore:
+        log.info(f"[Worker] 取得信號量，正在處理檔案 ID: {file_id}")
+        try:
+            # 讀取檔案內容
+            # 注意：在真實的分散式系統中，檔案路徑可能需要轉換或從遠端儲存讀取
+            with open(file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+
+            processor = GeminiProcessor(
+                api_key=api_key.key,
+                model_name=GEMINI_MODEL_NAME,
+                timeout=GEMINI_API_TIMEOUT
+            )
+
+            analysis_result, error = await processor.analyze_content(content, ANALYSIS_PROMPT_TEMPLATE)
+
+            if error:
+                log.error(f"檔案 ID {file_id} 分析失敗: {error}")
+                return {"file_id": file_id, "status": "failed", "error_message": error}
+            else:
+                log.info(f"檔案 ID {file_id} 分析成功。")
+                # 將分析結果（JSON）轉換為字串存儲
+                return {"file_id": file_id, "status": "processed", "analysis_result": json.dumps(analysis_result, ensure_ascii=False)}
+
+        except Exception as e:
+            log.error(f"處理檔案 ID {file_id} 時發生未預期的 Worker 錯誤: {e}", exc_info=True)
+            return {"file_id": file_id, "status": "failed", "error_message": str(e)}
+
+async def process_batch_async():
+    """
+    非同步批次處理的主函式。
+    """
+    log.info("--- [非同步批次處理] 開始執行 ---")
+
+    if not db_client or not gemini_manager:
+        log.warning("[非同步批次處理] DB 客戶端或 Gemini 管理器未初始化，跳過此次執行。")
+        return
+
+    # 1. 收集任務
+    pending_files = db_client.get_files_by_status('pending')
+    if not pending_files:
+        log.info("[非同步批次處理] 沒有待處理的檔案，任務結束。")
+        return
+
+    log.info(f"[非同步批次處理] 發現 {len(pending_files)} 個待處理的檔案。")
+
+    # 2. 準備資源
+    all_keys = gemini_manager.get_all_keys()
+    if not all_keys:
+        log.error("[非同步批次處理] 金鑰池為空，無法處理檔案。")
+        return
+
+    key_cycle = itertools.cycle(all_keys)
+    semaphore = asyncio.Semaphore(MAX_CONCURRENT_TASKS)
+
+    # 3. 建立受控的非同步任務
+    tasks = []
+    for file_record in pending_files:
+        api_key = next(key_cycle)
+        task = asyncio.create_task(worker(file_record, api_key, semaphore))
+        tasks.append(task)
+
+    # 4. 一次性併發派發並等待結果
+    log.info(f"準備派發 {len(tasks)} 個非同步任務，最大併發數: {MAX_CONCURRENT_TASKS}...")
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    log.info("所有非同步任務執行完畢。")
+
+    # 5. 批次更新狀態
+    success_count = 0
+    failure_count = 0
+    for result in results:
+        if isinstance(result, Exception):
+            log.error(f"一個 Worker 任務因未捕捉的例外而失敗: {result}", exc_info=result)
+            failure_count += 1
+            continue
+
+        file_id = result.get('file_id')
+        status = result.get('status')
+
+        if status == 'processed':
+            db_client.update_file_status(
+                file_id,
+                'processed',
+                analysis_result=result.get('analysis_result')
+            )
+            success_count += 1
+        else:
+            db_client.update_file_status(
+                file_id,
+                'failed',
+                error_message=result.get('error_message')
+            )
+            failure_count += 1
+
+    log.info(f"--- [非同步批次處理] 執行完畢 ---")
+    log.info(f"成功: {success_count}，失敗: {failure_count}。")
+
+
+def run_batch_processing_periodically():
+    """
+    在一個專門的執行緒中，定期執行非同步批次處理。
+    """
+    log.info("[批次處理執行緒] 已啟動，將每隔 {} 秒執行一次。".format(BATCH_PROCESSING_INTERVAL_SECONDS))
+    while not stop_event.is_set():
+        try:
+            # 使用 asyncio.run 來執行頂層的 async 函式
+            asyncio.run(process_batch_async())
+        except Exception as e:
+            log.error(f"[批次處理執行緒] 執行非同步任務時發生錯誤: {e}", exc_info=True)
+
+        # 等待下一個週期或直到停止事件被觸發
+        stop_event.wait(BATCH_PROCESSING_INTERVAL_SECONDS)
+    log.info("[批次處理執行緒] 已停止。")
+
+
+# --- 現有的服務管理邏輯 (保持不變) ---
+
 def find_free_port():
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(('', 0))
@@ -184,9 +347,9 @@ def main():
     parser.add_argument("--port", type=int, default=None, help="指定 API 伺服器運行的固定埠號。")
     args, _ = parser.parse_known_args()
 
-    global db_client
+    global db_client, gemini_manager
     try:
-        log.info("--- [協調器啟動 V5.5] ---")
+        log.info("--- [協調器啟動 V5.5 + 非同步批次處理] ---")
 
         # 清理上一次執行的信號檔案
         if READINESS_SIGNAL_FILE.exists():
@@ -224,8 +387,23 @@ def main():
         db_client = DBClient()
         log.info("✅ DB 客戶端初始化完成。")
 
+        # 初始化 Gemini Manager
+        # 在真實應用中，金鑰應該從安全的設定檔或環境變數載入
+        # 這裡我們假設金鑰儲存在環境變數 GOOGLE_API_KEYS_JSON 中
+        # 格式: '[{"name": "key1", "value": "xxx"}, {"name": "key2", "value": "yyy"}]'
+        api_keys_json = os.environ.get("GOOGLE_API_KEYS_JSON", "[]")
+        try:
+            api_keys = json.loads(api_keys_json)
+            if not api_keys:
+                log.warning("未提供任何 API 金鑰，非同步處理器將無法執行。")
+            gemini_manager = GeminiManager(api_keys=api_keys)
+        except (json.JSONDecodeError, ValueError) as e:
+            log.error(f"無法載入或解析 API 金鑰: {e}")
+            # 即使金鑰載入失敗，系統仍應繼續啟動
+            gemini_manager = GeminiManager(api_keys=[])
+
+
         log.info("🔧 正在啟動 API 伺服器...")
-        # V5.5: 建立一個事件，讓核心準備任務可以知道 API 伺服器何時就緒
         api_ready_event = threading.Event()
         api_server_cmd = [sys.executable, "-m", "api.api_server", "--port", str(api_port)]
         if args.mock: api_server_cmd.append("--mock")
@@ -236,10 +414,7 @@ def main():
         api_proc = subprocess.Popen(api_server_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding='utf-8', env=api_env)
         processes.append(api_proc)
 
-        # V5.5: 修改 stream_reader 的呼叫，讓它在偵測到 Uvicorn 啟動信號時設置 api_ready_event
-        api_ready_signal = "Uvicorn running on"
-        # V5.5.1 修正: 將就緒信號的監聽同時應用於 stdout 和 stderr，以確保捕捉到 Uvicorn 的啟動訊息
-        api_ready_kwargs = {'ready_event': api_ready_event, 'ready_signal': api_ready_signal}
+        api_ready_kwargs = {'ready_event': api_ready_event, 'ready_signal': "Uvicorn running on"}
         api_stdout_thread = threading.Thread(target=stream_reader, args=(api_proc.stdout, 'api_server'), kwargs=api_ready_kwargs)
         api_stderr_thread = threading.Thread(target=stream_reader, args=(api_proc.stderr, 'api_server_stderr'), kwargs=api_ready_kwargs)
         threads.extend([api_stdout_thread, api_stderr_thread])
@@ -247,12 +422,17 @@ def main():
             t.daemon = True
             t.start()
 
-        # --- V5.5 啟動優化: 啟動核心服務準備執行緒 ---
         log.info("🚀 正在啟動核心服務準備任務 (背景執行)...")
         core_prep_thread = threading.Thread(target=prepare_core_services, args=(api_port, api_ready_event), daemon=True)
         threads.append(core_prep_thread)
         core_prep_thread.start()
-        # --- V5.5 啟動優化結束 ---
+
+        # --- 啟動新的非同步批次處理執行緒 ---
+        log.info("🚀 正在啟動非同步批次處理監控執行緒...")
+        batch_thread = threading.Thread(target=run_batch_processing_periodically, daemon=True)
+        threads.append(batch_thread)
+        batch_thread.start()
+        # --- --------------------------- ---
 
         log.info("--- [協調器進入監控模式] ---")
         while not stop_event.is_set():

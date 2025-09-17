@@ -1,338 +1,192 @@
 # -*- coding: utf-8 -*-
-# tools/gemini_processor.py
-import argparse
+import asyncio
 import json
 import logging
-import os
-import re
-import sys
 import time
-from pathlib import Path
-import google.generativeai as genai
-import concurrent.futures
+from typing import Any, Dict, Optional, Tuple
 
-# --- 日誌設定 ---
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    stream=sys.stderr
-)
-log = logging.getLogger('gemini_processor_tool')
+try:
+    import google.generativeai as genai
+    from google.api_core import exceptions as google_exceptions
+    from google.generativeai.types import GenerationConfig
+except ImportError:
+    logging.warning("缺少 google-generativeai 模組，AI 分析功能將被停用。")
+    genai = None
+    GenerationConfig = None
+    google_exceptions = None
 
-# --- 輔助函式 ---
-def sanitize_filename(title: str, max_len: int = 60) -> str:
-    if not title:
-        title = "untitled_document"
-    title = re.sub(r'[\\/*?:"<>|]', "_", title)
-    title = title.replace(" ", "_")
-    title = re.sub(r"_+", "_", title)
-    title = title.strip('_')
-    return title[:max_len]
+# 專為此模組設定日誌
+log = logging.getLogger(__name__)
 
-def print_progress(status: str, detail: str, extra_data: dict = None):
-    progress_data = {"type": "progress", "status": status, "detail": detail}
-    if extra_data:
-        progress_data.update(extra_data)
-    print(json.dumps(progress_data), file=sys.stderr, flush=True)
+class GeminiProcessor:
+    """
+    一個使用 asyncio 實現的非同步 Gemini API 處理器。
+    它被設計為由 Orchestrator 在受控的併發環境中呼叫。
+    """
 
-# --- 提示詞管理 ---
-PROMPTS_FILE_PATH = Path(__file__).resolve().parent.parent / "prompts" / "default_prompts.json"
+    def __init__(self, api_key: str, model_name: str = "gemini-1.5-flash-latest", timeout: int = 120):
+        """
+        初始化 Gemini 處理器。
 
-def load_prompts() -> dict:
-    try:
-        with open(PROMPTS_FILE_PATH, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError) as e:
-        log.critical(f"🔴 無法載入或解析提示詞檔案: {PROMPTS_FILE_PATH}。錯誤: {e}", exc_info=True)
-        sys.exit(1)
+        Args:
+            api_key (str): 用於此次操作的 Google API 金鑰。
+            model_name (str): 要使用的 Gemini 模型名稱。
+            timeout (int): API 請求的網路超時時間（秒）。
+        """
+        if not genai:
+            raise ImportError("GeminiProcessor 無法初始化，因為 google.generativeai 模組未安裝。")
 
-ALL_PROMPTS = load_prompts()
+        self.api_key = api_key
+        self.model_name = model_name
+        self.timeout = timeout
+        self.model = None # 模型將在首次需要時配置
 
-# --- 錯誤處理 ---
-GEMINI_ERROR_MAP = {
-    "SAFETY": "處理失敗：內容可能涉及安全或敏感議題。",
-    "RECITATION": "處理失敗：內容可能引用了受版權保護的資料。",
-    "OTHER": "處理失敗：因未知的模型內部原因終止。"
-}
+    def _configure_model(self) -> None:
+        """設定 genai 模組和模型實例。"""
+        if self.model is None:
+            genai.configure(api_key=self.api_key)
+            generation_config = GenerationConfig(response_mime_type="application/json")
+            self.model = genai.GenerativeModel(
+                self.model_name,
+                generation_config=generation_config
+            )
 
-def get_error_message_from_response(response):
-    try:
-        if response.prompt_feedback.block_reason:
-            reason = response.prompt_feedback.block_reason.name
-            return GEMINI_ERROR_MAP.get(reason, f"請求被未知原因阻擋: {reason}")
-        candidate = response.candidates[0]
-        if candidate.finish_reason.name not in ("STOP", "MAX_TOKENS"):
-            reason = candidate.finish_reason.name
-            return GEMINI_ERROR_MAP.get(reason, f"處理異常終止: {reason}")
-    except (AttributeError, IndexError):
-        return None
-    return None
+    async def _call_gemini_api(self, prompt: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+        """
+        以非同步方式呼叫 Gemini API。
+        使用 asyncio.to_thread 來執行會阻塞的 SDK 呼叫。
 
-# --- 核心 Gemini 處理函式 ---
+        Args:
+            prompt (str): 發送給模型的提示詞。
 
-def list_models():
-    """列出可用的 Gemini 模型並以 JSON 格式輸出，帶有強制超時。"""
-    def list_models_task():
-        api_key = os.getenv("GOOGLE_API_KEY")
-        if not api_key:
-            raise ValueError("API Key not found in environment variables.")
-        genai.configure(api_key=api_key)
-        models_list = []
-        for m in genai.list_models():
-            if 'generateContent' in m.supported_generation_methods:
-                 models_list.append({"id": m.name, "name": m.display_name})
-        return models_list
-
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+        Returns:
+            一個元組 (結果, 錯誤訊息)。
+            - result (dict | None): 成功時為解析後的 JSON 物件。
+            - error (str | None): 失敗時為錯誤訊息字串。
+        """
         try:
-            future = executor.submit(list_models_task)
-            models_list = future.result(timeout=30)
-            print(json.dumps(models_list), flush=True)
-        except ValueError as e:
-            log.critical(f"🔴 列出模型失敗: {e}")
-            print(f"Error listing models: {e}", file=sys.stderr, flush=True)
-            sys.exit(1)
-        except concurrent.futures.TimeoutError:
-            log.critical(f"🔴 列出模型超時！操作在 30 秒內未能完成。")
-            print("Error listing models: Timeout after 30 seconds.", file=sys.stderr, flush=True)
-            sys.exit(1)
+            self._configure_model()
+
+            # 將阻塞的 SDK 呼叫移至背景執行緒
+            response = await asyncio.to_thread(
+                self.model.generate_content,
+                prompt,
+                request_options={'timeout': self.timeout}
+            )
+
+            raw_text = response.text
+            # 移除常見的 markdown 程式碼區塊標記
+            if raw_text.strip().startswith("```json"):
+                raw_text = raw_text.strip()[7:-3].strip()
+
+            return json.loads(raw_text), None
+
+        except json.JSONDecodeError as e:
+            log.error(f"JSON 解碼失敗: {e}\n收到的原始文字: '{raw_text}'")
+            return None, f"JSON 解碼失敗: {e}"
         except Exception as e:
-            log.critical(f"🔴 Failed to list models: {e}", exc_info=True)
-            print(f"Error listing models: {e}", file=sys.stderr, flush=True)
-            sys.exit(1)
+            # 處理 Google API 的特定錯誤
+            if isinstance(e, google_exceptions.ResourceExhausted):
+                log.error(f"API 配額耗盡: {e}")
+                return None, "API_RATE_LIMIT_EXCEEDED"
 
-def validate_key():
-    """僅驗證 API 金鑰的有效性。"""
-    try:
-        import google.api_core.exceptions
-        api_key = os.getenv("GOOGLE_API_KEY")
-        if not api_key:
-            print("錯誤：未在環境變數中提供 GOOGLE_API_KEY。", file=sys.stderr, flush=True)
-            sys.exit(1)
+            log.error(f"呼叫 Gemini API 時發生未預期的錯誤: {e}", exc_info=True)
+            return None, str(e)
 
-        genai.configure(api_key=api_key)
-        # 執行一個輕量級的 API 呼叫來觸發驗證
-        next(genai.list_models(), None)
+    async def analyze_content(self, content: str, prompt_template: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+        """
+        根據提供的內容和提示詞模板進行分析。
 
-        log.info("✅ API 金鑰驗證成功。")
-        sys.exit(0)
+        Args:
+            content (str): 要分析的文字內容。
+            prompt_template (str): 用於生成最終提示詞的模板。
 
-    except google.api_core.exceptions.InvalidArgument as e:
-        print(f"金鑰驗證失敗：無效的 API 金鑰或格式錯誤。Google API 訊息: {e}", file=sys.stderr, flush=True)
-        sys.exit(1)
-    except google.api_core.exceptions.PermissionDenied as e:
-        print(f"金鑰驗證失敗：權限被拒絕。請檢查您的金鑰是否有權限存取該服務。Google API 訊息: {e}", file=sys.stderr, flush=True)
-        sys.exit(1)
-    except Exception as e:
-        print(f"金鑰驗證時發生未預期的網路或其他錯誤：{e}", file=sys.stderr, flush=True)
-        sys.exit(1)
+        Returns:
+            一個元組 (分析結果, 錯誤訊息)。
+        """
+        prompt = prompt_template.format(content=content)
+        log.info(f"準備使用模型 '{self.model_name}' 進行內容分析...")
 
-def generate_content_with_timeout(model, prompt_parts: list, log_message: str, internal_timeout: int = 100):
-    log.info(f"正要呼叫 model.generate_content ({log_message})...")
-    external_timeout = internal_timeout + 10
-    def generation_task():
-        try:
-            return model.generate_content(prompt_parts, request_options={'timeout': internal_timeout})
-        except Exception as e:
-            log.error(f"generate_content 執行緒內部發生錯誤 ({log_message}): {e}", exc_info=True)
-            raise
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-        try:
-            future = executor.submit(generation_task)
-            response = future.result(timeout=external_timeout)
-            log.info(f"model.generate_content ({log_message}) 呼叫成功返回。")
-            return response
-        except concurrent.futures.TimeoutError:
-            log.critical(f"🔴 model.generate_content ({log_message}) 超時！操作在 {external_timeout} 秒內未能完成。")
-            raise RuntimeError(f"AI 內容生成操作 '{log_message}' 超時。")
-        except Exception as e:
-            log.critical(f"🔴 model.generate_content ({log_message}) 發生未預期的錯誤: {e}", exc_info=True)
-            raise
+        result, error = await self._call_gemini_api(prompt)
 
-def upload_to_gemini(genai_module, audio_path: Path, display_filename: str):
-    log.info(f"☁️ Uploading '{display_filename}' to Gemini Files API with a hard timeout...")
-    print_progress("uploading", f"正在上傳音訊檔案 {display_filename}...")
-    ext = audio_path.suffix.lower()
-    mime_map = {'.mp3': 'audio/mp3', '.m4a': 'audio/m4a', '.aac': 'audio/aac', '.wav': 'audio/wav', '.ogg': 'audio/ogg', '.flac': 'audio/flac', '.webm': 'audio/webm', '.mp4': 'audio/mp4'}
-    mime_type = mime_map.get(ext, 'application/octet-stream')
-    if mime_type in ['audio/m4a', 'audio/mp4']:
-        mime_type = 'audio/aac'
-    def upload_task():
-        log.info("正要呼叫 genai.upload_file...")
-        try:
-            # 修正：移除不被支援的 'request_options' 參數。
-            # 超時控制完全由外部的 concurrent.futures.ThreadPoolExecutor 的 future.result(timeout=...) 來處理。
-            return genai_module.upload_file(path=str(audio_path), display_name=display_filename, mime_type=mime_type)
-        except Exception as e:
-            log.error(f"檔案上傳執行緒內部發生錯誤: {e}", exc_info=True)
-            raise
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-        try:
-            future = executor.submit(upload_task)
-            audio_file_resource = future.result(timeout=110)
-            log.info(f"✅ Upload successful. Gemini File URI: {audio_file_resource.uri}")
-            print_progress("upload_complete", "音訊上傳成功。")
-            return audio_file_resource
-        except concurrent.futures.TimeoutError:
-            log.critical("🔴 檔案上傳超時！操作在 110 秒內未能完成。")
-            raise RuntimeError("檔案上傳操作超時，程序被強制終止。")
-        except Exception as e:
-            log.critical(f"🔴 Failed to upload file to Gemini: {e}", exc_info=True)
-            raise
+        if error:
+            log.error(f"內容分析失敗: {error}")
+            return None, error
 
-def get_summary_and_transcript(gemini_file_resource, model, video_title: str, original_filename: str):
-    log.info(f"🤖 Requesting summary and transcript from model '{model.model_name}'...")
-    print_progress("generating_transcript", "AI 正在生成摘要與逐字稿...")
-    prompt = ALL_PROMPTS['get_summary_and_transcript'].format(original_filename=original_filename, video_title=video_title)
-    response = generate_content_with_timeout(model, [prompt, gemini_file_resource], "摘要與逐字稿")
-    full_response_text = response.text
-    summary_match = re.search(r"\[重點摘要開始\](.*?)\[重點摘要結束\]", full_response_text, re.DOTALL)
-    summary_text = summary_match.group(1).strip() if summary_match else "未擷取到重點摘要。"
-    transcript_match = re.search(r"\[詳細逐字稿開始\](.*?)\[詳細逐字稿結束\]", full_response_text, re.DOTALL)
-    transcript_text = transcript_match.group(1).strip() if transcript_match else "未擷取到詳細逐字稿。"
-    if "未擷取到" in summary_text and "未擷取到" in transcript_text and "---[逐字稿分隔線]---" not in full_response_text:
-        transcript_text = full_response_text
-        summary_text = "（自動摘要失敗，請參考下方逐字稿自行整理）"
-    log.info("✅ Successfully generated summary and transcript.")
-    print_progress("transcript_generated", "摘要與逐字稿生成完畢。")
-    return summary_text, transcript_text, response
+        log.info("內容分析成功完成。")
+        return result, None
 
-def generate_html_report(summary_text: str, transcript_text: str, model, video_title: str):
-    log.info(f"🎨 Requesting HTML report from model '{model.model_name}'...")
-    print_progress("generating_html", "AI 正在美化格式並生成 HTML 報告...")
-    prompt = ALL_PROMPTS['format_as_html'].format(video_title_for_html=video_title, summary_text_for_html=summary_text, transcript_text_for_html=transcript_text)
-    response = generate_content_with_timeout(model, [prompt], "HTML報告")
-    generated_html = response.text
-    if generated_html.strip().startswith("```html"):
-        generated_html = generated_html.strip()[7:]
-    if generated_html.strip().endswith("```"):
-        generated_html = generated_html.strip()[:-3]
-    doctype_pos = generated_html.lower().find("<!doctype html>")
-    if doctype_pos != -1:
-        generated_html = generated_html[doctype_pos:]
-    log.info("✅ Successfully generated HTML report.")
-    print_progress("html_generated", "HTML 報告生成完畢。")
-    return generated_html.strip(), response
+# 備註：保留此區塊是為了展示如果此檔案需要作為獨立腳本執行時的範例。
+# 在目前的專案架構中，此檔案主要作為模組被 Orchestrator 匯入和使用。
+async def main():
+    """
+    提供一個命令列介面來測試 GeminiProcessor。
+    """
+    import argparse
+    from rich.console import Console
+    from rich.panel import Panel
 
-def process_audio_file(audio_path: Path, model_name: str, video_title: str, output_dir: Path, tasks: str, output_format: str):
-    start_time = time.time()
-    total_tokens_used = 0
-    api_key = os.getenv("GOOGLE_API_KEY")
+    parser = argparse.ArgumentParser(description="非同步 Gemini 內容分析工具。")
+    parser.add_argument("file_path", type=str, help="包含待分析內容的文字檔案路徑。")
+    parser.add_argument("--api-key", type=str, help="Google API 金鑰 (或使用 GOOGLE_API_KEY 環境變數)。")
+    parser.add_argument("--model", type=str, default="gemini-1.5-flash-latest", help="要使用的 Gemini 模型。")
+
+    args = parser.parse_args()
+
+    console = Console()
+
+    api_key = args.api_key or os.environ.get("GOOGLE_API_KEY")
     if not api_key:
-        raise ValueError("GOOGLE_API_KEY environment variable not set.")
-    genai.configure(api_key=api_key)
-    task_list = [t.strip() for t in tasks.lower().split(',') if t.strip()]
-    results = {}
-    gemini_file_resource = None
+        console.print("[bold red]錯誤：[/bold red] 必須透過 --api-key 參數或 GOOGLE_API_KEY 環境變數提供 API 金鑰。")
+        return
+
     try:
-        gemini_file_resource = upload_to_gemini(genai, audio_path, audio_path.name)
-        model_instance = genai.GenerativeModel(model_name)
-        def get_token_count(response):
-            try: return response.usage_metadata.total_token_count
-            except: return 0
-        if "summary" in task_list and "transcript" in task_list:
-            summary, transcript, response = get_summary_and_transcript(gemini_file_resource, model_instance, video_title, audio_path.name)
-            error_msg = get_error_message_from_response(response)
-            if error_msg: raise ValueError(error_msg)
-            total_tokens_used += get_token_count(response)
-            results['summary'] = summary
-            results['transcript'] = transcript
-        else:
-            if "summary" in task_list:
-                prompt = ALL_PROMPTS['get_summary_only'].format(original_filename=audio_path.name, video_title=video_title)
-                response = generate_content_with_timeout(model_instance, [prompt, gemini_file_resource], "僅摘要")
-                error_msg = get_error_message_from_response(response)
-                if error_msg: raise ValueError(error_msg)
-                total_tokens_used += get_token_count(response)
-                results['summary'] = response.text.strip()
-            if "transcript" in task_list:
-                prompt = ALL_PROMPTS['get_transcript_only'].format(original_filename=audio_path.name, video_title=video_title)
-                response = generate_content_with_timeout(model_instance, [prompt, gemini_file_resource], "僅逐字稿")
-                error_msg = get_error_message_from_response(response)
-                if error_msg: raise ValueError(error_msg)
-                total_tokens_used += get_token_count(response)
-                results['transcript'] = response.text.strip()
-        sanitized_title = sanitize_filename(video_title)
-        timestamp = time.strftime("%Y%m%d-%H%M%S")
-        final_filename_base = f"{sanitized_title}_{timestamp}_AI_Report"
-        html_report_path = None
-        txt_report_path = None
-
-        if output_format == 'html':
-            html_content, response = generate_html_report(results.get('summary', ''), results.get('transcript', ''), model_instance, video_title)
-            error_msg = get_error_message_from_response(response)
-            if error_msg: raise ValueError(error_msg)
-            total_tokens_used += get_token_count(response)
-            output_path = output_dir / f"{final_filename_base}.html"
-            with open(output_path, "w", encoding="utf-8") as f: f.write(html_content)
-            html_report_path = str(output_path)
-        else: # Handle 'txt' format
-            summary_text = results.get('summary', '無摘要。')
-            transcript_text = results.get('transcript', '無逐字稿。')
-            full_text_content = f"# {video_title}\n\n## 重點摘要\n\n{summary_text}\n\n---\n\n## 詳細逐字稿\n\n{transcript_text}"
-            output_path = output_dir / f"{final_filename_base}.txt"
-            with open(output_path, "w", encoding="utf-8") as f: f.write(full_text_content)
-            txt_report_path = str(output_path)
-
-        final_result = {
-            "type": "result",
-            "status": "已完成",
-            "output_path": str(output_path),
-            "video_title": video_title,
-            "total_tokens_used": total_tokens_used,
-            "processing_duration_seconds": round(time.time() - start_time, 2),
-            "html_report_path": html_report_path,
-            "txt_report_path": txt_report_path
-        }
-        print(json.dumps(final_result), flush=True)
+        with open(args.file_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+    except FileNotFoundError:
+        console.print(f"[bold red]錯誤：[/bold red] 找不到檔案 '{args.file_path}'。")
+        return
     except Exception as e:
-        log.critical(f"🔴 處理流程中發生未預期的嚴重錯誤: {e}", exc_info=True)
-        raise
-    finally:
-        if gemini_file_resource:
-            log.info(f"🗑️ Cleaning up Gemini file: {gemini_file_resource.name}")
-            try:
-                for attempt in range(3):
-                    try:
-                        genai.delete_file(gemini_file_resource.name)
-                        log.info("✅ Cleanup successful.")
-                        break
-                    except Exception as e_del:
-                        log.warning(f"Attempt {attempt+1} to delete file failed: {e_del}")
-                        if attempt < 2: time.sleep(2)
-                        else: raise
-            except Exception as e:
-                log.error(f"🔴 Failed to clean up Gemini file '{gemini_file_resource.name}' after retries: {e}")
+        console.print(f"[bold red]錯誤：[/bold red] 讀取檔案時發生錯誤: {e}")
+        return
 
-def main():
-    parser = argparse.ArgumentParser(description="Gemini AI 處理工具。")
-    parser.add_argument("--command", type=str, default="process", choices=["process", "list_models", "validate_key"], help="要執行的操作。")
-    args, remaining_argv = parser.parse_known_args()
-    if args.command == "list_models":
-        list_models()
-    elif args.command == "validate_key":
-        validate_key()
-    elif args.command == "process":
-        process_parser = argparse.ArgumentParser()
-        process_parser.add_argument("--command", type=str, help=argparse.SUPPRESS)
-        process_parser.add_argument("--audio-file", type=str, required=True, help="要處理的音訊檔案路徑。")
-        process_parser.add_argument("--model", type=str, required=True, help="要使用的 Gemini 模型 API 名稱。")
-        process_parser.add_argument("--video-title", type=str, required=True, help="原始影片標題，用於提示詞。")
-        process_parser.add_argument("--output-dir", type=str, required=True, help="儲存生成報告的目錄。")
-        process_parser.add_argument("--tasks", type=str, default="summary,transcript", help="要執行的任務列表。")
-        process_parser.add_argument("--output-format", type=str, default="html", choices=["html", "txt"], help="最終輸出的檔案格式。")
-        process_args = process_parser.parse_args(remaining_argv)
-        audio_path = Path(process_args.audio_file)
-        if not audio_path.exists():
-            log.critical(f"Input audio file not found: {audio_path}")
-            print(json.dumps({"type": "result", "status": "failed", "error": f"Input file not found: {audio_path}"}), flush=True)
-            sys.exit(1)
-        try:
-            process_audio_file(audio_path=audio_path, model_name=process_args.model, video_title=process_args.video_title, output_dir=Path(process_args.output_dir), tasks=process_args.tasks, output_format=process_args.output_format)
-        except Exception as e:
-            log.critical(f"An error occurred in the main processing flow: {e}", exc_info=True)
-            print(json.dumps({"type": "result", "status": "failed", "error": str(e)}), flush=True)
-            sys.exit(1)
+    # 簡單的範例提示詞模板
+    prompt_template = """
+    你是一位專業的金融分析師。請閱讀以下財報文字，並以 JSON 格式回傳以下資訊：
+    1. `company_name` (string): 公司名稱。
+    2. `fiscal_year` (string): 財報的會計年度。
+    3. `net_income` (number): 純利金額。
+    4. `summary` (string): 少於 100 字的財報重點摘要。
+
+    文章內容如下：
+    ---
+    {content}
+    ---
+    請直接回傳 JSON 物件，不要包含任何額外的解釋或 Markdown 標記。
+    """
+
+    console.print(Panel(f"正在使用模型 [bold cyan]{args.model}[/bold cyan] 分析檔案 [bold yellow]{args.file_path}[/bold yellow]...", title="[bold green]分析開始[/bold green]"))
+
+    processor = GeminiProcessor(api_key=api_key, model_name=args.model)
+    result, error = await processor.analyze_content(content, prompt_template)
+
+    if error:
+        console.print(Panel(f"分析失敗：\n[bold red]{error}[/bold red]", title="[bold red]分析失敗[/bold red]"))
+    else:
+        console.print(Panel(json.dumps(result, indent=2, ensure_ascii=False), title="[bold green]分析結果 (JSON)[/bold green]"))
+
 
 if __name__ == "__main__":
-    main()
+    # 為了能從命令列執行此腳本進行測試
+    import os
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+
+    # 檢查是否有名為 "GOOGLE_API_KEY" 的環境變數
+    if not os.environ.get("GOOGLE_API_KEY"):
+        print("警告: GOOGLE_API_KEY 環境變數未設定。如果需要，請透過 --api-key 參數提供。")
+
+    # 在 Windows 上設定正確的事件迴圈策略
+    if os.name == 'nt':
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
+    asyncio.run(main())
