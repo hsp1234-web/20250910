@@ -189,12 +189,14 @@ def save_urls_to_db(parsed_data: list[dict], source_text: str, conn: Optional[sq
             # --- 步驟 3: 準備並插入新資料 ---
             created_at_iso = get_current_taipei_time_iso()
             data_to_insert = [
-                (item['url'], item['author'], item['date'], item['time'], source_text, created_at_iso)
+                # Jules @ 2025-09-17: 新增 item['title'] 以便將解析出的標題存入資料庫
+                (item['url'], item['author'], item['date'], item['time'], item['title'], source_text, created_at_iso)
                 for item in new_items
             ]
 
             cursor.executemany(
-                "INSERT INTO extracted_urls (url, author, message_date, message_time, source_text, created_at, status) VALUES (?, ?, ?, ?, ?, ?, 'pending')",
+                # Jules @ 2025-09-17: 在 INSERT 語句中也加入 title 欄位
+                "INSERT INTO extracted_urls (url, author, message_date, message_time, title, source_text, created_at, status) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')",
                 data_to_insert
             )
         log.info(f"成功將 {len(data_to_insert)} 筆新的解析資料儲存到資料庫。")

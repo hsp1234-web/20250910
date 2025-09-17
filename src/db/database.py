@@ -147,6 +147,8 @@ def initialize_database(conn: sqlite3.Connection = None):
             )
             ''')
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_url ON extracted_urls (url)")
+            # Jules @ 2025-09-17: 為狀態查詢優化新增索引
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_extracted_urls_status ON extracted_urls (status)")
 
             # --- 新增 AI 分析報告歷史紀錄資料表 ---
             cursor.execute('''
@@ -778,7 +780,19 @@ def get_urls_by_statuses(statuses: list[str]) -> list[dict]:
         # 為 IN 子句建立一個佔位符字串
         placeholders = ','.join(['?'] * len(statuses))
         # 2025-09-18 V4 優化：查詢所有欄位以滿足不同頁面的需求
-        sql = f"SELECT * FROM extracted_urls WHERE status IN ({placeholders}) ORDER BY created_at DESC"
+        # 2025-09-17 Jules 修正：明確指定欄位，排除大型的 source_text 欄位以優化效能
+        sql = f"""
+            SELECT
+                id, url, created_at, status, status_message, local_path,
+                file_hash, extracted_image_paths, extracted_text, author,
+                message_date, message_time, title, retry_count, last_error_details
+            FROM
+                extracted_urls
+            WHERE
+                status IN ({placeholders})
+            ORDER BY
+                created_at DESC
+        """
 
         cursor = conn.cursor()
         cursor.execute(sql, statuses)
