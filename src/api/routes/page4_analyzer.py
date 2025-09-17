@@ -49,6 +49,7 @@ import functools
 class Stage1Request(BaseModel):
     file_ids: List[int]
     model_name: str
+    delay_seconds: float = 0
 
 class Stage1RetryRequest(BaseModel):
     task_id: int
@@ -400,12 +401,18 @@ async def start_stage1_analysis(request: Request, payload: Stage1Request, backgr
         raise HTTPException(status_code=500, detail="伺服器狀態未完全初始化（缺少佇列或信號量）。")
 
     tasks_created = []
-    for file_id in payload.file_ids:
+    for i, file_id in enumerate(payload.file_ids):
         # V4 Bug Fix: 使用注入的 db client 查詢，並處理找不到紀錄的情況
         file_data = db.get_url_by_id(url_id=file_id)
         if not file_data:
             log.warning(f"在啟動第一階段分析時，找不到檔案 ID: {file_id}，已跳過。")
             continue
+
+        # 在處理第一個任務前不延遲，之後的任務前都延遲
+        if i > 0 and payload.delay_seconds > 0:
+            log.info(f"等待 {payload.delay_seconds} 秒後再排入下一個任務...")
+            await asyncio.sleep(payload.delay_seconds)
+
 
         filename = Path(file_data['local_path']).name if file_data.get('local_path') else f"未知檔案_{file_id}"
 

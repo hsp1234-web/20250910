@@ -38,11 +38,17 @@
             <h2>階段一：AI 文字擷取</h2>
             <p>請從下方列表中勾選您想分析的檔案，選擇模型後啟動第一階段分析。完成後，項目將會出現在「績效分析」頁面。</p>
 
-            <div class="form-group" style="margin-top: 20px;">
-                <label for="stage1-model-select">選擇分析模型:</label>
-                <select id="stage1-model-select" disabled>
-                    <option value="">正在檢查 API 金鑰...</option>
-                </select>
+            <div class="form-group" style="margin-top: 20px; display: flex; align-items: center; gap: 20px;">
+                <div>
+                    <label for="stage1-model-select">選擇分析模型:</label>
+                    <select id="stage1-model-select" disabled>
+                        <option value="">正在檢查 API 金鑰...</option>
+                    </select>
+                </div>
+                <div>
+                    <label for="request-delay-seconds">請求間隔(秒):</label>
+                    <input type="number" id="request-delay-seconds" value="2" min="0" step="0.1" style="width: 80px;">
+                </div>
             </div>
 
             <div class="action-bar">
@@ -241,13 +247,14 @@
             if (modelSelect.disabled) return alert('請先新增有效的 API 金鑰才能開始分析。');
             const modelName = modelSelect.value;
             if (!modelName) return alert('請選擇分析模型。');
+            const delaySeconds = parseFloat(document.getElementById('request-delay-seconds').value) || 0;
 
-            logStatus(`啟動第一階段分析，共 ${fileIds.length} 個檔案...`, 'blue');
+            logStatus(`啟動第一階段分析，共 ${fileIds.length} 個檔案，請求間隔 ${delaySeconds} 秒...`, 'blue');
             try {
                 const response = await fetch('/api/analyzer/start_stage1_analysis', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ file_ids: fileIds, model_name: modelName })
+                    body: JSON.stringify({ file_ids: fileIds, model_name: modelName, delay_seconds: delaySeconds })
                 });
                 const result = await response.json();
                 if (response.ok) {
@@ -421,6 +428,25 @@
             const overlay = document.getElementById('readiness-overlay');
             const buttons = document.querySelectorAll('button, a.button, input[type="button"], input[type="submit"]');
 
+            // 輔助函數：啟用UI
+            function enableUI() {
+                overlay.style.display = 'none';
+                buttons.forEach(btn => {
+                    btn.disabled = false;
+                });
+                console.log('系統已就緒，UI 已啟用。');
+            }
+
+            // 檢查 sessionStorage 中是否已有就緒標記
+            if (sessionStorage.getItem('isSystemReady') === 'true') {
+                enableUI();
+                const overlayText = overlay.querySelector('p');
+                if(overlayText) {
+                    overlayText.innerText = '系統已就緒';
+                }
+                return; // 如果已就緒，則不執行後續的輪詢
+            }
+
             // 1. 預設禁用所有按鈕並顯示遮罩
             buttons.forEach(btn => {
                 if (!btn.closest('.navbar')) {
@@ -434,13 +460,10 @@
                 fetch('/api/health/ready')
                     .then(response => {
                         if (response.ok) {
-                            // 3. 一旦請求成功，啟用按鈕並隱藏遮罩
+                            // 3. 一旦請求成功，設定標記、啟用按鈕並隱藏遮罩
                             clearInterval(readinessInterval);
-                            overlay.style.display = 'none';
-                            buttons.forEach(btn => {
-                                btn.disabled = false;
-                            });
-                            console.log('系統已就緒，UI 已啟用。');
+                            sessionStorage.setItem('isSystemReady', 'true'); // 設定標記
+                            enableUI();
                         } else {
                             console.log('等待核心服務就緒...');
                         }
