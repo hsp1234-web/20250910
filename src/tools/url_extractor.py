@@ -37,87 +37,90 @@ log = logging.getLogger('url_extractor')
 
 def parse_chat_log(text: str) -> list[dict]:
     """
-    從給定的 LINE 聊天紀錄文字中，解析出日期、時間、作者和連結，並去除重複的網址。
-    這個實作是根據使用者提供的聊天紀錄範例所設計。
+    (Jules @ 2025-09-17) 新版解析器
+    從給定的 LINE 聊天紀錄文字中，解析出日期、時間、作者、標題和連結。
+    這個實作採用區塊化處理，能夠正確處理跨多行的訊息。
 
     :param text: 包含 LINE 聊天紀錄的來源文字。
-    :return: 一個字典列表，每個字典包含 'date', 'time', 'author', 'url'，且網址不會重複。
+    :return: 一個字典列表，每個字典包含 'date', 'time', 'author', 'title', 'url'。
     """
-    # 偵測 LINE 聊天紀錄中的關鍵模式
-    # 1. 日期行: e.g., "2025/5/6（週二）"
-    date_pattern = re.compile(r'(\d{4}/\d{1,2}/\d{1,2})（週.）')
-    # 2. 發言行: e.g., "13:30\t579-0740320Jack" (後面可能還有文字)
-    #    - \t 是定位字元 (tab)
-    #    - 捕捉時間 (HH:MM) 和作者 (直到下一個 \t 或行尾)
-    message_pattern = re.compile(r'^(\d{2}:\d{2})\t([^\t]+)')
-    # 3. 網址: 匹配 http/https 開頭的 URL
+    results = []
+    current_date = None
+    lines = text.split('\n')
+    i = 0
+
+    # 定義正規表示式
+    date_pattern = re.compile(r'(\d{4})[年/](\d{1,2})[年/](\d{1,2})')
+    message_pattern = re.compile(r'^(\d{2}:\d{2})\t([^\t]+)\t?(.*)$')
     url_pattern = re.compile(r'https?://\S+')
 
-    results = []
-    seen_urls = set()  # 用於追蹤已經出現過的網址，以進行去重
-    current_date = None
-    last_message_info = None
+    while i < len(lines):
+        line = lines[i].strip()
 
-    lines = text.split('\n')
-
-    for i, line in enumerate(lines):
-        line = line.strip()
-        if not line:
-            continue
-
+        # 1. 處理日期行
         date_match = date_pattern.match(line)
         if date_match:
-            # 將 YYYY/M/D 或 YYYY/MM/DD 格式標準化為 YYYY-MM-DD
-            date_parts = date_match.group(1).split('/')
-            current_date = f"{date_parts[0]}-{int(date_parts[1]):02d}-{int(date_parts[2]):02d}"
-            last_message_info = None # 新的一天，重置作者資訊
+            year, month, day = date_match.groups()
+            current_date = f"{year}-{int(month):02d}-{int(day):02d}"
+            i += 1
             continue
 
+        if not current_date:
+            i += 1
+            continue
+
+        # 2. 處理訊息行
         message_match = message_pattern.match(line)
         if message_match:
-            time = message_match.group(1)
-            author = message_match.group(2).strip().split('\t')[0] # 再一次確保只取作者名
+            time, author, first_line_content = message_match.groups()
+            author = author.strip()
 
-            # 過濾掉無效的作者/系統訊息
-            if any(keyword in author for keyword in ["加入聊天", "已收回訊息", "退出聊天"]):
-                last_message_info = None
+            # 過濾系統訊息
+            if any(keyword in author for keyword in ["加入聊天", "退出聊天"]) or "已收回訊息" in first_line_content:
+                i += 1
                 continue
 
-            # 暫存作者資訊，因為連結可能在下一行
-            last_message_info = {'time': time, 'author': author}
+            # 收集完整的訊息區塊 (包含後續行)
+            content_parts = [first_line_content.strip()]
+            j = i + 1
+            while j < len(lines):
+                next_line = lines[j].strip()
+                if not next_line or date_pattern.match(next_line) or message_pattern.match(next_line):
+                    break # 遇到空行、新日期或新訊息，區塊結束
+                content_parts.append(next_line)
+                j += 1
 
-            # 檢查發言的同一行是否包含網址
-            url_match_in_line = url_pattern.search(line)
-            if url_match_in_line:
-                url = url_match_in_line.group(0)
-                if url not in seen_urls:
-                    seen_urls.add(url)
-                    results.append({
-                        'date': current_date,
-                        'time': time,
-                        'author': author,
-                        'url': url
-                    })
-                last_message_info = None # 處理完畢，重置以避免重複關聯
-            continue
+            # 從訊息區塊中提取標題和 URL
+            full_content_str = " ".join(content_parts)
+            url_match = url_pattern.search(full_content_str)
 
-        # 如果這行不是日期也不是發言，檢查它是否只包含一個網址
-        # 並且緊跟在一個有效的發言者之後
-        # 使用 fullmatch 確保整行就是一個網址，避免誤判包含網址的普通句子
-        url_match = url_pattern.fullmatch(line)
-        if url_match and last_message_info:
-            url = url_match.group(0)
-            if url not in seen_urls:
-                seen_urls.add(url)
+            if url_match:
+                url = url_match.group(0)
+                # 標題是 URL 之前的所有文字
+                title = full_content_str[:url_match.start()].strip()
+
+                # 如果標題為空，使用一個預設值
+                if not title:
+                    title = "無標題"
+
+                # 過濾掉教學/提醒訊息
+                if "提醒小作文標題格式" in title:
+                    i = j # 移動到下一個未處理的行
+                    continue
+
                 results.append({
                     'date': current_date,
-                    'time': last_message_info['time'],
-                    'author': last_message_info['author'],
+                    'time': time,
+                    'author': author,
+                    'title': title,
                     'url': url
                 })
-            last_message_info = None # 處理完畢，重置
 
-    log.info(f"從聊天紀錄中解析出 {len(results)} 筆不重複的作者-網址配對。")
+            i = j # 移動到下一個未處理的行
+        else:
+            i += 1 # 如果不是訊息行，繼續下一行
+
+    log.info(f"從聊天紀錄中解析出 {len(results)} 筆結構化資料。")
     return results
 
 
