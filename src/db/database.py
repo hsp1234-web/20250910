@@ -161,6 +161,24 @@ def initialize_database(conn: sqlite3.Connection = None):
             ''')
             # --- 結束 ---
 
+            # --- 為 API 金鑰管理建立資料表 (V4 重構) ---
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS api_keys (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    key_name TEXT NOT NULL UNIQUE,
+                    key_hash TEXT NOT NULL UNIQUE,
+                    key_value TEXT NOT NULL,
+                    is_valid INTEGER NOT NULL DEFAULT 0,
+                    last_validated_at TEXT,
+                    total_tokens_used INTEGER DEFAULT 0,
+                    request_count INTEGER DEFAULT 0,
+                    last_used_at TEXT,
+                    status TEXT DEFAULT 'active'
+                )
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_key_hash ON api_keys (key_hash)")
+            # --- 結束 ---
+
             # --- 為兩階段 AI 分析流程建立新資料表 ---
             cursor.execute('''
             CREATE TABLE IF NOT EXISTS analysis_tasks (

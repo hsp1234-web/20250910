@@ -35,6 +35,12 @@ log = logging.getLogger(__name__)
 router = APIRouter()
 # V4 優化：移除在模組加載時建立的客戶端實例。
 # DB_CLIENT = get_client()
+
+# JULES (2025-09-17): 暫時加回 DB_CLIENT 全域變數，以相容舊的整合測試。
+# 這些測試使用 monkeypatch 來修補這個變數，但在 V4 重構後它已被移除。
+# 長期解決方案是重寫測試以使用 FastAPI 的依賴注入覆蓋機制。
+DB_CLIENT = DBClient()
+
 TEMP_JSON_DIR = SRC_DIR.parent / "temp_json"
 REPORTS_DIR = SRC_DIR.parent / "reports"
 
@@ -389,7 +395,7 @@ async def run_analysis_task_wrapper(task_id: int, semaphore: asyncio.Semaphore, 
 
 @router.post("/start_stage1_analysis")
 async def start_stage1_analysis(request: Request, payload: Stage1Request, background_tasks: BackgroundTasks, db: DBClient = Depends(get_db)):
-    """(V4 優化後) 啟動第一階段：JSON 提取"""
+    """(V5 優化後) 啟動第一階段：JSON 提取，採用併發調度"""
     if not payload.file_ids:
         raise HTTPException(status_code=400, detail="檔案 ID 列表不可為空。")
 
@@ -400,44 +406,57 @@ async def start_stage1_analysis(request: Request, payload: Stage1Request, backgr
     if not semaphore or not queue:
         raise HTTPException(status_code=500, detail="伺服器狀態未完全初始化（缺少佇列或信號量）。")
 
-    tasks_created = []
-    for i, file_id in enumerate(payload.file_ids):
-        # V4 Bug Fix: 使用注入的 db client 查詢，並處理找不到紀錄的情況
+    # 步驟 1: 在一個快速、非阻塞的迴圈中準備所有任務
+    tasks_to_run_params = []
+    for file_id in payload.file_ids:
         file_data = db.get_url_by_id(url_id=file_id)
         if not file_data:
             log.warning(f"在啟動第一階段分析時，找不到檔案 ID: {file_id}，已跳過。")
             continue
 
-        # 在處理第一個任務前不延遲，之後的任務前都延遲
-        if i > 0 and payload.delay_seconds > 0:
-            log.info(f"等待 {payload.delay_seconds} 秒後再排入下一個任務...")
-            await asyncio.sleep(payload.delay_seconds)
-
-
         filename = Path(file_data['local_path']).name if file_data.get('local_path') else f"未知檔案_{file_id}"
-
         task = db.create_or_get_analysis_task(file_id=file_id, filename=filename)
+
         if task:
+            # 重設任務狀態
             db.update_analysis_task(task_id=task['id'], updates={
                 "stage1_status": "pending", "stage1_error_log": None, "stage1_json_path": None,
                 "performance_status": "pending", "performance_error_log": None,
                 "stage2_status": "pending", "stage2_error_log": None, "stage2_report_path": None
             })
-            background_tasks.add_task(
-                run_analysis_task_wrapper,
-                task_id=task['id'],
+            tasks_to_run_params.append({
+                "task_id": task['id'],
+                "file_id": file_id,
+                "model_name": payload.model_name
+            })
+
+    # 步驟 2: 定義一個非同步函式，用於收集並併發執行所有任務
+    async def run_all_tasks_concurrently():
+        log.info(f"準備使用 asyncio.gather 併發執行 {len(tasks_to_run_params)} 個分析任務...")
+        coroutines = []
+        for params in tasks_to_run_params:
+            coro = run_analysis_task_wrapper(
+                task_id=params['task_id'],
                 semaphore=semaphore,
                 blocking_func=_run_stage1_blocking_task,
                 queue=queue,
                 loop=loop,
                 db_client=db,
-                file_id=file_id,
-                model_name=payload.model_name,
+                file_id=params['file_id'],
+                model_name=params['model_name'],
                 stage=1
             )
-            tasks_created.append(task['id'])
+            coroutines.append(coro)
 
-    return {"message": f"已成功為 {len(tasks_created)} 個檔案排入第一階段分析佇列。"}
+        # 使用 asyncio.gather 來併發執行所有協程
+        await asyncio.gather(*coroutines)
+        log.info("所有透過 gather 派發的分析任務均已完成。")
+
+    # 步驟 3: 將這個統一的併發執行函式作為單一背景任務加入
+    if tasks_to_run_params:
+        background_tasks.add_task(run_all_tasks_concurrently)
+
+    return {"message": f"已成功為 {len(tasks_to_run_params)} 個檔案排入第一階段併發分析佇列。"}
 
 
 @router.post("/retry_stage1_analysis")

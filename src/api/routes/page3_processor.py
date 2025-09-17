@@ -29,6 +29,11 @@ log = logging.getLogger(__name__)
 templates = Jinja2Templates(directory=str(SRC_DIR / "static"))
 router = APIRouter()
 
+# JULES (2025-09-17): 暫時加回 DB_CLIENT 全域變數，以相容舊的整合測試。
+# 這些測試使用 monkeypatch 來修補這個變數，但在 V4 重構後它已被移除。
+# 長期解決方案是重寫測試以使用 FastAPI 的依賴注入覆蓋機制。
+DB_CLIENT = DBClient()
+
 
 # --- Pydantic 模型 ---
 class ProcessRequest(BaseModel):

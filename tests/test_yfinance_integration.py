@@ -94,12 +94,16 @@ def test_yfinance_integration(db_conn, monkeypatch):
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
 
+    # 建立一個 db_client 實例以傳遞給函式
+    db_client_instance = FakeDBClient(db_conn)
+
     _run_stage1_blocking_task(
         task_id=task_id,
         file_id=mock_file_id,
         model_name=MODEL_NAME,
         queue=mock_queue,
-        loop=loop
+        loop=loop,
+        db_client=db_client_instance
     )
 
     # 3. --- 驗證 (Assert) ---
@@ -122,19 +126,9 @@ def test_yfinance_integration(db_conn, monkeypatch):
     # Check that AI data is preserved
     assert final_data['symbol'] == "2330.TW"
 
-    # Check that quantitative analysis data was added
-    assert "quantitative_analysis" in final_data
-    qa_data = final_data["quantitative_analysis"]
-
-    # Check for the expected metrics
-    expected_keys = [
-        "total_return", "annualized_return", "annualized_volatility",
-        "max_drawdown", "sharpe_ratio", "alpha", "beta"
-    ]
-    for key in expected_keys:
-        assert key in qa_data
-        # Allow for None values, which can happen if data is insufficient for a metric
-        assert isinstance(qa_data[key], (int, float)) or qa_data[key] is None
+    # V5 修正：第一階段分析不包含量化分析，該部分已移至獨立的績效分析階段。
+    # 因此，我們只驗證 AI 提取的資料是否正確即可。
+    assert "quantitative_analysis" not in final_data
 
     # Clean up the created file
     json_path.unlink()
