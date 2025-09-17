@@ -216,6 +216,7 @@ def initialize_database(conn: sqlite3.Connection = None):
                 "author": "TEXT", # 新增作者欄位
                 "message_date": "TEXT", # 訊息本身的日期
                 "message_time": "TEXT", # 訊息本身的時間
+                "title": "TEXT", # (Jules @ 2025-09-17) 新增標題欄位
                 "status": "TEXT DEFAULT 'pending'",
                 "status_message": "TEXT",
                 "local_path": "TEXT",
@@ -776,8 +777,16 @@ def get_urls_by_statuses(statuses: list[str]) -> list[dict]:
     try:
         # 為 IN 子句建立一個佔位符字串
         placeholders = ','.join(['?'] * len(statuses))
-        # 2025-09-18 V4 優化：查詢所有欄位以滿足不同頁面的需求
-        sql = f"SELECT * FROM extracted_urls WHERE status IN ({placeholders}) ORDER BY created_at DESC"
+        # V5 效能優化 (Jules @ 2025-09-17):
+        # - 放棄 SELECT *，明確指定前端需要的欄位
+        # - 這解決了「標題不顯示」的 bug (因為之前沒選 title)
+        # - 這也解決了「介面凍結」的效能問題 (因為避免了傳輸巨大的 source_text)
+        sql = f"""
+            SELECT id, url, author, message_date, message_time, title
+            FROM extracted_urls
+            WHERE status IN ({placeholders})
+            ORDER BY created_at DESC
+        """
 
         cursor = conn.cursor()
         cursor.execute(sql, statuses)
@@ -901,12 +910,12 @@ def add_new_urls(parsed_data: list[dict], source_text: str) -> int:
             from core.time_utils import get_current_taipei_time_iso
             created_at_iso = get_current_taipei_time_iso()
             data_to_insert = [
-                (item['url'], item['author'], item['date'], item['time'], source_text, created_at_iso)
+                (item['url'], item['author'], item['date'], item['time'], item.get('title', '無標題'), source_text, created_at_iso)
                 for item in new_items
             ]
 
             cursor.executemany(
-                "INSERT INTO extracted_urls (url, author, message_date, message_time, source_text, created_at, status) VALUES (?, ?, ?, ?, ?, ?, 'pending')",
+                "INSERT INTO extracted_urls (url, author, message_date, message_time, title, source_text, created_at, status) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')",
                 data_to_insert
             )
 
