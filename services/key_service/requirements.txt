@@ -1,0 +1,4 @@
+# 金鑰管理微服務的核心依賴
+fastapi
+uvicorn[standard]
+google-generativeai

@@ -1,0 +1,7 @@
+# 下載器微服務的核心依賴
+fastapi
+uvicorn[standard]
+gdown
+filetype
+requests
+python-dateutil
