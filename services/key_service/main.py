@@ -180,6 +180,13 @@ def read_root():
 # --- 允許直接執行此檔案以進行測試 ---
 if __name__ == "__main__":
     # 從環境變數讀取埠號，以便協調器可以動態指派
-    port = int(os.environ.get("PORT", 8001))
+    # 修正：確保在找不到環境變數時，程式會失敗而不是使用一個可能衝突的預設值
+    try:
+        port = int(os.environ["PORT"])
+    except (KeyError, ValueError):
+        log("錯誤：未在環境變數中找到有效的 'PORT'。服務無法啟動。", "ERROR")
+        exit(1)
+
     log(f"將在 http://127.0.0.1:{port} 上啟動伺服器")
-    uvicorn.run(app, host="127.0.0.1", port=port, log_level="info")
+    # 修正：直接將 app 物件傳遞給 uvicorn.run，而不是用字串
+    uvicorn.run(app, host="127.0.0.1", port=port)

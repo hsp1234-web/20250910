@@ -176,23 +176,46 @@ async def get_report_content(file_id: int, db: DBClient = Depends(get_db)):
 
 # --- 背景任務函式 (重構後) ---
 
-def _run_processing_blocking_task(url_id: int, db_client, queue: asyncio.Queue, loop: asyncio.AbstractEventLoop):
-    """這是在背景執行的單一檔案處理的同步阻塞部分。"""
-    # --- 延遲導入 (Lazy Import) ---
-    from tools.content_extractor import extract_content
-    # JULES V6 啟動優化：延遲載入
-    from tools.file_hasher import calculate_sha256
+import requests
+from core.config_manager import get_service_url
 
-    time.sleep(1) # 為解決檔案系統競爭條件，在開始時增加一個短暫的延遲
+def _call_processor_service(file_path: str) -> dict:
+    """呼叫內容提取微服務的輔助函式。"""
+    service_url = get_service_url("processor_service")
+    if not service_url:
+        raise RuntimeError("內容提取服務(processor_service)目前不可用或未設定。")
+
+    service_endpoint = f"{service_url}/extract_content"
+    log.info(f"正在向內容提取服務發送請求: {service_endpoint}")
+    try:
+        response = requests.post(
+            service_endpoint,
+            json={"file_path": file_path},
+            timeout=180  # 3 分鐘超時
+        )
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        log.error(f"呼叫內容提取服務時發生網路錯誤: {e}", exc_info=True)
+        # 將原始錯誤包裝後重新拋出，以便上層可以捕獲並記錄
+        raise RuntimeError(f"與內容提取服務通訊失敗: {e}") from e
+
+def _run_processing_blocking_task(url_id: int, db_client, queue: asyncio.Queue, loop: asyncio.AbstractEventLoop):
+    """
+    (V6 重構後) 這是在背景執行的單一檔案處理的同步阻塞部分。
+    現在它會呼叫 `processor_service` 來完成工作。
+    """
+    from tools.file_hasher import calculate_sha256
+    time.sleep(1)
 
     log.info(f"背景任務：開始處理檔案 URL ID: {url_id}")
-    final_status = 'processing_failed' # 預設為失敗
-    file_path = None  # 初始化 file_path 以確保在 finally 區塊中可用
+    final_status = 'processing_failed'
+    file_path = None
 
     try:
         url_record = db_client.get_url_by_id(url_id)
         if not url_record or not url_record['local_path']:
-             raise ValueError(f"在資料庫中找不到 ID {url_id} 的有效本地檔案路徑。")
+            raise ValueError(f"在資料庫中找不到 ID {url_id} 的有效本地檔案路徑。")
 
         file_path = Path(url_record['local_path'])
         if not file_path.is_file():
@@ -200,14 +223,16 @@ def _run_processing_blocking_task(url_id: int, db_client, queue: asyncio.Queue, 
 
         log.info(f"背景任務：準備處理檔案: {file_path}")
 
+        # 步驟 1: 呼叫微服務來提取內容
+        content_data = _call_processor_service(str(file_path))
+
+        # 步驟 2: 計算檔案雜湊值
         file_hash = calculate_sha256(file_path)
-        image_output_dir = file_path.parent / "extracted_images"
-        content_data = extract_content(str(file_path), str(image_output_dir))
 
-        text_content = content_data.get("text", "") if content_data else ""
-        image_paths_json = json.dumps(content_data.get("image_paths", [])) if content_data else "[]"
+        text_content = content_data.get("text", "")
+        image_paths_json = json.dumps(content_data.get("image_paths", []))
 
-        if not text_content and not json.loads(image_paths_json):
+        if not text_content and not content_data.get("image_paths"):
             status = 'processed_unsupported'
             status_message = '不支援的檔案類型或檔案為空，無法提取任何內容。'
         else:

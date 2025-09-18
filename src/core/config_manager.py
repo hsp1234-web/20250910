@@ -104,6 +104,45 @@ def update_config_value(key: str, value: Any) -> bool:
     current_config[key] = value
     return save_config(current_config)
 
+
+# --- V6 微服務支援 ---
+SERVICE_REGISTRY_FILE = Path("/tmp/service_registry.json")
+_service_registry_cache: Dict[str, Any] = {}
+_service_registry_mtime: float = 0
+
+def get_service_url(service_name: str) -> str | None:
+    """
+    從服務註冊檔案中獲取指定微服務的基礎 URL。
+    實現了基於檔案修改時間的快取。
+    """
+    global _service_registry_cache, _service_registry_mtime
+
+    try:
+        if not SERVICE_REGISTRY_FILE.exists():
+            # log.warning("服務註冊檔案不存在，無法尋找微服務。")
+            return None
+
+        current_mtime = SERVICE_REGISTRY_FILE.stat().st_mtime
+        # 如果快取是空的，或者檔案已被修改，則重新載入
+        if not _service_registry_cache or current_mtime > _service_registry_mtime:
+            log.info(f"正在重新載入服務註冊檔案: {SERVICE_REGISTRY_FILE}")
+            with open(SERVICE_REGISTRY_FILE, 'r', encoding='utf-8') as f:
+                _service_registry_cache = json.load(f)
+            _service_registry_mtime = current_mtime
+
+        service_info = _service_registry_cache.get(service_name)
+        if service_info and service_info.get("status") == "running":
+            port = service_info.get("port")
+            return f"http://127.0.0.1:{port}"
+        else:
+            log.warning(f"在服務註冊中找不到 '{service_name}' 或其狀態不是 'running'。")
+            return None
+
+    except (IOError, json.JSONDecodeError, FileNotFoundError) as e:
+        log.error(f"讀取或解析服務註冊檔案時發生錯誤: {e}", exc_info=True)
+        return None
+
+
 if __name__ == '__main__':
     # 簡單的測試
     print("--- 測試設定管理器 ---")
