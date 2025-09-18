@@ -20,8 +20,9 @@ sys.path.insert(0, str(SRC_DIR))
 # from db.database import get_db_connection
 from db.client import DBClient
 from ..dependencies import get_db
-from tools.file_hasher import calculate_sha256
-from tools.image_compressor import compress_image
+# JULES V6 啟動優化：延遲載入
+# from tools.file_hasher import calculate_sha256
+# from tools.image_compressor import compress_image
 from fastapi import Depends
 
 # --- 常數與設定 ---
@@ -135,6 +136,9 @@ async def get_report_content(file_id: int, db: DBClient = Depends(get_db)):
     """(V4 優化後) 獲取單一已處理報告的詳細內容。"""
     log.info(f"API: 收到對檔案 ID {file_id} 的報告內容請求。")
     try:
+        # JULES V6 啟動優化：延遲載入
+        from tools.image_compressor import compress_image
+
         row = db.get_url_by_id(url_id=file_id)
         if not row or row['status'] != 'processed':
             raise HTTPException(status_code=404, detail="找不到指定 ID 的已處理報告。")
@@ -176,6 +180,8 @@ def _run_processing_blocking_task(url_id: int, db_client, queue: asyncio.Queue, 
     """這是在背景執行的單一檔案處理的同步阻塞部分。"""
     # --- 延遲導入 (Lazy Import) ---
     from tools.content_extractor import extract_content
+    # JULES V6 啟動優化：延遲載入
+    from tools.file_hasher import calculate_sha256
 
     time.sleep(1) # 為解決檔案系統競爭條件，在開始時增加一個短暫的延遲
 

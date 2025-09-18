@@ -12,7 +12,8 @@ SRC_DIR = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(SRC_DIR))
 
 from core import key_manager, config_manager
-from tools.gemini_manager import GeminiManager
+# JULES V6 啟動優化：延遲載入
+# from tools.gemini_manager import GeminiManager
 
 # --- 常數與設定 ---
 log = logging.getLogger(__name__)
@@ -97,6 +98,8 @@ async def get_available_models():
     這需要至少有一個有效的 API 金鑰。
     """
     try:
+        # JULES V6 啟動優化：延遲載入
+        from tools.gemini_manager import GeminiManager
         # 獲取有效的金鑰來初始化 Gemini Manager
         valid_keys = key_manager.get_all_valid_keys_for_manager()
         if not valid_keys:

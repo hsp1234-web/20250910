@@ -23,11 +23,12 @@ from db.client import DBClient
 from ..dependencies import get_db
 # V4 優化：移除 get_db_connection
 # from db.database import get_db_connection
-from core import key_manager, prompt_manager
-from core.time_utils import get_current_taipei_date_str
-from tools.gemini_manager import GeminiManager
-from tools.quantitative_analyzer import find_valid_yfinance_symbol
-from tools.taiwan_stock_suffix_helper import SUFFIX_HELPER
+# JULES V6 啟動優化：延遲載入重量級依賴
+from core import time_utils
+# from core import key_manager, prompt_manager
+# from tools.gemini_manager import GeminiManager
+# from tools.quantitative_analyzer import find_valid_yfinance_symbol
+# from tools.taiwan_stock_suffix_helper import SUFFIX_HELPER
 from fastapi import Depends
 
 # --- 常數與設定 ---
@@ -84,6 +85,12 @@ def _run_stage1_blocking_task(task_id: int, file_id: int, model_name: str, queue
     """
     log.info(f"第一階段任務實際執行開始：task_id={task_id}, file_id={file_id}, model={model_name}")
     try:
+        # JULES V6 啟動優化：延遲載入
+        from core import key_manager, prompt_manager
+        from tools.gemini_manager import GeminiManager
+        from tools.quantitative_analyzer import find_valid_yfinance_symbol
+        from tools.taiwan_stock_suffix_helper import SUFFIX_HELPER
+
         # 1. 初始化 Gemini Manager
         from core.config_manager import get_config_value
         api_timeout = get_config_value("api_timeout_seconds", 35)
@@ -172,6 +179,10 @@ def _run_date_inference_blocking_task(task_id: int, model_name: str, queue: asyn
     """
     log.info(f"AI 日期推斷任務實際執行開始：task_id={task_id}")
     try:
+        # JULES V6 啟動優化：延遲載入
+        from core import key_manager, prompt_manager
+        from tools.gemini_manager import GeminiManager
+
         task_data = db_client.get_analysis_task(task_id=task_id)
         if not task_data or not task_data.get("file_content_for_analysis"):
              raise ValueError(f"任務 {task_id} 中找不到可供分析的檔案內容。")
@@ -215,12 +226,12 @@ def _run_date_inference_blocking_task(task_id: int, model_name: str, queue: asyn
         text_content = task_data['file_content_for_analysis']
 
         # Fallback message_date if needed for the prompt itself
-        fallback_message_date = url_record.get("message_date", get_current_taipei_date_str()) if url_record else get_current_taipei_date_str()
+        fallback_message_date = url_record.get("message_date", time_utils.get_current_taipei_date_str()) if url_record else time_utils.get_current_taipei_date_str()
 
         date_prompt = date_prompt_template.format(
             document_text=text_content,
             message_date=fallback_message_date,
-            today_date=get_current_taipei_date_str()
+            today_date=time_utils.get_current_taipei_date_str()
         )
 
         inferred_date_str, error, used_key, token_usage = gemini.prompt_for_text(prompt=date_prompt, model_name=model_name)
@@ -261,6 +272,7 @@ def _run_performance_analysis_blocking_task(task_id: int, queue: asyncio.Queue, 
     """
     log.info(f"本地績效分析任務實際執行開始：task_id={task_id}")
     try:
+        # JULES V6 啟動優化：延遲載入
         from tools.quantitative_analyzer import calculate_performance_stats
 
         task_data = db_client.get_analysis_task(task_id=task_id)
@@ -317,6 +329,10 @@ def _run_stage2_blocking_task(task_id: int, model_name: str, queue: asyncio.Queu
     """
     log.info(f"第二階段任務實際執行開始：task_id={task_id}, model={model_name}")
     try:
+        # JULES V6 啟動優化：延遲載入
+        from core import key_manager, prompt_manager
+        from tools.gemini_manager import GeminiManager
+
         task_data = db_client.get_analysis_task(task_id=task_id)
         if not task_data or not task_data.get("stage1_json_path"):
             raise ValueError(f"找不到任務 {task_id} 或其第一階段的 JSON 產出路徑。")
