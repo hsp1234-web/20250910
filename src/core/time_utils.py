@@ -6,6 +6,7 @@
 from datetime import datetime
 import zoneinfo
 from dateutil import parser as date_parser
+from dateutil.parser import ParserError
 
 TAIPEI_TZ = zoneinfo.ZoneInfo("Asia/Taipei")
 
@@ -32,6 +33,7 @@ def get_current_taipei_time_iso() -> str:
 def format_iso_for_filename(iso_string: str) -> str:
     """
     將一個 ISO 格式的時間字串（可能包含時區）轉換為檔名所需的安全格式。
+    這個函式現在更強大，能夠處理來自 LINE 的不一致的時間格式，例如 '下午 02:30'。
     例如：'2025-09-11T09:30:00+08:00' -> '2025-09-11T09-30-00'
     """
     if not iso_string:
@@ -39,8 +41,12 @@ def format_iso_for_filename(iso_string: str) -> str:
         return get_current_taipei_time().strftime('%Y-%m-%dT%H-%M-%S')
 
     try:
+        # 新增：預處理字串，以應對 LINE 的 '上午'/'下午' 格式
+        # 這讓解析器可以處理 '2025-09-15T下午 02:30:00' 這樣的字串
+        processed_string = iso_string.replace("上午", "AM").replace("下午", "PM")
+
         # dateutil.parser 可以智慧地解析幾乎所有格式的日期字串
-        dt_object = date_parser.parse(iso_string)
+        dt_object = date_parser.parse(processed_string)
 
         # 如果傳入的字串沒有時區資訊，我們假設它就是台北時間
         if dt_object.tzinfo is None:
@@ -52,7 +58,14 @@ def format_iso_for_filename(iso_string: str) -> str:
 
         # 格式化為檔名所需的安全格式
         return dt_taipei.strftime('%Y-%m-%dT%H-%M-%S')
-    except (ValueError, TypeError) as e:
+    except (ValueError, TypeError, ParserError) as e:
         print(f"警告：無法解析時間字串 '{iso_string}' ({e})。回退到使用當前時間。")
         # 如果解析失敗，回退到使用當前時間，以確保功能不中斷
         return get_current_taipei_time().strftime('%Y-%m-%dT%H-%M-%S')
+
+def get_current_taipei_date_str() -> str:
+    """
+    獲取當前台北時區的日期字串，格式為 YYYY-MM-DD。
+    專門用於提供給 AI 提示詞作為上下文。
+    """
+    return get_current_taipei_time().strftime('%Y-%m-%d')

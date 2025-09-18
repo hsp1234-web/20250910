@@ -37,82 +37,99 @@ log = logging.getLogger('url_extractor')
 
 def parse_chat_log(text: str) -> list[dict]:
     """
-    從給定的 LINE 聊天紀錄文字中，解析出日期、時間、作者和連結。
-    這個實作是根據使用者提供的聊天紀錄範例所設計。
+    (Jules @ 2025-09-17) 新版解析器
+    從給定的 LINE 聊天紀錄文字中，解析出日期、時間、作者、標題和連結。
+    這個實作採用區塊化處理，能夠正確處理跨多行的訊息。
 
     :param text: 包含 LINE 聊天紀錄的來源文字。
-    :return: 一個字典列表，每個字典包含 'date', 'time', 'author', 'url'。
+    :return: 一個字典列表，每個字典包含 'date', 'time', 'author', 'title', 'url'。
     """
-    # 偵測 LINE 聊天紀錄中的關鍵模式
-    # 1. 日期行: e.g., "2025/5/6（週二）"
-    date_pattern = re.compile(r'(\d{4}/\d{1,2}/\d{1,2})（週.）')
-    # 2. 發言行: e.g., "13:30\t579-0740320Jack" (後面可能還有文字)
-    #    - \t 是定位字元 (tab)
-    #    - 捕捉時間 (HH:MM) 和作者 (直到下一個 \t 或行尾)
-    message_pattern = re.compile(r'^(\d{2}:\d{2})\t([^\t]+)')
-    # 3. 網址: 匹配 http/https 開頭的 URL
-    url_pattern = re.compile(r'https?://\S+')
-
     results = []
     current_date = None
-    last_message_info = None
-
     lines = text.split('\n')
+    i = 0
 
-    for i, line in enumerate(lines):
-        line = line.strip()
-        if not line:
-            continue
+    # 定義正規表示式
+    # 恢復為更精確的日期格式，此格式在第二次檢查時被證實是正確的
+    date_pattern = re.compile(r'(\d{4}/\d{1,2}/\d{1,2})（週.）')
+    message_pattern = re.compile(r'^(\d{2}:\d{2})\t([^\t]+)\t?(.*)$')
+    url_pattern = re.compile(r'https?://\S+')
 
+    while i < len(lines):
+        line = lines[i].strip()
+        log.debug(f"正在處理第 {i} 行: '{line[:50]}...'")
+
+        # 1. 處理日期行
         date_match = date_pattern.match(line)
         if date_match:
-            # 將 YYYY/M/D 或 YYYY/MM/DD 格式標準化為 YYYY-MM-DD
+            # 將 YYYY/M/D 格式標準化為 YYYY-MM-DD
             date_parts = date_match.group(1).split('/')
             current_date = f"{date_parts[0]}-{int(date_parts[1]):02d}-{int(date_parts[2]):02d}"
-            last_message_info = None # 新的一天，重置作者資訊
+            i += 1
             continue
 
+        if not current_date:
+            i += 1
+            continue
+
+        # 2. 處理訊息行
         message_match = message_pattern.match(line)
         if message_match:
-            time = message_match.group(1)
-            author = message_match.group(2).strip().split('\t')[0] # 再一次確保只取作者名
+            time, author, first_line_content = message_match.groups()
+            author = author.strip()
 
-            # 過濾掉無效的作者/系統訊息
-            if any(keyword in author for keyword in ["加入聊天", "已收回訊息", "退出聊天"]):
-                last_message_info = None
+            # 過濾系統訊息
+            if any(keyword in author for keyword in ["加入聊天", "退出聊天"]) or "已收回訊息" in first_line_content:
+                i += 1
                 continue
 
-            # 暫存作者資訊，因為連結可能在下一行
-            last_message_info = {'time': time, 'author': author}
+            # 收集完整的訊息區塊 (包含後續行)
+            content_parts = [first_line_content.strip()]
+            j = i + 1
+            while j < len(lines):
+                next_line = lines[j].strip()
+                # 檢查是否為區塊的結束標記
+                if date_pattern.match(next_line) or message_pattern.match(next_line):
+                    break
 
-            # 檢查發言的同一行是否包含網址
-            url_match_in_line = url_pattern.search(line)
-            if url_match_in_line:
-                url = url_match_in_line.group(0)
+                # 如果不是結束標記，且不是空行，則加入內容
+                if next_line:
+                    content_parts.append(next_line)
+
+                j += 1 # 繼續掃描下一行
+
+            # 從訊息區塊中提取標題和 URL
+            full_content_str = " ".join(content_parts)
+            url_match = url_pattern.search(full_content_str)
+
+            if url_match:
+                url = url_match.group(0)
+                # 標題是 URL 之前的所有文字，並將多個空白符正規化為單一空格
+                title_raw = full_content_str[:url_match.start()]
+                title = re.sub(r'\s+', ' ', title_raw).strip()
+
+                # 如果標題為空，使用一個預設值
+                if not title:
+                    title = "無標題"
+
+                # 過濾掉教學/提醒訊息
+                if "提醒小作文標題格式" in title:
+                    i = j # 移動到下一個未處理的行
+                    continue
+
                 results.append({
                     'date': current_date,
                     'time': time,
                     'author': author,
+                    'title': title,
                     'url': url
                 })
-                last_message_info = None # 處理完畢，重置以避免重複關聯
-            continue
 
-        # 如果這行不是日期也不是發言，檢查它是否只包含一個網址
-        # 並且緊跟在一個有效的發言者之後
-        # 使用 fullmatch 確保整行就是一個網址，避免誤判包含網址的普通句子
-        url_match = url_pattern.fullmatch(line)
-        if url_match and last_message_info:
-            url = url_match.group(0)
-            results.append({
-                'date': current_date,
-                'time': last_message_info['time'],
-                'author': last_message_info['author'],
-                'url': url
-            })
-            last_message_info = None # 處理完畢，重置
+            i = j # 移動到下一個未處理的行
+        else:
+            i += 1 # 如果不是訊息行，繼續下一行
 
-    log.info(f"從聊天紀錄中解析出 {len(results)} 筆有效的作者-網址配對。")
+    log.info(f"從聊天紀錄中解析出 {len(results)} 筆結構化資料。")
     return results
 
 
@@ -150,20 +167,39 @@ def save_urls_to_db(parsed_data: list[dict], source_text: str, conn: Optional[sq
     try:
         with db_conn:
             cursor = db_conn.cursor()
-            created_at_iso = get_current_taipei_time_iso()
 
-            # 準備要插入的多筆資料，現在包含作者、訊息日期和時間
+            # --- 步驟 1: 獲取資料庫中所有現存的 URL ---
+            cursor.execute("SELECT url FROM extracted_urls")
+            existing_urls = {row[0] for row in cursor.fetchall()}
+            log.info(f"資料庫中已存在 {len(existing_urls)} 個獨立的網址。")
+
+            # --- 步驟 2: 過濾掉已經存在的 URL ---
+            new_items = []
+            for item in parsed_data:
+                if item['url'] not in existing_urls:
+                    new_items.append(item)
+                    existing_urls.add(item['url']) # 也加入到集合中，以處理當前批次內的重複
+
+            if not new_items:
+                log.info("所有解析出的網址都已存在於資料庫中，無需新增。")
+                return
+
+            log.info(f"過濾後，有 {len(new_items)} 筆新網址需要儲存。")
+
+            # --- 步驟 3: 準備並插入新資料 ---
+            created_at_iso = get_current_taipei_time_iso()
             data_to_insert = [
-                (item['url'], item['author'], item['date'], item['time'], source_text, created_at_iso)
-                for item in parsed_data
+                # Jules @ 2025-09-17: 新增 item['title'] 以便將解析出的標題存入資料庫
+                (item['url'], item['author'], item['date'], item['time'], item['title'], source_text, created_at_iso)
+                for item in new_items
             ]
 
-            # 使用 executemany 來高效地插入多筆記錄
             cursor.executemany(
-                "INSERT INTO extracted_urls (url, author, message_date, message_time, source_text, created_at, status) VALUES (?, ?, ?, ?, ?, ?, 'pending')",
+                # Jules @ 2025-09-17: 在 INSERT 語句中也加入 title 欄位
+                "INSERT INTO extracted_urls (url, author, message_date, message_time, title, source_text, created_at, status) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')",
                 data_to_insert
             )
-        log.info(f"成功將 {len(parsed_data)} 筆解析資料儲存到資料庫。")
+        log.info(f"成功將 {len(data_to_insert)} 筆新的解析資料儲存到資料庫。")
     except sqlite3.Error as e:
         log.error(f"儲存解析資料到資料庫時發生錯誤: {e}", exc_info=True)
     finally:

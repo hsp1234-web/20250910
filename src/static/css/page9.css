@@ -1,0 +1,181 @@
+/* src/static/css/page9.css */
+
+body {
+    background-color: #f0f2f5; /* A slightly different background for the dashboard */
+}
+
+.container {
+    max-width: 1400px; /* Wider container for dashboard layout */
+    padding: 20px;
+    margin: 20px auto;
+}
+
+h1 {
+    color: #333;
+    border-bottom: 3px solid #007bff;
+    padding-bottom: 10px;
+    margin-bottom: 20px;
+}
+
+#loading-indicator {
+    text-align: center;
+    font-size: 1.2em;
+    color: #555;
+    padding: 40px;
+}
+
+#dashboard-container {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+.report-item {
+    background-color: #fff;
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+    transition: box-shadow 0.3s ease;
+}
+
+.report-item:hover {
+    box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+}
+
+.report-header {
+    padding: 15px 20px;
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background-color: #f8f9fa;
+    border-bottom: 1px solid #e9ecef;
+    border-radius: 8px 8px 0 0;
+}
+
+.report-header:hover {
+    background-color: #e9ecef;
+}
+
+.report-header.active {
+    background-color: #007bff;
+    color: white;
+}
+
+.report-title {
+    font-weight: 600;
+    font-size: 1.1em;
+}
+
+.report-meta {
+    font-size: 0.9em;
+    color: #6c757d;
+}
+
+.report-header.active .report-meta {
+    color: #f0f2f5;
+}
+
+.report-content {
+    padding: 20px;
+    border-top: 1px solid #ddd;
+}
+
+.report-grid {
+    display: grid;
+    /* 調整為三欄，給圖表較多空間，KPI 和 AI 摘要各佔一欄 */
+    grid-template-columns: 1.5fr 1fr 1fr;
+    gap: 20px;
+    align-items: flex-start;
+}
+
+@media (max-width: 1200px) {
+    .report-grid {
+        grid-template-columns: 1fr 1fr; /* 中等螢幕變為兩欄 */
+    }
+}
+
+@media (max-width: 768px) {
+    .report-grid {
+        grid-template-columns: 1fr; /* 小螢幕變為堆疊 */
+    }
+}
+
+.chart-container {
+    width: 100%;
+}
+
+.kpi-container table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.kpi-container th, .kpi-container td {
+    padding: 10px;
+    border: 1px solid #e9ecef;
+    text-align: left;
+}
+
+.kpi-container th {
+    background-color: #f8f9fa;
+    font-weight: 600;
+}
+
+.kpi-container td:last-child {
+    text-align: right;
+    font-family: monospace;
+    font-weight: 500;
+}
+
+/* --- 新增的 AI 摘要和 JSON 檢視器樣式 --- */
+.ai-summary-container, .kpi-container {
+    background-color: #fdfdfd;
+    padding: 15px;
+    border: 1px solid #e9ecef;
+    border-radius: 5px;
+}
+
+.ai-summary-container h4, .kpi-container h4 {
+    margin-top: 0;
+    margin-bottom: 15px;
+    color: #343a40;
+    border-bottom: 2px solid #e0e0e0;
+    padding-bottom: 5px;
+}
+
+.ai-summary-container p {
+    margin: 5px 0;
+    line-height: 1.6;
+}
+
+.view-json-btn {
+    display: inline-block;
+    margin-top: 15px;
+    padding: 8px 12px;
+    background-color: #6c757d;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+
+.view-json-btn:hover {
+    background-color: #5a6268;
+}
+
+.json-viewer {
+    margin-top: 20px;
+    padding: 15px;
+    background-color: #212529; /* 深色背景 */
+    color: #f8f9fa; /* 亮色文字 */
+    border-radius: 5px;
+    overflow-x: auto;
+    max-height: 400px;
+}
+
+.json-viewer pre {
+    margin: 0;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+}

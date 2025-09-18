@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>策略績效儀表板</title>
+    <link rel="stylesheet" href="/static/css/common.css">
+    <link rel="stylesheet" href="/static/css/nav.css">
+    <link rel="stylesheet" href="/static/css/page9.css">
+</head>
+<body>
+    <nav class="top-nav">
+        <ul>
+            <li><a href="/">鳳凰主頁</a></li>
+            <li><a href="/page1">網址提取</a></li>
+            <li><a href="/page2">批次下載</a></li>
+            <li><a href="/page3">檔案處理</a></li>
+            <li><a href="/page4_stage1_ai">AI 分析</a></li>
+            <li><a href="/page5">備份管理</a></li>
+            <li><a href="/page6">金鑰管理</a></li>
+            <li><a href="/page7">提示詞管理</a></li>
+            <li><a href="/page9" class="active">績效儀表板</a></li>
+        </ul>
+    </nav>
+
+    <div class="container">
+        <h1>策略績效儀表板</h1>
+        <p>此頁面彙總所有已完成的量化分析報告，方便進行比較與檢視。</p>
+
+        <div id="loading-indicator">正在載入報告...</div>
+
+        <div id="dashboard-container">
+            <!-- 報表將會動態插入到這裡 -->
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const container = document.getElementById('dashboard-container');
+            const loadingIndicator = document.getElementById('loading-indicator');
+
+            const translations = {
+                "total_return": "總報酬率",
+                "annualized_return": "年化報酬率",
+                "annualized_volatility": "年化波動率",
+                "max_drawdown": "最大回撤 (MDD)",
+                "sharpe_ratio": "夏普比率",
+                "alpha": "Alpha (α)",
+                "beta": "Beta (β)"
+            };
+
+            const createReportElement = (report) => {
+                const element = document.createElement('div');
+                element.className = 'report-item';
+
+                // --- 標題區 ---
+                const header = document.createElement('div');
+                header.className = 'report-header';
+                header.innerHTML = `
+                    <span class="report-title">${report.title} (Symbol: ${report.symbol})</span>
+                    <span class="report-meta">分析於: ${new Date(report.source_date).toLocaleDateString()} by ${report.source_author}</span>
+                `;
+                header.addEventListener('click', () => {
+                    const content = element.querySelector('.report-content');
+                    content.style.display = content.style.display === 'none' ? 'block' : 'none';
+                    header.classList.toggle('active');
+                });
+
+                // --- 內容區 (預設隱藏) ---
+                const content = document.createElement('div');
+                content.className = 'report-content';
+                content.style.display = 'none';
+
+                const contentGrid = document.createElement('div');
+                contentGrid.className = 'report-grid';
+
+                // 圖表區
+                const chartDiv = document.createElement('div');
+                chartDiv.className = 'chart-container';
+                if (report.chart_html) {
+                    chartDiv.innerHTML = report.chart_html;
+                } else {
+                    chartDiv.innerHTML = '<p>無可用圖表。</p>';
+                }
+
+                // KPI 表格區
+                const kpiDiv = document.createElement('div');
+                kpiDiv.className = 'kpi-container';
+                let kpiTableHtml = '<h4>量化指標</h4><table><thead><tr><th>指標</th><th>數值</th></tr></thead><tbody>';
+                if (report.backtest_kpis) {
+                    for (const [key, value] of Object.entries(report.backtest_kpis)) {
+                        const displayName = translations[key] || key;
+                        const formattedValue = typeof value === 'number' ? value.toFixed(4) : String(value);
+                        kpiTableHtml += `<tr><td>${displayName}</td><td>${formattedValue}</td></tr>`;
+                    }
+                }
+                kpiTableHtml += '</tbody></table>';
+                kpiDiv.innerHTML = kpiTableHtml;
+
+                // --- 【新增】AI 分析摘要區 ---
+                const aiSummaryDiv = document.createElement('div');
+                aiSummaryDiv.className = 'ai-summary-container';
+                let summaryHtml = '<h4>AI 分析摘要</h4>';
+                if (report.stage1_result_json) {
+                    const summaryData = report.stage1_result_json;
+                    summaryHtml += `<p><strong>標題:</strong> ${summaryData.title || 'N/A'}</p>`;
+                    summaryHtml += `<p><strong>情緒:</strong> ${summaryData.sentiment || 'N/A'}</p>`;
+                    summaryHtml += `<p><strong>摘要:</strong> ${summaryData.summary || 'N/A'}</p>`;
+                    summaryHtml += `<button class="view-json-btn" data-task-id="${report.task_id}">查看完整 JSON</button>`;
+                } else {
+                    summaryHtml += '<p>無 AI 分析資料。</p>';
+                }
+                aiSummaryDiv.innerHTML = summaryHtml;
+                // --- 結束 ---
+
+                contentGrid.appendChild(chartDiv);
+                contentGrid.appendChild(kpiDiv);
+                contentGrid.appendChild(aiSummaryDiv); // 新增到網格中
+                content.appendChild(contentGrid);
+
+                // --- 【新增】JSON 檢視區 ---
+                const jsonViewer = document.createElement('div');
+                jsonViewer.className = 'json-viewer';
+                jsonViewer.id = `json-viewer-${report.task_id}`;
+                jsonViewer.style.display = 'none';
+                content.appendChild(jsonViewer);
+                // --- 結束 ---
+
+                element.appendChild(header);
+                element.appendChild(content);
+
+                return element;
+            };
+
+            container.addEventListener('click', (e) => {
+                if (e.target.classList.contains('view-json-btn')) {
+                    const taskId = e.target.dataset.taskId;
+                    const viewer = document.getElementById(`json-viewer-${taskId}`);
+                    if (!viewer) return;
+
+                    if (viewer.style.display === 'none') {
+                        const reportData = window.reportsData.find(r => r.task_id == taskId);
+                        if (reportData && reportData.stage1_result_json) {
+                            viewer.innerHTML = `<pre>${JSON.stringify(reportData.stage1_result_json, null, 2)}</pre>`;
+                            viewer.style.display = 'block';
+                            e.target.textContent = '隱藏 JSON';
+                        }
+                    } else {
+                        viewer.style.display = 'none';
+                        e.target.textContent = '查看完整 JSON';
+                    }
+                }
+            });
+
+            const fetchAndRenderReports = async () => {
+                try {
+                    const response = await fetch('/api/dashboard/performance_reports');
+                    if (!response.ok) {
+                        throw new Error(`獲取報告失敗: ${response.statusText}`);
+                    }
+                    window.reportsData = await response.json(); // 將報告儲存在 window 以供事件監聽器使用
+
+                    loadingIndicator.style.display = 'none';
+
+                    if (window.reportsData.length === 0) {
+                        container.innerHTML = '<p>目前沒有已完成的績效報告。</p>';
+                        return;
+                    }
+
+                    window.reportsData.forEach(report => {
+                        const reportElement = createReportElement(report);
+                        container.appendChild(reportElement);
+                    });
+
+                } catch (error) {
+                    loadingIndicator.textContent = `載入報告時發生錯誤: ${error.message}`;
+                    loadingIndicator.style.color = 'red';
+                    console.error(error);
+                }
+            };
+
+            fetchAndRenderReports();
+        });
+    </script>
+
+    <!-- V5.5 Readiness Overlay Start -->
+    <style>
+        #readiness-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.7);
+            color: white;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 1.5em;
+            z-index: 9999;
+            flex-direction: column;
+            text-align: center;
+        }
+        #readiness-overlay .spinner {
+            border: 4px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top: 4px solid #fff;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin-bottom: 20px;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+    <div id="readiness-overlay">
+        <div class="spinner"></div>
+        <p>系統正在初始化核心服務，請稍候...</p>
+    </div>
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const overlay = document.getElementById('readiness-overlay');
+            const buttons = document.querySelectorAll('button, a.button, input[type="button"], input[type="submit"]');
+
+            // 輔助函數：啟用UI
+            function enableUI() {
+                overlay.style.display = 'none';
+                buttons.forEach(btn => {
+                    btn.disabled = false;
+                });
+                console.log('系統已就緒，UI 已啟用。');
+            }
+
+            // 檢查 sessionStorage 中是否已有就緒標記
+            if (sessionStorage.getItem('isSystemReady') === 'true') {
+                enableUI();
+                const overlayText = overlay.querySelector('p');
+                if(overlayText) {
+                    overlayText.innerText = '系統已就緒';
+                }
+                return; // 如果已就緒，則不執行後續的輪詢
+            }
+
+            // 1. 預設禁用所有按鈕並顯示遮罩
+            buttons.forEach(btn => {
+                if (!btn.closest('.navbar')) {
+                    btn.disabled = true;
+                }
+            });
+            overlay.style.display = 'flex';
+
+            // 2. 定期輪詢 /api/health/ready 端點
+            const readinessInterval = setInterval(() => {
+                fetch('/api/health/ready')
+                    .then(response => {
+                        if (response.ok) {
+                            // 3. 一旦請求成功，設定標記、啟用按鈕並隱藏遮罩
+                            clearInterval(readinessInterval);
+                            sessionStorage.setItem('isSystemReady', 'true'); // 設定標記
+                            enableUI();
+                        } else {
+                            console.log('等待核心服務就緒...');
+                        }
+                    })
+                    .catch(error => {
+                        console.error('輪詢就緒狀態時發生錯誤:', error);
+                        const overlayText = overlay.querySelector('p');
+                        if(overlayText) {
+                            overlayText.innerText = '無法連接到後端服務，請檢查連線或稍後重試。';
+                        }
+                    });
+            }, 2000); // 每 2 秒輪詢一次
+        });
+    </script>
+    <!-- V5.5 Readiness Overlay End -->
+</body>
+</html>

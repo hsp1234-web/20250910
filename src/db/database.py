@@ -147,6 +147,8 @@ def initialize_database(conn: sqlite3.Connection = None):
             )
             ''')
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_url ON extracted_urls (url)")
+            # Jules @ 2025-09-17: 為狀態查詢優化新增索引
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_extracted_urls_status ON extracted_urls (status)")
 
             # --- 新增 AI 分析報告歷史紀錄資料表 ---
             cursor.execute('''
@@ -159,6 +161,24 @@ def initialize_database(conn: sqlite3.Connection = None):
                 FOREIGN KEY (source_url_id) REFERENCES extracted_urls (id)
             )
             ''')
+            # --- 結束 ---
+
+            # --- 為 API 金鑰管理建立資料表 (V4 重構) ---
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS api_keys (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    key_name TEXT NOT NULL UNIQUE,
+                    key_hash TEXT NOT NULL UNIQUE,
+                    key_value TEXT NOT NULL,
+                    is_valid INTEGER NOT NULL DEFAULT 0,
+                    last_validated_at TEXT,
+                    total_tokens_used INTEGER DEFAULT 0,
+                    request_count INTEGER DEFAULT 0,
+                    last_used_at TEXT,
+                    status TEXT DEFAULT 'active'
+                )
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_key_hash ON api_keys (key_hash)")
             # --- 結束 ---
 
             # --- 為兩階段 AI 分析流程建立新資料表 ---
@@ -198,6 +218,7 @@ def initialize_database(conn: sqlite3.Connection = None):
                 "author": "TEXT", # 新增作者欄位
                 "message_date": "TEXT", # 訊息本身的日期
                 "message_time": "TEXT", # 訊息本身的時間
+                "title": "TEXT", # (Jules @ 2025-09-17) 新增標題欄位
                 "status": "TEXT DEFAULT 'pending'",
                 "status_message": "TEXT",
                 "local_path": "TEXT",
@@ -246,6 +267,56 @@ def initialize_database(conn: sqlite3.Connection = None):
                 "stage2_token_usage": "INTEGER"
             }
             for col, col_type in token_migrations.items():
+                try:
+                    cursor.execute(f"ALTER TABLE analysis_tasks ADD COLUMN {col} {col_type}")
+                    log.info(f"欄位 '{col}' 已成功新增至 'analysis_tasks' 資料表。")
+                except sqlite3.OperationalError as e:
+                    if "duplicate column name" in str(e):
+                        pass
+                    else:
+                        raise
+            # --- 結束 ---
+
+            # --- 為 analysis_tasks 新增績效分析相關欄位 (2025-09-15) ---
+            performance_migrations = {
+                "performance_status": "VARCHAR(20) DEFAULT 'pending'",
+                "performance_error_log": "TEXT"
+            }
+            for col, col_type in performance_migrations.items():
+                try:
+                    cursor.execute(f"ALTER TABLE analysis_tasks ADD COLUMN {col} {col_type}")
+                    log.info(f"欄位 '{col}' 已成功新增至 'analysis_tasks' 資料表。")
+                except sqlite3.OperationalError as e:
+                    if "duplicate column name" in str(e):
+                        pass
+                    else:
+                        raise
+            # --- 結束 ---
+
+            # --- 為 analysis_tasks 新增 AI 推斷日期欄位 (2025-09-15) ---
+            date_inference_migrations = {
+                "inferred_publish_date": "TEXT",
+                "date_inference_status": "VARCHAR(20) DEFAULT 'pending'"
+            }
+            for col, col_type in date_inference_migrations.items():
+                try:
+                    cursor.execute(f"ALTER TABLE analysis_tasks ADD COLUMN {col} {col_type}")
+                    log.info(f"欄位 '{col}' 已成功新增至 'analysis_tasks' 資料表。")
+                except sqlite3.OperationalError as e:
+                    if "duplicate column name" in str(e):
+                        pass
+                    else:
+                        raise
+            # --- 結束 ---
+
+            # --- 為 analysis_tasks 新增更多分析欄位 (2025-09-15) ---
+            more_analysis_migrations = {
+                "date_inference_model": "TEXT",
+                "date_inference_token_usage": "INTEGER",
+                "performance_model": "TEXT",
+                "performance_token_usage": "INTEGER"
+            }
+            for col, col_type in more_analysis_migrations.items():
                 try:
                     cursor.execute(f"ALTER TABLE analysis_tasks ADD COLUMN {col} {col_type}")
                     log.info(f"欄位 '{col}' 已成功新增至 'analysis_tasks' 資料表。")
@@ -696,7 +767,82 @@ def update_url(url_id: int, updates: dict) -> bool:
         if conn:
             conn.close()
 
+
+def get_urls_by_statuses(statuses: list[str]) -> list[dict]:
+    """根據狀態列表獲取所有相關的 URL 紀錄。"""
+    if not statuses:
+        return []
+
+    conn = get_db_connection()
+    if not conn: return []
+
+    try:
+        # 為 IN 子句建立一個佔位符字串
+        placeholders = ','.join(['?'] * len(statuses))
+        # 2025-09-18 V4 優化：查詢所有欄位以滿足不同頁面的需求
+        # 2025-09-17 Jules 修正：明確指定欄位，排除大型的 source_text 欄位以優化效能
+        sql = f"""
+            SELECT
+                id, url, created_at, status, status_message, local_path,
+                file_hash, extracted_image_paths, extracted_text, author,
+                message_date, message_time, title, retry_count, last_error_details
+            FROM
+                extracted_urls
+            WHERE
+                status IN ({placeholders})
+            ORDER BY
+                created_at DESC
+        """
+
+        cursor = conn.cursor()
+        cursor.execute(sql, statuses)
+        rows = cursor.fetchall()
+        return [dict(row) for row in rows]
+    except sqlite3.Error as e:
+        log.error(f"❌ 根據 statuses {statuses} 查詢 URLs 時發生錯誤: {e}", exc_info=True)
+        return []
+    finally:
+        if conn:
+            conn.close()
+
+
 # --- 結束 ---
+
+
+def get_performance_dashboard_data() -> list[dict]:
+    """
+    (V4 優化新增) 獲取績效儀表板所需的所有數據。
+    使用 JOIN 查詢以避免 N+1 問題。
+    """
+    sql = """
+        SELECT
+            at.id,
+            at.stage1_json_path,
+            eu.author,
+            eu.message_date
+        FROM
+            analysis_tasks at
+        JOIN
+            extracted_urls eu ON at.file_id = eu.id
+        WHERE
+            at.performance_status = 'completed' AND at.stage1_json_path IS NOT NULL
+        ORDER BY
+            at.created_at DESC
+    """
+    conn = get_db_connection()
+    if not conn: return []
+
+    try:
+        cursor = conn.cursor()
+        cursor.execute(sql)
+        rows = cursor.fetchall()
+        return [dict(row) for row in rows]
+    except sqlite3.Error as e:
+        log.error(f"獲取儀表板數據時發生錯誤: {e}", exc_info=True)
+        return []
+    finally:
+        if conn:
+            conn.close()
 
 
 # --- 新增：檔案總覽頁面專用函式 (2025-09-13) ---
@@ -731,6 +877,99 @@ def get_analysis_task_by_file_id(file_id: int) -> dict | None:
     except sqlite3.Error as e:
         log.error(f"❌ 根據 file_id {file_id} 查詢分析任務時發生錯誤: {e}", exc_info=True)
         return None
+    finally:
+        if conn:
+            conn.close()
+
+
+def add_new_urls(parsed_data: list[dict], source_text: str) -> int:
+    """
+    (V4 優化新增) 將解析後的結構化資料儲存到資料庫，並進行去重。
+    返回新增的紀錄數量。
+    """
+    if not parsed_data:
+        log.info("沒有要儲存的資料，跳過資料庫操作。")
+        return 0
+
+    conn = get_db_connection()
+    if not conn:
+        log.error("無法建立資料庫連線，資料儲存失敗。")
+        return 0
+
+    try:
+        with conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT url FROM extracted_urls")
+            existing_urls = {row[0] for row in cursor.fetchall()}
+
+            new_items = []
+            for item in parsed_data:
+                if item['url'] not in existing_urls:
+                    new_items.append(item)
+                    existing_urls.add(item['url'])
+
+            if not new_items:
+                log.info("所有解析出的網址都已存在於資料庫中，無需新增。")
+                return 0
+
+            # 延遲匯入以避免循環依賴
+            from core.time_utils import get_current_taipei_time_iso
+            created_at_iso = get_current_taipei_time_iso()
+            data_to_insert = [
+                (item['url'], item['author'], item['date'], item['time'], item.get('title', '無標題'), source_text, created_at_iso)
+                for item in new_items
+            ]
+
+            cursor.executemany(
+                "INSERT INTO extracted_urls (url, author, message_date, message_time, title, source_text, created_at, status) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')",
+                data_to_insert
+            )
+
+        count = len(data_to_insert)
+        log.info(f"成功將 {count} 筆新的解析資料儲存到資料庫。")
+        return count
+    except sqlite3.Error as e:
+        log.error(f"儲存解析資料到資料庫時發生錯誤: {e}", exc_info=True)
+        return 0
+    finally:
+        if conn:
+            conn.close()
+
+
+def get_filtered_urls(start_date: str = None, end_date: str = None) -> list[dict]:
+    """
+    (V4 優化新增) 根據日期範圍獲取 URL 紀錄。
+    (Jules @ 2025-09-17) 修改以回傳卡片所需的所有欄位。
+    """
+    # Jules @ 2025-09-17: 新增 title, message_time, 和 status 欄位以支援卡片模式
+    query = "SELECT id, url, author, message_date, message_time, title, status FROM extracted_urls"
+    filters = []
+    params = []
+
+    if start_date:
+        filters.append("message_date >= ?")
+        params.append(start_date)
+    if end_date:
+        filters.append("message_date <= ?")
+        params.append(end_date)
+
+    if filters:
+        query += " WHERE " + " AND ".join(filters)
+
+    query += " ORDER BY created_at DESC"
+
+    conn = get_db_connection()
+    if not conn: return []
+
+    try:
+        cursor = conn.cursor()
+        cursor.execute(query, params)
+        rows = cursor.fetchall()
+        # Jules @ 2025-09-17: 直接回傳完整的字典，讓前端處理
+        return [dict(row) for row in rows]
+    except sqlite3.Error as e:
+        log.error(f"查詢總覽資料時發生錯誤: {e}", exc_info=True)
+        return []
     finally:
         if conn:
             conn.close()

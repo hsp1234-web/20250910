@@ -15,31 +15,29 @@ from typing import List
 SRC_DIR = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(SRC_DIR))
 
-from db.database import get_db_connection
-from db.client import get_client
+from fastapi import APIRouter, HTTPException, Request, BackgroundTasks, Depends
+
+# V4 優化：移除 get_db_connection，全面改用依賴注入
+# from db.database import get_db_connection
+from db.client import DBClient
+from ..dependencies import get_db
+
 
 # --- 常數與設定 ---
 log = logging.getLogger(__name__)
 templates = Jinja2Templates(directory=str(SRC_DIR / "static"))
 router = APIRouter()
-DB_CLIENT = get_client()
+
 
 # --- API 端點 ---
 @router.get("/pending_urls")
-async def get_pending_urls():
+async def get_pending_urls(db: DBClient = Depends(get_db)):
     """
-    獲取所有狀態為 'pending' 的網址列表。
-    現在也會獲取作者和訊息時間等欄位，以便在前端表格中顯示。
+    (V4 優化後) 獲取所有狀態為 'pending' 的網址列表。
     """
     log.info("API: 收到獲取待處理網址列表的請求。")
-    conn = None
     try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute(
-            "SELECT id, url, author, message_date, message_time FROM extracted_urls WHERE status = 'pending' ORDER BY created_at DESC"
-        )
-        rows = cursor.fetchall()
+        rows = db.get_urls_by_statuses(statuses=['pending'])
         results = [
             {
                 "id": row['id'],
@@ -47,31 +45,27 @@ async def get_pending_urls():
                 "author": row['author'],
                 "message_date": row['message_date'],
                 "message_time": row['message_time'],
+                "title": row['title'] # Jules @ 2025-09-17: 修正 API，將 title 欄位加入回傳的 JSON 中
             }
             for row in rows
         ]
         return JSONResponse(content=results)
     except Exception as e:
         log.error(f"API: 獲取待處理網址時發生錯誤: {e}", exc_info=True)
+        # 假設 DBClient 在出錯時會引發一個可捕獲的異常
+        if isinstance(e, (ConnectionError, RuntimeError)):
+             raise HTTPException(status_code=503, detail=f"資料庫服務通訊失敗: {e}")
         raise HTTPException(status_code=500, detail="獲取待處理網址時發生伺服器內部錯誤。")
-    finally:
-        if conn:
-            conn.close()
 
 
 @router.get("/completed")
-async def get_completed_downloads():
+async def get_completed_downloads(db: DBClient = Depends(get_db)):
     """
-    獲取所有狀態為 'completed' (已下載完成) 的檔案列表。
-    這是為了在頁面二顯示已完成的項目。
+    (V4 優化後) 獲取所有狀態為 'completed' (已下載完成) 的檔案列表。
     """
     log.info("API: 收到獲取已完成下載列表的請求。")
-    conn = None
     try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT id, url, local_path, created_at FROM extracted_urls WHERE status = 'completed' ORDER BY created_at DESC")
-        rows = cursor.fetchall()
+        rows = db.get_urls_by_statuses(statuses=['completed'])
         # 從 local_path 提取檔名，並確保 local_path 存在
         results = [
             {
@@ -85,10 +79,9 @@ async def get_completed_downloads():
         return JSONResponse(content=results)
     except Exception as e:
         log.error(f"API: 獲取已完成下載列表時發生錯誤: {e}", exc_info=True)
+        if isinstance(e, (ConnectionError, RuntimeError)):
+             raise HTTPException(status_code=503, detail=f"資料庫服務通訊失敗: {e}")
         raise HTTPException(status_code=500, detail="獲取已完成下載列表時發生伺服器內部錯誤。")
-    finally:
-        if conn:
-            conn.close()
 
 
 # --- Pydantic 模型 ---
@@ -183,9 +176,14 @@ async def run_task_wrapper(task_id: int, semaphore: asyncio.Semaphore, blocking_
 
 
 @router.post("/start_downloads")
-async def start_downloads(payload: DownloadRequest, background_tasks: BackgroundTasks, request: Request):
+async def start_downloads(
+    payload: DownloadRequest,
+    background_tasks: BackgroundTasks,
+    request: Request,
+    db: DBClient = Depends(get_db)
+):
     """
-    (重構後) 接收要下載的 URL ID 列表，並為每一個 ID 建立一個使用佇列通知的背景下載任務。
+    (V4 優化後) 接收要下載的 URL ID 列表，並使用共享的 DBClient 實例來建立背景任務。
     """
     url_ids = payload.ids
     if not url_ids:
@@ -202,11 +200,9 @@ async def start_downloads(payload: DownloadRequest, background_tasks: Background
         raise HTTPException(status_code=500, detail="伺服器狀態未完全初始化（缺少佇列或信號量）。")
 
     try:
-        # 立即將所有請求的 URL 狀態更新為 'downloading'
-        # JULES (2025-09-14): 修正錯誤。DBClient 沒有 execute_query 方法。
-        # 改為使用迴圈和高階的 update_url 方法，以符合現有的抽象層設計。
+        # V4 優化：使用透過 Depends 注入的共享 db 實例，而不是全域變數
         for url_id in url_ids:
-            DB_CLIENT.update_url(url_id, {"status": "downloading", "status_message": "已加入下載佇列"})
+            db.update_url(url_id, {"status": "downloading", "status_message": "已加入下載佇列"})
         log.info(f"API: 已將 {len(url_ids)} 個 URL 的狀態更新為 'downloading'。")
 
         # 為每個 URL 新增一個背景任務
@@ -218,7 +214,7 @@ async def start_downloads(payload: DownloadRequest, background_tasks: Background
                 blocking_func=_run_download_blocking_task,
                 queue=queue,
                 loop=loop,
-                db_client=DB_CLIENT  # 傳遞 client 進去
+                db_client=db  # V4 優化：將共享的 db 實例傳遞到背景任務中
             )
 
         return JSONResponse(

@@ -27,7 +27,8 @@ import psutil
 SRC_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SRC_DIR))
 
-from db.client import get_client
+# V4 循環導入修復：從新的依賴檔案中導入
+from .dependencies import db_client
 
 # --- JULES 於 2025-08-09 的修改：設定應用程式全域時區 ---
 # 為了確保所有日誌和資料庫時間戳都使用一致的時區，我們在應用程式啟動的
@@ -101,10 +102,9 @@ class ConnectionManager:
 manager = ConnectionManager()
 
 
-# --- DB 客戶端 ---
-# 在模組加載時獲取客戶端單例
-# 客戶端內部有重試機制，會等待 DB 管理者服務就緒
-db_client = get_client()
+# V4 循環導入修復：
+# db_client 的實例化和 get_db 函數已移至 `dependencies.py`
+# 以解決循環導入問題。api_server 現在直接從那裡導入共享的 db_client 實例。
 
 # --- FastAPI Lifespan Manager ---
 
@@ -133,6 +133,15 @@ async def notification_broadcaster(app: FastAPI):
             # 等待一小段時間再繼續，避免快速的錯誤迴圈
             await asyncio.sleep(1)
 
+
+# V4 計畫書優化 (2025-09-18)：移除冗長的啟動任務
+#
+# 移除了 install_system_fonts() 函數及其在 lifespan 中的呼叫。
+#
+# 原因：
+# 根據 V4 計畫書分析，字體安裝流程是造成應用啟動過於冗長的瓶頸之一。
+# 由於此功能在當前部署環境中並非必要，直接移除是最高效的優化手段。
+# 這將直接縮短從啟動到服務完全就緒的時間。
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -204,20 +213,28 @@ async def add_server_port_to_state(request: Request, call_next):
 
 
 # --- 整合模組化路由 ---
-from api.routes import ui, page1_ingestion, page2_downloader, page3_processor, page4_analyzer, page5_backup, page6_keys, page7_prompts, page8_details
+from core import config_manager
+from api.routes import ui, page1, page2_downloader, page3_processor, page4_analyzer, page5_backup, page6_keys, page7_prompts, page8_details, page9_dashboard
+
+# --- JULES (2025-09-15): 在應用程式啟動時載入設定 ---
+# 將設定載入到 app.state 中，使其在整個應用程式中可用。
+app.state.config = config_manager.get_config()
+log.info(f"全域設定已載入。API 超時設定為: {app.state.config.get('api_timeout_seconds')} 秒。")
+
 
 # UI 路由 (提供 HTML 頁面)
 app.include_router(ui.router, tags=["UI"])
 
 # API 路由 (提供資料介面)
-app.include_router(page1_ingestion.router, prefix="/api/ingestion", tags=["API: 網址提取"])
+app.include_router(page1.router) # No prefix, as it's defined in the router itself
 app.include_router(page2_downloader.router, prefix="/api/downloader", tags=["API: 批次下載"])
 app.include_router(page3_processor.router, prefix="/api/processor", tags=["API: 檔案處理"])
 app.include_router(page4_analyzer.router, prefix="/api/analyzer", tags=["API: AI 分析"])
 app.include_router(page5_backup.router, prefix="/api/backup", tags=["API: 備份管理"])
 app.include_router(page6_keys.router, prefix="/api/keys", tags=["API: 金鑰管理"])
-app.include_router(page7_prompts.router, prefix="/api/prompts", tags=["API: 提示詞管理"])
+app.include_router(page7_prompts.router, prefix="/api", tags=["API: 提示詞管理"])
 app.include_router(page8_details.router, prefix="/api", tags=["API: 檔案總覽"])
+app.include_router(page9_dashboard.router, prefix="/api/dashboard", tags=["API: 績效儀表板"])
 
 # --- 路徑設定 ---
 # 新的上傳檔案儲存目錄
@@ -1355,6 +1372,30 @@ async def websocket_endpoint(websocket: WebSocket):
 async def health_check():
     """提供一個簡單的健康檢查端點。"""
     return {"status": "ok", "message": "API Server is running."}
+
+
+# V5.5 啟動優化: 新增完全就緒健康檢查端點
+@app.get("/api/health/ready")
+async def readiness_check():
+    """
+    檢查核心服務 (依賴安裝、金鑰驗證) 是否已完全準備就緒。
+    前端將輪詢此端點以決定何時啟用 UI。
+    """
+    # 這是由 orchestrator 在準備好後建立的信號檔案
+    readiness_signal_file = Path("/tmp/full_ready.signal")
+    if readiness_signal_file.exists():
+        # 如果檔案存在，表示核心服務已就緒
+        return JSONResponse(
+            status_code=200,
+            content={"status": "ready", "message": "系統核心服務已準備就緒。"}
+        )
+    else:
+        # 如果檔案不存在，表示仍在初始化
+        return JSONResponse(
+            status_code=503, # Service Unavailable
+            content={"status": "initializing", "message": "系統正在初始化核心服務，請稍候..."},
+            headers={"Retry-After": "5"} # 建議客戶端 5 秒後重試
+        )
 
 
 

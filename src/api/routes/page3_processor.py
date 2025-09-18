@@ -16,16 +16,24 @@ from typing import List
 SRC_DIR = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(SRC_DIR))
 
-from db.database import get_db_connection
-from db.client import get_client
+# V4 優化：移除 get_db_connection，全面改用依賴注入
+# from db.database import get_db_connection
+from db.client import DBClient
+from ..dependencies import get_db
 from tools.file_hasher import calculate_sha256
 from tools.image_compressor import compress_image
+from fastapi import Depends
 
 # --- 常數與設定 ---
 log = logging.getLogger(__name__)
 templates = Jinja2Templates(directory=str(SRC_DIR / "static"))
 router = APIRouter()
-DB_CLIENT = get_client()
+
+# JULES (2025-09-17): 暫時加回 DB_CLIENT 全域變數，以相容舊的整合測試。
+# 這些測試使用 monkeypatch 來修補這個變數，但在 V4 重構後它已被移除。
+# 長期解決方案是重寫測試以使用 FastAPI 的依賴注入覆蓋機制。
+DB_CLIENT = DBClient()
+
 
 # --- Pydantic 模型 ---
 class ProcessRequest(BaseModel):
@@ -36,21 +44,12 @@ class ResetRequest(BaseModel):
 
 # --- API 端點 ---
 @router.get("/terminal_files")
-async def get_terminal_files():
-    """獲取所有已進入終端狀態 (processed, processed_unsupported, processing_failed) 的檔案列表。"""
+async def get_terminal_files(db: DBClient = Depends(get_db)):
+    """(V4 優化後) 獲取所有已進入終端狀態的檔案列表。"""
     log.info("API: 收到獲取所有終端狀態檔案列表的請求。")
-    conn = None
     try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        # 查詢所有已結束處理的狀態
-        cursor.execute("""
-            SELECT id, url, local_path, status, status_message
-            FROM extracted_urls
-            WHERE status IN ('processed', 'processed_unsupported', 'processing_failed')
-            ORDER BY created_at DESC
-        """)
-        rows = cursor.fetchall()
+        statuses = ['processed', 'processed_unsupported', 'processing_failed']
+        rows = db.get_urls_by_statuses(statuses=statuses)
         results = [
             {
                 "id": row['id'],
@@ -64,25 +63,23 @@ async def get_terminal_files():
         return JSONResponse(content=results)
     except Exception as e:
         log.error(f"API: 獲取終端狀態檔案時發生錯誤: {e}", exc_info=True)
+        if isinstance(e, (ConnectionError, RuntimeError)):
+             raise HTTPException(status_code=503, detail=f"資料庫服務通訊失敗: {e}")
         raise HTTPException(status_code=500, detail="獲取終端狀態檔案時發生伺服器內部錯誤。")
-    finally:
-        if conn:
-            conn.close()
 
 
 @router.post("/reset_files")
-async def reset_files(payload: ResetRequest):
-    """將指定 ID 的檔案狀態重設回 'completed'，以便重新處理。"""
+async def reset_files(payload: ResetRequest, db: DBClient = Depends(get_db)):
+    """(V4 優化後) 將指定 ID 的檔案狀態重設回 'completed'，以便重新處理。"""
     if not payload.ids:
         raise HTTPException(status_code=400, detail="未提供要重設的檔案 ID。")
 
     log.info(f"API: 收到將 {len(payload.ids)} 個檔案狀態重設為 'completed' 的請求。")
     try:
-        # JULES (2025-09-14): 修正錯誤。DBClient 沒有 execute_query 方法。
-        # 改為使用迴圈和高階的 update_url 方法。
+        # V4 優化：使用透過 Depends 注入的共享 db 實例
         updated_count = 0
         for url_id in payload.ids:
-            success = DB_CLIENT.update_url(url_id, {"status": "completed", "status_message": "等待重新處理"})
+            success = db.update_url(url_id, {"status": "completed", "status_message": "等待重新處理"})
             if success:
                 updated_count += 1
 
@@ -98,39 +95,26 @@ async def reset_files(payload: ResetRequest):
 
 
 @router.get("/completed_files")
-async def get_completed_files():
-    """獲取所有狀態為 'completed' (已下載完成) 的檔案列表。"""
+async def get_completed_files(db: DBClient = Depends(get_db)):
+    """(V4 優化後) 獲取所有狀態為 'completed' (已下載完成) 的檔案列表。"""
     log.info("API: 收到獲取已下載檔案列表的請求。")
-    conn = None
     try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT id, url, local_path FROM extracted_urls WHERE status = 'completed' ORDER BY created_at DESC")
-        rows = cursor.fetchall()
+        rows = db.get_urls_by_statuses(statuses=['completed'])
         results = [{"id": row['id'], "url": row['url'], "filename": Path(row['local_path']).name} for row in rows if row['local_path']]
         return JSONResponse(content=results)
     except Exception as e:
         log.error(f"API: 獲取已下載檔案時發生錯誤: {e}", exc_info=True)
+        if isinstance(e, (ConnectionError, RuntimeError)):
+             raise HTTPException(status_code=503, detail=f"資料庫服務通訊失敗: {e}")
         raise HTTPException(status_code=500, detail="獲取已下載檔案時發生伺服器內部錯誤。")
-    finally:
-        if conn:
-            conn.close()
 
 
 @router.get("/processed")
-async def get_processed_files():
-    """
-    獲取所有狀態為 'processed' (已處理完成) 的檔案列表。
-    這是為了在頁面三顯示已處理的報告。
-    """
+async def get_processed_files(db: DBClient = Depends(get_db)):
+    """(V4 優化後) 獲取所有狀態為 'processed' (已處理完成) 的檔案列表。"""
     log.info("API: 收到獲取已處理報告列表的請求。")
-    conn = None
     try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        # 選擇 file_hash 也是為了將來可能的用途
-        cursor.execute("SELECT id, local_path FROM extracted_urls WHERE status = 'processed' ORDER BY created_at DESC")
-        rows = cursor.fetchall()
+        rows = db.get_urls_by_statuses(statuses=['processed'])
         results = [
             {
                 "id": row['id'],
@@ -141,28 +125,18 @@ async def get_processed_files():
         return JSONResponse(content=results)
     except Exception as e:
         log.error(f"API: 獲取已處理報告列表時發生錯誤: {e}", exc_info=True)
+        if isinstance(e, (ConnectionError, RuntimeError)):
+             raise HTTPException(status_code=503, detail=f"資料庫服務通訊失敗: {e}")
         raise HTTPException(status_code=500, detail="獲取已處理報告列表時發生伺服器內部錯誤。")
-    finally:
-        if conn:
-            conn.close()
 
 
 @router.get("/report/{file_id}")
-async def get_report_content(file_id: int):
-    """
-    獲取單一已處理報告的詳細內容，包括文字和壓縮後的圖片路徑。
-    """
+async def get_report_content(file_id: int, db: DBClient = Depends(get_db)):
+    """(V4 優化後) 獲取單一已處理報告的詳細內容。"""
     log.info(f"API: 收到對檔案 ID {file_id} 的報告內容請求。")
-    conn = None
     try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute(
-            "SELECT extracted_text, extracted_image_paths FROM extracted_urls WHERE id = ? AND status = 'processed'",
-            (file_id,)
-        )
-        row = cursor.fetchone()
-        if not row:
+        row = db.get_url_by_id(url_id=file_id)
+        if not row or row['status'] != 'processed':
             raise HTTPException(status_code=404, detail="找不到指定 ID 的已處理報告。")
 
         # 從資料庫獲取真實的文字內容
@@ -191,10 +165,9 @@ async def get_report_content(file_id: int):
 
     except Exception as e:
         log.error(f"API: 獲取報告 ID {file_id} 的內容時發生錯誤: {e}", exc_info=True)
+        if isinstance(e, (ConnectionError, RuntimeError)):
+             raise HTTPException(status_code=503, detail=f"資料庫服務通訊失敗: {e}")
         raise HTTPException(status_code=500, detail="獲取報告內容時發生伺服器內部錯誤。")
-    finally:
-        if conn:
-            conn.close()
 
 
 # --- 背景任務函式 (重構後) ---
@@ -286,8 +259,13 @@ async def run_task_wrapper(task_id: int, semaphore: asyncio.Semaphore, blocking_
 
 
 @router.post("/start_processing")
-async def start_processing(payload: ProcessRequest, background_tasks: BackgroundTasks, request: Request):
-    """(重構後) 接收要處理的檔案 ID 列表，並為每一個 ID 建立一個使用佇列通知的背景處理任務。"""
+async def start_processing(
+    payload: ProcessRequest,
+    background_tasks: BackgroundTasks,
+    request: Request,
+    db: DBClient = Depends(get_db)
+):
+    """(V4 優化後) 接收要處理的檔案 ID 列表，並使用共享的 DBClient 實例來建立背景任務。"""
     url_ids = payload.ids
     if not url_ids:
         raise HTTPException(status_code=400, detail="未提供要處理的檔案 ID。")
@@ -302,10 +280,9 @@ async def start_processing(payload: ProcessRequest, background_tasks: Background
         raise HTTPException(status_code=500, detail="伺服器狀態未完全初始化（缺少佇列或信號量）。")
 
     try:
-        # JULES (2025-09-14): 修正錯誤。DBClient 沒有 execute_query 方法。
-        # 改為使用迴圈和高階的 update_url 方法。
+        # V4 優化：使用透過 Depends 注入的共享 db 實例
         for url_id in url_ids:
-            DB_CLIENT.update_url(url_id, {"status": "processing", "status_message": "已加入處理佇列"})
+            db.update_url(url_id, {"status": "processing", "status_message": "已加入處理佇列"})
         log.info(f"API: 已將 {len(url_ids)} 個檔案的狀態更新為 'processing'。")
 
         for url_id in url_ids:
@@ -316,7 +293,7 @@ async def start_processing(payload: ProcessRequest, background_tasks: Background
                 blocking_func=_run_processing_blocking_task,
                 queue=queue,
                 loop=loop,
-                db_client=DB_CLIENT  # 傳遞 client 進去
+                db_client=db  # V4 優化：將共享的 db 實例傳遞到背景任務中
             )
 
         return JSONResponse(

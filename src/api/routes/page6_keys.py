@@ -4,14 +4,14 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Body
+from fastapi import APIRouter, HTTPException, Body, BackgroundTasks
 from pydantic import BaseModel, Field
 
 # --- 路徑修正與模組匯入 ---
 SRC_DIR = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(SRC_DIR))
 
-from core import key_manager
+from core import key_manager, config_manager
 from tools.gemini_manager import GeminiManager
 
 # --- 常數與設定 ---
@@ -63,18 +63,19 @@ async def remove_key(key_hash: str):
     else:
         raise HTTPException(status_code=404, detail="找不到具有該雜湊值的金鑰。")
 
-@router.post("/validate", summary="重新驗證所有金鑰")
-async def validate_all_stored_keys():
+@router.post("/validate", summary="在背景重新驗證所有金鑰")
+async def validate_all_stored_keys(background_tasks: BackgroundTasks):
     """
-    觸發對金鑰池中所有金鑰的重新驗證。
-    這是一個耗時操作，客戶端應準備等待。
+    觸發對金鑰池中所有金鑰的背景重新驗證。
+    此操作將在背景執行，API 會立即返回。
     """
     try:
-        validated_keys = key_manager.validate_all_keys()
-        return {"message": "所有金鑰已重新驗證。", "keys": validated_keys}
+        log.info("接收到請求，將在背景排程驗證所有金鑰。")
+        background_tasks.add_task(key_manager.validate_all_keys)
+        return {"message": "已成功排定背景金鑰驗證任務。"}
     except Exception as e:
-        log.error(f"重新驗證金鑰時發生錯誤: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="重新驗證金鑰時發生伺服器內部錯誤。")
+        log.error(f"排定金鑰驗證任務時發生錯誤: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="排定金鑰驗證任務時發生伺服器內部錯誤。")
 
 @router.post("/load_from_authorized_source", summary="從授權來源（環境變數）載入金鑰")
 async def load_keys_from_env(payload: LoadFromEnvRequest):
@@ -124,3 +125,44 @@ async def test_api_key(payload: TestKeyRequest):
         log.error(f"測試金鑰時發生錯誤: {e}", exc_info=True)
         # 即使是測試，也回傳一個明確的失敗狀態，而不是 500 錯誤
         return {"is_valid": False, "error": str(e)}
+
+# --- JULES (2025-09-17): 重構為通用的設定管理 API ---
+
+class ConfigUpdateRequest(BaseModel):
+    value: float = Field(..., description="要更新的設定值。")
+
+@router.get("/config/{key}", summary="獲取指定的設定值")
+async def get_config_value_api(key: str):
+    """
+    從設定檔中讀取並回傳指定鍵的值。
+    """
+    try:
+        value = config_manager.get_config_value(key)
+        if value is None:
+            raise HTTPException(status_code=404, detail=f"找不到設定鍵: {key}")
+        return {"key": key, "value": value}
+    except Exception as e:
+        log.error(f"讀取設定 '{key}' 時發生錯誤: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"無法讀取設定檔: {key}")
+
+@router.post("/config/{key}", summary="更新指定的設定值")
+async def update_config_value_api(key: str, payload: ConfigUpdateRequest):
+    """
+    更新設定檔中的指定鍵值對。
+    """
+    try:
+        # 在此處可以加入對特定 key 的值進行驗證的邏輯
+        if key in ["api_timeout_seconds", "gemini_submission_delay", "gemini_rotation_delay"]:
+            if not (0 <= payload.value <= 300):
+                raise HTTPException(status_code=400, detail="設定值必須介於 0 到 300 之間。")
+
+        success = config_manager.update_config_value(key, payload.value)
+        if success:
+            return {"message": f"設定 '{key}' 已成功更新。", "new_value": payload.value}
+        else:
+            raise HTTPException(status_code=500, detail="儲存設定檔時發生錯誤。")
+    except HTTPException as e:
+        raise e # 重新拋出 HTTP 例外
+    except Exception as e:
+        log.error(f"更新設定 '{key}' 時發生錯誤: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"更新設定時發生伺服器內部錯誤: {key}")

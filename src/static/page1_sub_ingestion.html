@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>資料擷取</title>
+    <link rel="stylesheet" href="/static/css/page1_unified.css">
+</head>
+<body>
+    <div class="content">
+        <div class="panel">
+            <div class="ingestion-buttons">
+                <button id="submit-button-top">開始處理</button>
+            </div>
+            <h2>資料擷取與處理</h2>
+            <p>請在此處貼上來源文字:</p>
+            <textarea id="text-input" rows="20" placeholder="在此貼上來源文字..."></textarea>
+            <div class="ingestion-buttons">
+                <button id="submit-button-bottom">開始處理</button>
+            </div>
+            <div id="status-message" style="margin-top: 20px; font-weight: bold; text-align: center;"></div>
+        </div>
+
+        <div id="result-container" class="panel" style="display: none;">
+            <h2>處理結果</h2>
+            <div class="table-container">
+                <table id="result-table" class="results-table">
+                    <thead>
+                        <tr>
+                            <th>日期</th>
+                            <th>時間</th>
+                            <th>作者</th>
+                            <th>連結</th>
+                        </tr>
+                    </thead>
+                    <tbody id="result-body">
+                        <!-- JS 動態填入 -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const textInput = document.getElementById('text-input');
+        const submitButtonTop = document.getElementById('submit-button-top');
+        const submitButtonBottom = document.getElementById('submit-button-bottom');
+        const statusMessage = document.getElementById('status-message');
+        const resultContainer = document.getElementById('result-container');
+        const resultBody = document.getElementById('result-body');
+
+        const handleSubmit = async () => {
+            const text = textInput.value;
+            if (!text.trim()) {
+                statusMessage.textContent = '錯誤：輸入文字不可為空。';
+                statusMessage.style.color = 'var(--error-color)';
+                return;
+            }
+
+            statusMessage.textContent = '正在處理中，請稍候...';
+            statusMessage.style.color = 'var(--primary-color)';
+            resultContainer.style.display = 'none';
+            resultBody.innerHTML = '';
+
+            try {
+                const response = await fetch('/api/page1/extract_urls', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ text: text }),
+                });
+
+                if (!response.ok) {
+                    const errorResult = await response.json();
+                    throw new Error(errorResult.detail || '伺服器發生錯誤');
+                }
+
+                const result = await response.json();
+
+                if (result.length === 0) {
+                    statusMessage.textContent = '未在文字中找到可解析的「作者-連結」組合。';
+                    statusMessage.style.color = 'orange';
+                    return;
+                }
+
+                statusMessage.textContent = `成功解析到 ${result.length} 筆資料。`;
+                statusMessage.style.color = 'var(--success-color)';
+
+                result.forEach(item => {
+                    const row = document.createElement('tr');
+                    row.innerHTML = `
+                        <td>${item.date || '---'}</td>
+                        <td>${item.time}</td>
+                        <td>${item.author}</td>
+                        <td><a href="${item.url}" target="_blank" rel="noopener noreferrer">${item.url}</a></td>
+                    `;
+                    resultBody.appendChild(row);
+                });
+
+                resultContainer.style.display = 'block';
+
+            } catch (error) {
+                statusMessage.textContent = `發生錯誤：${error.message}`;
+                statusMessage.style.color = 'var(--error-color)';
+            }
+        };
+
+        submitButtonTop.addEventListener('click', handleSubmit);
+        submitButtonBottom.addEventListener('click', handleSubmit);
+    </script>
+
+    <!-- V5.5 Readiness Overlay Start -->
+    <style>
+        #readiness-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.7);
+            color: white;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 1.5em;
+            z-index: 9999;
+            flex-direction: column;
+            text-align: center;
+        }
+        #readiness-overlay .spinner {
+            border: 4px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top: 4px solid #fff;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin-bottom: 20px;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+    <div id="readiness-overlay">
+        <div class="spinner"></div>
+        <p>系統正在初始化核心服務，請稍候...</p>
+    </div>
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const overlay = document.getElementById('readiness-overlay');
+            const buttons = document.querySelectorAll('button, a.button, input[type="button"], input[type="submit"]');
+
+            // 輔助函數：啟用UI
+            function enableUI() {
+                overlay.style.display = 'none';
+                buttons.forEach(btn => {
+                    btn.disabled = false;
+                });
+                console.log('系統已就緒，UI 已啟用。');
+            }
+
+            // 檢查 sessionStorage 中是否已有就緒標記
+            if (sessionStorage.getItem('isSystemReady') === 'true') {
+                enableUI();
+                const overlayText = overlay.querySelector('p');
+                if(overlayText) {
+                    overlayText.innerText = '系統已就緒';
+                }
+                return; // 如果已就緒，則不執行後續的輪詢
+            }
+
+            // 1. 預設禁用所有按鈕並顯示遮罩
+            buttons.forEach(btn => {
+                if (!btn.closest('.navbar')) {
+                    btn.disabled = true;
+                }
+            });
+            overlay.style.display = 'flex';
+
+            // 2. 定期輪詢 /api/health/ready 端點
+            const readinessInterval = setInterval(() => {
+                fetch('/api/health/ready')
+                    .then(response => {
+                        if (response.ok) {
+                            // 3. 一旦請求成功，設定標記、啟用按鈕並隱藏遮罩
+                            clearInterval(readinessInterval);
+                            sessionStorage.setItem('isSystemReady', 'true'); // 設定標記
+                            enableUI();
+                        } else {
+                            console.log('等待核心服務就緒...');
+                        }
+                    })
+                    .catch(error => {
+                        console.error('輪詢就緒狀態時發生錯誤:', error);
+                        const overlayText = overlay.querySelector('p');
+                        if(overlayText) {
+                            overlayText.innerText = '無法連接到後端服務，請檢查連線或稍後重試。';
+                        }
+                    });
+            }, 2000); // 每 2 秒輪詢一次
+        });
+    </script>
+    <!-- V5.5 Readiness Overlay End -->
+</body>
+</html>

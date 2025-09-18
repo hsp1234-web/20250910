@@ -1,12 +1,14 @@
 import logging
 import json
 import time
+import random  # 導入 random 模組
 import threading
 from collections import deque
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Tuple
 
 try:
     import google.generativeai as genai
+    from google.api_core import exceptions as google_exceptions # 導入具體的例外類型
     from google.generativeai.types import GenerationConfig
     from PIL import Image
 except ImportError:
@@ -14,6 +16,7 @@ except ImportError:
     genai = None
     Image = None
     GenerationConfig = None
+    google_exceptions = None # 確保在導入失敗時變數存在
 
 class ApiKey:
     """一個簡單的類別，用於儲存 API 金鑰及其名稱。"""
@@ -85,14 +88,17 @@ class GeminiManager:
             raise e
 
     def _api_call_wrapper(self, task_name: str, model_name: str, prompt_content: List[Any], output_format: str = 'json'):
-        if not genai:
-            return None, "google.generativeai not installed", "N/A"
+        if not genai or not google_exceptions:
+            return None, "google.generativeai 或其依賴未安裝", "N/A", 0
 
         last_error = None
 
         with self._lock:
             self._activate_cooled_down_keys()
             keys_to_try = list(self.key_pool)
+            # V4 優化：實現金鑰隨機選取，避免所有請求衝擊單一金鑰
+            # 這能最有效地將負載均分到所有可用金鑰上，解決日誌中大量請求等待的瓶頸。
+            random.shuffle(keys_to_try)
 
         if not keys_to_try:
             error_msg = f"金鑰池為空，無法執行 API 請求。(有 {len(self.cooldown_keys)} 個金鑰正在冷卻中)"
@@ -101,7 +107,7 @@ class GeminiManager:
 
         for i, api_key in enumerate(keys_to_try):
             tag = f"{task_name}-{api_key.name}"
-            logging.info(f"[{tag}] 準備使用金鑰 #{i+1}/{len(keys_to_try)} 執行 API 請求...")
+            logging.info(f"[{tag}] 準備使用隨機金鑰 #{i+1}/{len(keys_to_try)} 執行 API 請求...")
 
             try:
                 genai.configure(api_key=api_key.key)
@@ -125,11 +131,9 @@ class GeminiManager:
                     if not raw_text:
                         raise ValueError("API 回傳空內容")
 
-                    with self._lock:
-                        if api_key in self.key_pool:
-                            self.key_pool.remove(api_key)
-                            self.key_pool.append(api_key)
-
+                    # V4 優化：移除冗餘的 Round-Robin 邏輯。
+                    # 由於在每次 API 呼叫開始時已經對金鑰池進行了隨機排序 (random.shuffle)，
+                    # 此處的循環機制是多餘的，故移除以簡化邏輯。
                     logging.info(f"[{tag}] API 請求成功。")
                     # 嘗試獲取 token 使用量，採用更具防禦性的寫法
                     token_usage = 0 # 預設為 0
@@ -159,16 +163,27 @@ class GeminiManager:
                     last_error = e
                     last_error_str = f"{type(e).__name__}: {e}".lower()
 
-                    is_permanent_error = any(s in last_error_str for s in ["permission_denied", "invalid_api_key", "invalid_argument"])
-                    is_rate_limit_error = any(s in last_error_str for s in ["quota", "resourceexhausted", "429"])
+                    # V4 優化：更精準地捕捉速率限制錯誤
+                    is_rate_limit_by_type = isinstance(e, google_exceptions.ResourceExhausted) if google_exceptions else False
+                    is_rate_limit_by_string = any(s in last_error_str for s in ["resourceexhausted", "429", "rate limit"])
 
-                    if is_rate_limit_error:
+                    is_permanent_error = any(s in last_error_str for s in ["permission_denied", "invalid_api_key", "invalid_argument"])
+
+
+                    if is_rate_limit_by_type or is_rate_limit_by_string:
                         logging.error(f"[{tag}] 遭遇配額耗盡錯誤。將此金鑰移至冷卻區 {self.cooldown_seconds} 秒。")
                         with self._lock:
+                            # 確保金鑰仍在池中，避免多執行緒下的競爭條件
                             if api_key in self.key_pool:
                                 self.key_pool.remove(api_key)
                                 self.cooldown_keys[api_key.key] = time.time() + self.cooldown_seconds
-                        break # 跳出內層重試迴圈，嘗試下一個金鑰
+
+                        # Jules @ 2025-09-17: 增加一個可設定的延遲，避免在瞬間耗盡所有金鑰
+                        from core.config_manager import get_config_value
+                        delay = get_config_value("gemini_rotation_delay", 2.0)
+                        logging.info(f"[{tag}] 等待 {delay} 秒後嘗試下一個金鑰...")
+                        time.sleep(delay)
+                        break # 跳出內層重試迴圈，立即嘗試下一個金鑰
 
                     if is_permanent_error:
                         logging.error(f"[{tag}] 遭遇永久性錯誤: {last_error_str}。將立即嘗試下一個金鑰。")
@@ -185,13 +200,18 @@ class GeminiManager:
         logging.error(f"[{task_name}] 在嘗試了 {len(keys_to_try)} 組金鑰後，API 請求最終失敗。最後一個錯誤: {last_error}")
         return None, last_error, "all_keys_failed", 0
 
-    def prompt_for_json(self, prompt: str, model_name: str = "gemini-2.0-flash") -> Optional[Dict]:
+    def prompt_for_json(self, prompt: str, model_name: str = "gemini-2.0-flash") -> Tuple[Optional[Dict], Optional[Exception], str, int]:
         """
         使用自訂提示詞執行請求，並期望回傳一個 JSON 物件。
         適用於第一階段的結構化資料提取。
+
+        返回:
+            元組 (result, error, key_name, token_usage):
+            - result (dict | None): 成功時為解析後的 JSON 物件，否則為 None。
+            - error (Exception | None): 失敗時為異常物件，否則為 None。
+            - key_name (str): 用於此次請求的 API 金鑰名稱。
+            - token_usage (int): 本次請求消耗的 token 數量。
         """
-        # 說明：修改回傳值，使其從只回傳 result，變為回傳完整的 (result, error, used_key) 元組。
-        # 這是為了解決下游函式無法正確接收到錯誤狀態的問題。
         return self._api_call_wrapper(
             task_name="PromptForJson",
             model_name=model_name,
@@ -199,12 +219,18 @@ class GeminiManager:
             output_format='json'
         )
 
-    def prompt_for_text(self, prompt: str, model_name: str = "gemini-1.5-pro-latest") -> Optional[str]:
+    def prompt_for_text(self, prompt: str, model_name: str = "gemini-1.5-pro-latest") -> Tuple[Optional[str], Optional[Exception], str, int]:
         """
         使用自訂提示詞執行請求，並期望回傳純文字 (例如 HTML)。
         適用於第二階段的報告生成。
+
+        返回:
+            元組 (result, error, key_name, token_usage):
+            - result (str | None): 成功時為純文字回應，否則為 None。
+            - error (Exception | None): 失敗時為異常物件，否則為 None。
+            - key_name (str): 用於此次請求的 API 金鑰名稱。
+            - token_usage (int): 本次請求消耗的 token 數量。
         """
-        # 說明：同樣修改回傳值，使其回傳完整的 (result, error, used_key) 元組。
         return self._api_call_wrapper(
             task_name="PromptForText",
             model_name=model_name,

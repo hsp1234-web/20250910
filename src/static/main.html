@@ -27,5 +27,98 @@
     </div>
 
     <!-- 根據使用者要求，用於切換漢堡選單的 JavaScript 已移除 -->
+
+    <!-- V5.5 Readiness Overlay Start -->
+    <style>
+        #readiness-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.7);
+            color: white;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 1.5em;
+            z-index: 9999;
+            flex-direction: column;
+            text-align: center;
+        }
+        #readiness-overlay .spinner {
+            border: 4px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top: 4px solid #fff;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin-bottom: 20px;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+    <div id="readiness-overlay">
+        <div class="spinner"></div>
+        <p>系統正在初始化核心服務，請稍候...</p>
+    </div>
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const overlay = document.getElementById('readiness-overlay');
+            const buttons = document.querySelectorAll('button, a.button, input[type="button"], input[type="submit"]');
+
+            // 輔助函數：啟用UI
+            function enableUI() {
+                overlay.style.display = 'none';
+                buttons.forEach(btn => {
+                    btn.disabled = false;
+                });
+                console.log('系統已就緒，UI 已啟用。');
+            }
+
+            // 檢查 sessionStorage 中是否已有就緒標記
+            if (sessionStorage.getItem('isSystemReady') === 'true') {
+                enableUI();
+                const overlayText = overlay.querySelector('p');
+                if(overlayText) {
+                    overlayText.innerText = '系統已就緒';
+                }
+                return; // 如果已就緒，則不執行後續的輪詢
+            }
+
+            // 1. 預設禁用所有按鈕並顯示遮罩
+            buttons.forEach(btn => {
+                if (!btn.closest('.navbar')) {
+                    btn.disabled = true;
+                }
+            });
+            overlay.style.display = 'flex';
+
+            // 2. 定期輪詢 /api/health/ready 端點
+            const readinessInterval = setInterval(() => {
+                fetch('/api/health/ready')
+                    .then(response => {
+                        if (response.ok) {
+                            // 3. 一旦請求成功，設定標記、啟用按鈕並隱藏遮罩
+                            clearInterval(readinessInterval);
+                            sessionStorage.setItem('isSystemReady', 'true'); // 設定標記
+                            enableUI();
+                        } else {
+                            console.log('等待核心服務就緒...');
+                        }
+                    })
+                    .catch(error => {
+                        console.error('輪詢就緒狀態時發生錯誤:', error);
+                        const overlayText = overlay.querySelector('p');
+                        if(overlayText) {
+                            overlayText.innerText = '無法連接到後端服務，請檢查連線或稍後重試。';
+                        }
+                    });
+            }, 2000); // 每 2 秒輪詢一次
+        });
+    </script>
+    <!-- V5.5 Readiness Overlay End -->
 </body>
 </html>

@@ -7,18 +7,88 @@
     <link rel="stylesheet" href="/static/css/nav.css">
     <link rel="stylesheet" href="/static/css/common.css">
     <link rel="stylesheet" href="/static/css/page2.css">
+    <!-- 新增卡片樣式 -->
+    <style>
+        .card-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+            gap: 20px;
+        }
+        .item-card {
+            /* 使用 .panel 的樣式作為基礎 */
+            background: #ffffff;
+            border: 1px solid #dee2e6;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.05);
+            display: flex;
+            flex-direction: column;
+            transition: box-shadow 0.3s ease;
+        }
+        .item-card:hover {
+            box-shadow: 0 6px 12px rgba(0,0,0,0.1);
+        }
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid #eee;
+            padding-bottom: 10px;
+            margin-bottom: 15px;
+        }
+        .card-header .checkbox-container {
+            display: flex;
+            align-items: center;
+        }
+        .card-header input[type="checkbox"] {
+            width: 20px;
+            height: 20px;
+            cursor: pointer;
+        }
+        .card-header .item-id {
+            font-size: 0.9em;
+            color: #6c757d;
+        }
+        .card-body p {
+            margin: 0 0 10px 0;
+            color: #495057;
+            word-wrap: break-word;
+        }
+        .card-body p strong {
+            color: #343a40;
+            margin-right: 8px;
+        }
+        .card-body .url-link {
+            color: #007bff;
+            text-decoration: none;
+            word-break: break-all;
+        }
+        .card-body .url-link:hover {
+            text-decoration: underline;
+        }
+        .card-status {
+            margin-top: auto;
+            padding-top: 10px;
+            font-weight: bold;
+        }
+        .status-processing { background-color: #eaf2f8; }
+        .status-error { background-color: #fdedec; }
+        .status-completed { background-color: #eafaf1; }
+    </style>
 </head>
 <body>
     <nav class="top-nav">
+        <!-- ... (導覽列維持不變) ... -->
         <ul>
             <li><a href="/">鳳凰主頁</a></li>
             <li><a href="/page1">網址提取</a></li>
             <li><a href="/page2" class="active">批次下載</a></li>
             <li><a href="/page3">檔案處理</a></li>
-            <li><a href="/page4">AI 分析</a></li>
+            <li><a href="/page4_stage1_ai">AI 分析</a></li>
             <li><a href="/page5">備份管理</a></li>
             <li><a href="/page6">金鑰管理</a></li>
             <li><a href="/page7">提示詞管理</a></li>
+            <li><a href="/page9">績效儀表板</a></li>
         </ul>
     </nav>
 
@@ -27,20 +97,23 @@
             <h1>頁面二：批次下載</h1>
             <p>此頁面會列出所有已提取但尚未處理的網址。請勾選您想下載的項目，然後點擊按鈕開始下載。</p>
 
-            <div style="margin-bottom: 10px;">
-                <button id="select-all-button">全選</button>
-                <button id="deselect-all-button">取消全選</button>
+            <div class="action-bar">
+                <div class="action-group">
+                    <button id="select-all-button">全選</button>
+                    <button id="deselect-all-button">取消全選</button>
+                </div>
+                <div class="action-group">
+                    <button id="download-button" class="primary-action">開始下載選中項目</button>
+                </div>
             </div>
 
-            <div id="url-list-container">
+            <!-- 容器將使用新的 card-grid 樣式 -->
+            <div id="url-list-container" class="card-grid">
                 <p>正在載入待處理的網址...</p>
-            </div>
-
-            <div style="margin-top: 20px;">
-                <button id="download-button">開始下載選中項目</button>
             </div>
         </div>
 
+        <!-- ... (其餘部分維持不變) ... -->
         <div class="panel">
             <div class="panel-header">
                 <h2>狀態日誌</h2>
@@ -72,24 +145,11 @@
                 if (!isoString) return '無效時間';
                 try {
                     const date = new Date(isoString);
-                    // 使用 Intl.DateTimeFormat API，這是處理時區轉換最可靠的標準方法。
-                    // 它可以正確地將傳入的 UTC 時間（或任何帶有時區資訊的 ISO 字串）轉換到指定的 'Asia/Taipei' 時區。
-                    const formatter = new Intl.DateTimeFormat('en-CA', { // 使用 'en-CA' 可產生 YYYY-MM-DD 格式
-                        timeZone: 'Asia/Taipei',
-                        year: 'numeric',
-                        month: '2-digit',
-                        day: '2-digit',
-                        hour: '2-digit',
-                        minute: '2-digit',
-                        second: '2-digit',
-                        hour12: false
+                    const formatter = new Intl.DateTimeFormat('en-CA', {
+                        timeZone: 'Asia/Taipei', year: 'numeric', month: '2-digit', day: '2-digit',
+                        hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false
                     });
-
-                    // 格式化後會得到類似 "2025-09-11, 09:37:01" 的字串
-                    const formattedString = formatter.format(date);
-                    // 將其轉換為我們想要的 "YYYY/MM/DD HH:mm:ss" 格式
-                    return formattedString.replace(/-/g, '/').replace(',', '');
-
+                    return formatter.format(date).replace(/-/g, '/').replace(',', '');
                 } catch (e) {
                     console.error("時間格式化失敗:", e, "輸入值:", isoString);
                     return '時間格式錯誤';
@@ -107,6 +167,9 @@
                     const response = await fetch('/api/downloader/pending_urls');
                     if (!response.ok) throw new Error(`伺服器錯誤 (狀態 ${response.status})`);
                     const urls = await response.json();
+
+                    urlListContainer.innerHTML = ''; // 清空容器
+
                     if (urls.length === 0) {
                         urlListContainer.innerHTML = '<p>目前沒有待處理的網址。</p>';
                         downloadButton.disabled = true;
@@ -115,34 +178,31 @@
                         logStatus('列表為空。');
                         return;
                     }
-                    let html = `
-                        <table class="results-table">
-                            <thead>
-                                <tr>
-                                    <th><input type="checkbox" id="select-all-header-checkbox"></th>
-                                    <th>日期</th>
-                                    <th>時間</th>
-                                    <th>作者</th>
-                                    <th>連結</th>
-                                </tr>
-                            </thead>
-                            <tbody>`;
-                    urls.forEach(item => {
-                        html += `
-                            <tr>
-                                <td><input type="checkbox" class="url-checkbox" value="${item.id}"></td>
-                                <td>${item.message_date || '---'}</td>
-                                <td>${item.message_time || '---'}</td>
-                                <td>${item.author || '---'}</td>
-                                <td class="url-cell"><a href="${item.url}" title="${item.url}" target="_blank">${item.url}</a></td>
-                            </tr>`;
-                    });
-                    html += '</tbody></table>';
-                    urlListContainer.innerHTML = html;
 
-                    // Re-add event listener for the new header checkbox
-                    document.getElementById('select-all-header-checkbox').addEventListener('change', (e) => {
-                        document.querySelectorAll('.url-checkbox').forEach(cb => cb.checked = e.target.checked);
+                    urls.forEach(item => {
+                        const card = document.createElement('div');
+                        card.className = 'item-card';
+                        card.dataset.id = item.id; // 將 id 存在 dataset 中
+
+                        // 注意：item.title 欄位是為後端升級預留的
+                        const title = item.title || '無標題';
+
+                        card.innerHTML = `
+                            <div class="card-header">
+                                <div class="checkbox-container">
+                                    <input type="checkbox" class="url-checkbox" value="${item.id}">
+                                </div>
+                                <span class="item-id">ID: ${item.id}</span>
+                            </div>
+                            <div class="card-body">
+                                <p><strong>標題:</strong> ${title}</p>
+                                <p><strong>作者:</strong> ${item.author || '---'}</p>
+                                <p><strong>時間:</strong> ${item.message_date || ''} ${item.message_time || ''}</p>
+                                <p><strong>連結:</strong> <a href="${item.url}" title="${item.url}" target="_blank" class="url-link">${item.url}</a></p>
+                            </div>
+                            <div class="card-status"></div>
+                        `;
+                        urlListContainer.appendChild(card);
                     });
 
                     downloadButton.disabled = false;
@@ -157,6 +217,7 @@
 
             selectAllButton.addEventListener('click', () => document.querySelectorAll('.url-checkbox').forEach(cb => cb.checked = true));
             deselectAllButton.addEventListener('click', () => document.querySelectorAll('.url-checkbox').forEach(cb => cb.checked = false));
+
             downloadButton.addEventListener('click', async () => {
                 const selectedIds = Array.from(document.querySelectorAll('.url-checkbox:checked')).map(cb => parseInt(cb.value, 10));
                 if (selectedIds.length === 0) {
@@ -191,80 +252,52 @@
                 ws.onmessage = (event) => {
                     const data = JSON.parse(event.data);
 
-                    // 我們只關心 'task_update' 類型的訊息
-                    if (data.type !== 'task_update') {
-                        // 如果有新的 URL 被提取，也重新整理列表
-                        if (data.type === 'URLS_EXTRACTED') {
-                             logStatus('偵測到新的 URL 已被提取，正在更新列表...', 'green');
-                             setTimeout(fetchAndRenderUrls, 500);
-                        }
+                    if (data.type === 'URLS_EXTRACTED') {
+                         logStatus('偵測到新的 URL 已被提取，正在更新列表...', 'green');
+                         setTimeout(fetchAndRenderUrls, 500);
+                         return;
+                    }
+                    if (data.type !== 'task_update' || data.task_type !== 'download') {
                         return;
                     }
 
-                    // 我們只關心 'download' 類型的任務
-                    if (data.task_type !== 'download') {
-                        return;
-                    }
-
-                    const task_id = data.task_id;
+                    const taskId = data.task_id;
                     const status = data.status;
-                    const result = data.result; // result 現在是完整的資料庫紀錄物件
+                    const result = data.result;
 
-                    logStatus(`收到下載任務 #${task_id} 的更新: ${status}`, 'purple');
+                    logStatus(`收到下載任務 #${taskId} 的更新: ${status}`, 'purple');
 
-                    const row = document.querySelector(`input.url-checkbox[value="${task_id}"]`)?.closest('tr');
-
-                    if (!row) {
-                        logStatus(`警告: 在表格中找不到任務 #${task_id} 對應的列。可能已被處理。`, 'orange');
-                        // 即使找不到列，如果任務完成了，我們也應該更新「已完成」列表
-                        if (status === 'completed') {
-                            fetchAndRenderCompletedFiles();
-                        }
+                    const card = document.querySelector(`.item-card[data-id="${taskId}"]`);
+                    if (!card) {
+                        if (status === 'completed') fetchAndRenderCompletedFiles();
                         return;
                     }
 
-                    // 移除所有舊的狀態指示器
-                    row.classList.remove('status-processing', 'status-error', 'status-completed');
+                    card.classList.remove('status-processing', 'status-error', 'status-completed');
+                    const statusDiv = card.querySelector('.card-status');
 
                     switch (status) {
                         case 'downloading':
-                            row.classList.add('status-processing');
-                            // 在最後一格新增狀態提示
-                            updateRowStatusCell(row, '📥 下載中...', '#2980b9');
+                            card.classList.add('status-processing');
+                            statusDiv.innerHTML = `<span style="color: #2980b9;">📥 下載中...</span>`;
                             break;
                         case 'download_failed':
                         case 'failed':
-                            row.classList.add('status-error');
+                            card.classList.add('status-error');
                             const errorMessage = result.status_message || '未知錯誤';
-                            updateRowStatusCell(row, `❌ 失敗: ${errorMessage}`, '#c0392b');
+                            statusDiv.innerHTML = `<span style="color: #c0392b;">❌ 失敗: ${errorMessage}</span>`;
                             break;
                         case 'completed':
-                            row.classList.add('status-completed');
-                            updateRowStatusCell(row, `✅ 完成`, '#27ae60');
-                            // 動畫效果後移除
+                            card.classList.add('status-completed');
+                            statusDiv.innerHTML = `<span style="color: #27ae60;">✅ 完成</span>`;
                             setTimeout(() => {
-                                row.remove();
-                                // 更新已完成列表
+                                card.remove();
                                 fetchAndRenderCompletedFiles();
-                                logStatus(`任務 #${task_id} 已完成並從待辦列表移除。`);
+                                logStatus(`任務 #${taskId} 已完成並從待辦列表移除。`);
                             }, 1500);
                             break;
                     }
                 };
-            };
-
-            const updateRowStatusCell = (row, text, color) => {
-                let statusCell = row.querySelector('.status-cell');
-                if (!statusCell) {
-                    // 如果狀態欄不存在，則新增一個
-                    const header = document.querySelector('.results-table thead tr');
-                    if (!header.querySelector('.status-header')) {
-                         header.insertAdjacentHTML('beforeend', '<th class="status-header">狀態</th>');
-                    }
-                    statusCell = row.insertCell(-1);
-                    statusCell.className = 'status-cell';
-                }
-                statusCell.innerHTML = `<span style="color: ${color}; font-weight: bold;">${text}</span>`;
             };
 
             const fetchAndRenderCompletedFiles = async () => {
@@ -292,41 +325,111 @@
 
             const copyLogButton = document.getElementById('copy-log-button');
             copyLogButton.addEventListener('click', () => {
-                const logContent = statusArea.innerText;
-                navigator.clipboard.writeText(logContent).then(() => {
+                navigator.clipboard.writeText(statusArea.innerText).then(() => {
                     const originalIcon = copyLogButton.innerText;
                     copyLogButton.innerText = '✅';
-                    copyLogButton.disabled = true;
-                    setTimeout(() => {
-                        copyLogButton.innerText = originalIcon;
-                        copyLogButton.disabled = false;
-                    }, 3000);
-                }).catch(err => {
-                    console.error('無法複製日誌: ', err);
-                    alert('複製失敗，請手動複製。');
-                });
+                    setTimeout(() => { copyLogButton.innerText = originalIcon; }, 2000);
+                }).catch(err => console.error('無法複製日誌: ', err));
             });
 
             (async () => {
-                await Promise.all([
-                    fetchAndRenderUrls(),
-                    fetchAndRenderCompletedFiles()
-                ]);
+                await Promise.all([ fetchAndRenderUrls(), fetchAndRenderCompletedFiles() ]);
                 setupWebSocket();
             })();
-
-            const centerActiveNavButton = () => {
-                const activeNavButton = document.querySelector('.top-nav a.active');
-                if (activeNavButton) {
-                    activeNavButton.scrollIntoView({
-                        behavior: 'smooth',
-                        inline: 'center',
-                        block: 'nearest'
-                    });
-                }
-            };
-            setTimeout(centerActiveNavButton, 100);
         });
     </script>
+
+    <!-- V5.5 Readiness Overlay Start -->
+    <style>
+        #readiness-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.7);
+            color: white;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 1.5em;
+            z-index: 9999;
+            flex-direction: column;
+            text-align: center;
+        }
+        #readiness-overlay .spinner {
+            border: 4px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top: 4px solid #fff;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin-bottom: 20px;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+    <div id="readiness-overlay">
+        <div class="spinner"></div>
+        <p>系統正在初始化核心服務，請稍候...</p>
+    </div>
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const overlay = document.getElementById('readiness-overlay');
+            const buttons = document.querySelectorAll('button, a.button, input[type="button"], input[type="submit"]');
+
+            // 輔助函數：啟用UI
+            function enableUI() {
+                overlay.style.display = 'none';
+                buttons.forEach(btn => {
+                    btn.disabled = false;
+                });
+                console.log('系統已就緒，UI 已啟用。');
+            }
+
+            // 檢查 sessionStorage 中是否已有就緒標記
+            if (sessionStorage.getItem('isSystemReady') === 'true') {
+                enableUI();
+                const overlayText = overlay.querySelector('p');
+                if(overlayText) {
+                    overlayText.innerText = '系統已就緒';
+                }
+                return; // 如果已就緒，則不執行後續的輪詢
+            }
+
+            // 1. 預設禁用所有按鈕並顯示遮罩
+            buttons.forEach(btn => {
+                if (!btn.closest('.navbar')) {
+                    btn.disabled = true;
+                }
+            });
+            overlay.style.display = 'flex';
+
+            // 2. 定期輪詢 /api/health/ready 端點
+            const readinessInterval = setInterval(() => {
+                fetch('/api/health/ready')
+                    .then(response => {
+                        if (response.ok) {
+                            // 3. 一旦請求成功，設定標記、啟用按鈕並隱藏遮罩
+                            clearInterval(readinessInterval);
+                            sessionStorage.setItem('isSystemReady', 'true'); // 設定標記
+                            enableUI();
+                        } else {
+                            console.log('等待核心服務就緒...');
+                        }
+                    })
+                    .catch(error => {
+                        console.error('輪詢就緒狀態時發生錯誤:', error);
+                        const overlayText = overlay.querySelector('p');
+                        if(overlayText) {
+                            overlayText.innerText = '無法連接到後端服務，請檢查連線或稍後重試。';
+                        }
+                    });
+            }, 2000); // 每 2 秒輪詢一次
+        });
+    </script>
+    <!-- V5.5 Readiness Overlay End -->
 </body>
 </html>
