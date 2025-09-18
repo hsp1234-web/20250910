@@ -12,6 +12,9 @@ import time
 import json
 from pathlib import Path
 import requests # V5.5 新增導入
+import urllib.request
+import platform
+
 
 # --- 路徑修正 (必須在所有專案內部模組導入之前) ---
 SRC_DIR = Path(__file__).resolve().parent.parent
@@ -215,6 +218,110 @@ def stream_reader(stream, prefix, ready_event=None, ready_signal=None):
         log.error(f"讀取流 '{prefix}' 時發生錯誤: {e}", exc_info=True)
 
 
+# --- V29 新增: 通道管理器 ---
+class TunnelManager:
+    """通道管理器：並行啟動多個代理通道 (Cloudflare, Localtunnel) 以提供備援。"""
+    def __init__(self, port):
+        self._port = port
+        self._threads = []
+        self._processes = []
+
+    def start(self):
+        # 這裡可以透過環境變數或設定檔來決定要啟用哪些通道
+        self._start_thread(self._run_cloudflared, "Cloudflare")
+        self._start_thread(self._run_localtunnel, "Localtunnel")
+
+    def _start_thread(self, target, name):
+        thread = threading.Thread(target=target, name=name, daemon=True)
+        self._threads.append(thread)
+        thread.start()
+
+    def _update_url_status(self, name, status, url=None, error=None):
+        if status == 'ready':
+            log.info(f"✅ [通道] {name} 已就緒: {url}")
+            print(f"PUBLIC_URL_{name.upper()}: {url}", flush=True) # 為了讓外部腳本可以捕獲
+        elif status == 'error':
+            log.error(f"❌ [通道] {name} 發生錯誤: {error}")
+
+    def _ensure_cloudflared_installed(self):
+        if Path("./cloudflared").is_file(): return True
+        log.info("[Cloudflare] 未找到 Cloudflared，正在下載...")
+        arch = platform.machine()
+        url = f"https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-{'amd64' if arch == 'x86_64' else 'arm64'}"
+        try:
+            urllib.request.urlretrieve(url, "cloudflared")
+            os.chmod("cloudflared", 0o755)
+            log.info("✅ [Cloudflare] Cloudflared 下載成功。")
+            return True
+        except Exception as e:
+            log.error(f"[Cloudflare] Cloudflared 下載失敗: {e}")
+            return False
+
+    def _run_cloudflared(self):
+        self._update_url_status("Cloudflare", "starting")
+        if not self._ensure_cloudflared_installed():
+            self._update_url_status("Cloudflare", "error", error="安裝失敗")
+            return
+        proc = subprocess.Popen(["./cloudflared", "tunnel", "--url", f"http://127.0.0.1:{self._port}"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8')
+        self._processes.append(proc)
+        url_pattern = re.compile(r"https://[a-zA-Z0-9-]+\.trycloudflare\.com")
+        for line in iter(proc.stdout.readline, ''):
+            if stop_event.is_set(): break
+            log.debug(f"[Cloudflare] {line.strip()}")
+            if match := url_pattern.search(line):
+                self._update_url_status("Cloudflare", "ready", url=match.group(0))
+                return # 成功後就返回，讓執行緒結束
+        if not stop_event.is_set():
+            self._update_url_status("Cloudflare", "error", error="無法從日誌中解析 URL")
+
+    def _ensure_localtunnel_installed(self):
+        try:
+            # 檢查 npx 是否能執行 lt 命令
+            subprocess.run(["npx", "localtunnel", "--help"], check=True, capture_output=True)
+            return True
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            log.info("[Localtunnel] 正在安裝 Localtunnel...")
+            try:
+                # 使用 npm 安裝到本地 node_modules 並透過 npx 執行
+                subprocess.run(["npm", "install", "localtunnel"], check=True, capture_output=True)
+                log.info("✅ [Localtunnel] Localtunnel 安裝成功。")
+                return True
+            except subprocess.CalledProcessError as e:
+                log.error(f"[Localtunnel] 安裝失敗: {e.stderr}")
+                return False
+
+    def _run_localtunnel(self):
+        self._update_url_status("Localtunnel", "starting")
+        # localtunnel 的安裝檢查可以簡化，因為 npx 會自動處理
+        # if not self._ensure_localtunnel_installed():
+        #     self._update_url_status("Localtunnel", "error", error="安裝失敗")
+        #     return
+        proc = subprocess.Popen(["npx", "localtunnel", "--port", str(self._port)], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8')
+        self._processes.append(proc)
+        url_pattern = re.compile(r"your url is: (https://[a-zA-Z0-9-]+\.loca\.lt)")
+        for line in iter(proc.stdout.readline, ''):
+            if stop_event.is_set(): break
+            log.debug(f"[Localtunnel] {line.strip()}")
+            if match := url_pattern.search(line):
+                self._update_url_status("Localtunnel", "ready", url=match.group(1))
+                return # 成功後就返回
+        if not stop_event.is_set():
+            self._update_url_status("Localtunnel", "error", error="無法從日誌中解析 URL")
+
+    def stop(self):
+        log.info("[通道] 正在關閉所有通道...")
+        for p in self._processes:
+            if p.poll() is None:
+                try:
+                    p.terminate()
+                except ProcessLookupError:
+                    pass
+        for t in self._threads:
+            if t.is_alive():
+                t.join(timeout=2)
+        log.info("[通道] 所有通道已關閉。")
+
+
 def main():
     parser = argparse.ArgumentParser(description="系統協調器。")
     parser.add_argument("--mock", action="store_true", help="如果設置，則 worker 將以模擬模式運行。")
@@ -222,6 +329,7 @@ def main():
     args, _ = parser.parse_known_args()
 
     global db_client
+    tunnel_manager = None # 在 try 區塊外宣告
     try:
         log.info("--- [協調器啟動 V6.0] ---")
 
@@ -272,11 +380,22 @@ def main():
         api_stdout_thread.start()
         api_stderr_thread.start()
 
-        # 步驟 2: 啟動所有微服務
+        # 等待 API 伺服器就緒
+        if not api_ready_event.wait(timeout=60):
+            raise RuntimeError("等待主 API 伺服器就緒超時。")
+        log.info(f"✅ 主 API 伺服器已在埠號 {api_port} 上就緒。")
+
+        # 步驟 2: 啟動通道管理器
+        log.info("🚀 正在啟動通道管理器...")
+        tunnel_manager = TunnelManager(port=api_port)
+        tunnel_manager.start()
+
+        # 步驟 3: 啟動所有微服務
         start_all_microservices()
 
-        # 步驟 3: 執行舊的核心準備任務 (發送就緒信號等)
+        # 步驟 4: 執行舊的核心準備任務 (發送就緒信號等)
         log.info("🚀 正在啟動核心服務準備任務 (背景執行)...")
+        # 注意：這裡的 api_ready_event 已經是 set() 狀態，所以會立即執行
         core_prep_thread = threading.Thread(target=prepare_core_services, args=(api_port, api_ready_event), daemon=True)
         threads.append(core_prep_thread)
         core_prep_thread.start()
@@ -296,6 +415,11 @@ def main():
     finally:
         log.info("--- [協調器開始關閉程序] ---")
         stop_event.set()
+
+        # 關閉通道管理器
+        if tunnel_manager:
+            tunnel_manager.stop()
+
         for f in [READINESS_SIGNAL_FILE, SERVICE_REGISTRY_FILE]:
             if f.exists():
                 f.unlink()
