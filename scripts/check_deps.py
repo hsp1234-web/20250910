@@ -84,5 +84,57 @@ def main():
     for pkg in missing_packages:
         print(pkg)
 
+def ensure_dependencies(requirement_files: list[str]):
+    """
+    一個可重用的函式，確保指定的依賴檔案中的所有套件都已安裝。
+    如果偵測到缺失的套件，它會自動呼叫 pip 進行安裝。
+    主要設計給其他工具腳本在執行前呼叫，以實現依賴的懶加載。
+    """
+    import subprocess
+
+    # 將日誌訊息輸出到 stderr，以避免污染 stdout
+    print("--- [依賴懶加載] 正在檢查必要套件... ---", file=sys.stderr)
+
+    missing_packages = []
+    all_packages = []
+
+    for filepath in requirement_files:
+        try:
+            with open(filepath, 'r', encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith("#"):
+                        all_packages.append(line)
+        except FileNotFoundError:
+            print(f"錯誤: 懶加載依賴時找不到檔案 {filepath}", file=sys.stderr)
+            # 如果找不到依賴檔案，這是一個嚴重問題，直接拋出錯誤
+            raise
+
+    for pkg in all_packages:
+        if not check_dependency(pkg):
+            missing_packages.append(pkg)
+
+    if not missing_packages:
+        print("--- [依賴懶加載] 所有套件均已滿足。 ---", file=sys.stderr)
+        return
+
+    print(f"--- [依賴懶加載] 偵測到 {len(missing_packages)} 個缺失的套件，正在為您安裝... ---", file=sys.stderr)
+
+    try:
+        # 優先嘗試使用 uv 加速器
+        pip_command = [sys.executable, "-m", "uv", "pip", "install"] + missing_packages
+        print(f"--- [依賴懶加載] 正在嘗試使用 'uv' 快速安裝... ---", file=sys.stderr)
+        subprocess.run(pip_command, check=True, capture_output=True, text=True, encoding='utf-8')
+        print(f"--- [依賴懶加載] 'uv' 安裝成功。---", file=sys.stderr)
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        print(f"--- [依賴懶加載] 'uv' 不可用或安裝失敗，退回使用 'pip'... ---", file=sys.stderr)
+        pip_command = [sys.executable, "-m", "pip", "install"] + missing_packages
+        subprocess.run(pip_command, check=True, capture_output=True, text=True, encoding='utf-8')
+
+    print(f"--- [依賴懶加載] 套件安裝完成。 ---", file=sys.stderr)
+    # 安裝後，需要讓 Python 的 import 快取失效，以便能找到新安裝的套件
+    importlib.invalidate_caches()
+
+
 if __name__ == "__main__":
     main()

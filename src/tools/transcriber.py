@@ -1,5 +1,25 @@
 # -*- coding: utf-8 -*-
 # tools/transcriber.py
+
+# --- JULES: 依賴懶加載機制 ---
+# 在真正執行轉錄功能之前，先確保所有必要的依賴都已安裝。
+import sys
+from pathlib import Path
+
+# 將專案根目錄加入到 sys.path，以便找到 scripts 模組
+ROOT_DIR = Path(__file__).resolve().parent.parent.parent
+sys.path.insert(0, str(ROOT_DIR))
+try:
+    from scripts.check_deps import ensure_dependencies
+    # 定義此工具所需的依賴文件
+    TRANSCRIBER_REQS = [str(ROOT_DIR / "requirements" / "transcriber.txt")]
+    ensure_dependencies(TRANSCRIBER_REQS)
+except ImportError as e:
+    # 如果連 check_deps 都找不到，表示環境有嚴重問題
+    print(f"致命錯誤：無法導入依賴檢查模組。請確認專案結構是否完整。 {e}", file=sys.stderr)
+    sys.exit(1)
+# --- 懶加載結束 ---
+
 import time
 import logging
 import argparse

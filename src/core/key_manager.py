@@ -141,10 +141,22 @@ def delete_key(key_hash: str) -> bool:
     return affected_rows > 0
 
 def validate_all_keys() -> List[Dict[str, Any]]:
-    """重新驗證所有已儲存的金鑰。"""
-    keys_to_validate = _execute_query("SELECT id, key_value FROM api_keys", fetch='all')
+    """
+    (背景任務) 驗證所有「未驗證過」的金鑰。
+    此函式現在主要由背景任務呼叫，用於清理未被即時驗證過的金鑰。
+    """
+    # 只選取從未被驗證過的金鑰
+    keys_to_validate = _execute_query("SELECT id, key_value FROM api_keys WHERE last_validated_at IS NULL", fetch='all')
 
+    if not keys_to_validate:
+        # 使用 print 而非 logging，因為這是在背景執行緒中，logging 可能未設定
+        print("背景驗證：沒有需要驗證的新金鑰。")
+        return get_all_keys()
+
+    print(f"背景驗證：找到 {len(keys_to_validate)} 個新金鑰需要驗證。")
     for key in keys_to_validate:
+        # 為了避免在背景中消耗過多 I/O，可以考慮加入短暫延遲
+        time.sleep(0.1)
         is_valid = _validate_single_key(key["key_value"])
         validation_time = datetime.now().isoformat()
         query = "UPDATE api_keys SET is_valid = ?, last_validated_at = ? WHERE id = ?"
@@ -154,24 +166,55 @@ def validate_all_keys() -> List[Dict[str, Any]]:
 
 def get_valid_key() -> Optional[str]:
     """
-    從池中獲取一個有效的金鑰。
-    策略：優先選取最久未被使用的活躍金鑰。
+    從池中獲取一個有效的金鑰，實現懶驗證機制。
+    策略：
+    1. 優先選取已驗證為有效的金鑰。
+    2. 若無，則嘗試選取一個未驗證的金鑰進行即時驗證。
+    3. 驗證成功則使用，失敗則標記為無效並嘗試下一個。
     """
-    query = """
-        SELECT id, key_value FROM api_keys
-        WHERE status = 'active' AND is_valid = 1
-        ORDER BY last_used_at ASC NULLS FIRST
-        LIMIT 1
-    """
-    key_row = _execute_query(query, fetch='one')
+    # 無限迴圈是為了處理驗證失敗後需要重試下一個未驗證金鑰的情況
+    while True:
+        # 策略 1: 尋找已知有效的金鑰
+        query_valid = """
+            SELECT id, key_value FROM api_keys
+            WHERE status = 'active' AND is_valid = 1
+            ORDER BY last_used_at ASC NULLS FIRST
+            LIMIT 1
+        """
+        key_row = _execute_query(query_valid, fetch='one')
 
-    if key_row:
-        # 標記此金鑰為已使用
-        update_query = "UPDATE api_keys SET last_used_at = ? WHERE id = ?"
-        _execute_query(update_query, (datetime.now().isoformat(), key_row["id"]))
-        return key_row["key_value"]
+        if key_row:
+            update_query = "UPDATE api_keys SET last_used_at = ? WHERE id = ?"
+            _execute_query(update_query, (datetime.now().isoformat(), key_row["id"]))
+            return key_row["key_value"]
 
-    return None
+        # 策略 2: 若無已知有效的，尋找一個未驗證的來驗證
+        query_unverified = """
+            SELECT id, key_value FROM api_keys
+            WHERE last_validated_at IS NULL AND status = 'active'
+            LIMIT 1
+        """
+        key_to_validate = _execute_query(query_unverified, fetch='one')
+
+        if not key_to_validate:
+            # 沒有已知有效的，也沒有未驗證的，表示所有金鑰都已驗證且均無效
+            return None
+
+        # 進行即時驗證
+        is_valid = _validate_single_key(key_to_validate["key_value"])
+        validation_time = datetime.now().isoformat()
+
+        # 更新資料庫
+        update_query = "UPDATE api_keys SET is_valid = ?, last_validated_at = ? WHERE id = ?"
+        _execute_query(update_query, (is_valid, validation_time, key_to_validate["id"]))
+
+        if is_valid:
+            # 驗證成功，標記為已使用並返回
+            update_used_query = "UPDATE api_keys SET last_used_at = ? WHERE id = ?"
+            _execute_query(update_used_query, (datetime.now().isoformat(), key_to_validate["id"]))
+            return key_to_validate["key_value"]
+
+        # 如果驗證失敗，迴圈將繼續，尋找下一個未驗證的金鑰
 
 def get_all_valid_keys_for_manager() -> List[Dict[str, str]]:
     """獲取所有有效的金鑰，格式為 GeminiManager 所需的列表。"""

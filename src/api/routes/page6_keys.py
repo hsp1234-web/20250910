@@ -4,7 +4,7 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Body
+from fastapi import APIRouter, HTTPException, Body, BackgroundTasks
 from pydantic import BaseModel, Field
 
 # --- 路徑修正與模組匯入 ---
@@ -63,18 +63,19 @@ async def remove_key(key_hash: str):
     else:
         raise HTTPException(status_code=404, detail="找不到具有該雜湊值的金鑰。")
 
-@router.post("/validate", summary="重新驗證所有金鑰")
-async def validate_all_stored_keys():
+@router.post("/validate", summary="在背景重新驗證所有金鑰")
+async def validate_all_stored_keys(background_tasks: BackgroundTasks):
     """
-    觸發對金鑰池中所有金鑰的重新驗證。
-    這是一個耗時操作，客戶端應準備等待。
+    觸發對金鑰池中所有金鑰的背景重新驗證。
+    此操作將在背景執行，API 會立即返回。
     """
     try:
-        validated_keys = key_manager.validate_all_keys()
-        return {"message": "所有金鑰已重新驗證。", "keys": validated_keys}
+        log.info("接收到請求，將在背景排程驗證所有金鑰。")
+        background_tasks.add_task(key_manager.validate_all_keys)
+        return {"message": "已成功排定背景金鑰驗證任務。"}
     except Exception as e:
-        log.error(f"重新驗證金鑰時發生錯誤: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="重新驗證金鑰時發生伺服器內部錯誤。")
+        log.error(f"排定金鑰驗證任務時發生錯誤: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="排定金鑰驗證任務時發生伺服器內部錯誤。")
 
 @router.post("/load_from_authorized_source", summary="從授權來源（環境變數）載入金鑰")
 async def load_keys_from_env(payload: LoadFromEnvRequest):
