@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <title>微服務測試頁面</title>
+    <link rel="stylesheet" href="/static/css/common.css">
+    <style>
+        body { font-family: sans-serif; padding: 20px; }
+        .container { max-width: 800px; margin: auto; }
+        .form-group { margin-bottom: 15px; }
+        .form-group label { display: block; margin-bottom: 5px; }
+        .form-group input { width: 100%; padding: 8px; box-sizing: border-box; }
+        .key-list { margin-top: 20px; padding: 10px; background-color: #f5f5f5; border: 1px solid #ccc; min-height: 100px; white-space: pre-wrap; word-wrap: break-word; }
+        .error { color: red; margin-top: 10px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>微服務架構測試頁面</h1>
+        <p>此頁面用於驗證主 API 伺服器與後端「金鑰管理微服務」之間的通訊。</p>
+
+        <div class="form-group">
+            <h2>新增金鑰</h2>
+            <form id="add-key-form">
+                <label for="api_key">API 金鑰:</label>
+                <input type="text" id="api_key" name="api_key" required>
+                <label for="key_name" style="margin-top: 10px;">金鑰別名 (可選):</label>
+                <input type="text" id="key_name" name="key_name">
+                <button type="submit">新增金鑰</button>
+            </form>
+        </div>
+
+        <div id="message-area" class="message"></div>
+        <div id="error-area" class="error"></div>
+
+        <hr>
+
+        <div>
+            <h2>已儲存的金鑰</h2>
+            <button id="refresh-keys">重新整理列表</button>
+            <div id="key-list-area" class="key-list">點擊按鈕以載入金鑰...</div>
+        </div>
+    </div>
+
+    <script>
+        const form = document.getElementById('add-key-form');
+        const messageArea = document.getElementById('message-area');
+        const errorArea = document.getElementById('error-area');
+        const refreshButton = document.getElementById('refresh-keys');
+        const keyListArea = document.getElementById('key-list-area');
+
+        // API 端點 (指向主 API 伺服器的閘道)
+        const API_ENDPOINT = '/api/service_test/keys';
+
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            clearMessages();
+
+            const apiKey = document.getElementById('api_key').value;
+            const keyName = document.getElementById('key_name').value;
+
+            try {
+                const response = await fetch(API_ENDPOINT, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ api_key: apiKey, name: keyName }),
+                });
+
+                const result = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(result.detail || '發生未知錯誤');
+                }
+
+                messageArea.textContent = `成功: ${result.message}`;
+                form.reset();
+                loadKeys(); // 新增後自動刷新列表
+            } catch (err) {
+                errorArea.textContent = `錯誤: ${err.message}`;
+            }
+        });
+
+        refreshButton.addEventListener('click', loadKeys);
+
+        async function loadKeys() {
+            clearMessages();
+            keyListArea.textContent = '正在載入...';
+
+            try {
+                const response = await fetch(API_ENDPOINT);
+                const keys = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(keys.detail || '無法載入金鑰');
+                }
+
+                if (keys.length === 0) {
+                    keyListArea.textContent = '目前沒有已儲存的金鑰。';
+                } else {
+                    keyListArea.textContent = JSON.stringify(keys, null, 2);
+                }
+            } catch (err) {
+                keyListArea.textContent = `載入失敗: ${err.message}`;
+                errorArea.textContent = `錯誤: ${err.message}`;
+            }
+        }
+
+        function clearMessages() {
+            messageArea.textContent = '';
+            errorArea.textContent = '';
+        }
+
+        // 頁面載入時自動載入一次
+        document.addEventListener('DOMContentLoaded', loadKeys);
+    </script>
+</body>
+</html>
