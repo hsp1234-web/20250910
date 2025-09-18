@@ -103,9 +103,14 @@ def _install_dependencies(req_files: list[Path], log_prefix=""):
 def prepare_core_services(api_port: int, api_ready_event: threading.Event):
     """
     在背景執行緒中準備所有核心服務。
+    根據使用者要求，此函式現在會立即發送就緒信號，並將耗時的金鑰驗證放到另一個背景執行緒中，
+    避免阻塞主啟動流程。
+
+    流程:
     1. 安裝核心依賴。
-    2. 觸發金鑰驗證。
-    3. 發送完全就緒信號。
+    2. 等待 API 伺服器基礎服務就緒。
+    3. **立即發送「完全就緒」信號**，讓前端 UI 解鎖。
+    4. **在新的背景執行緒中非同步觸發金鑰驗證**。
     """
     try:
         log.info("[核心準備] 背景任務已啟動。")
@@ -120,28 +125,35 @@ def prepare_core_services(api_port: int, api_ready_event: threading.Event):
 
         if not server_is_ready:
             log.error("[核心準備] 等待 API 伺服器就緒超時，無法觸發金鑰驗證。")
+            # 即使如此，我們仍然發送就緒信號，讓基礎 UI 可用
+            full_readiness_event.set()
+            READINESS_SIGNAL_FILE.touch()
             return
 
-        log.info("[核心準備] API 伺服器已就緒，準備觸發金鑰驗證。")
-
-        # 步驟 3: 觸發金鑰驗證
-        validation_url = f"http://127.0.0.1:{api_port}/api/keys/validate"
-        log.info(f"[核心準備] 正在向 {validation_url} 發送 POST 請求...")
-        try:
-            response = requests.post(validation_url, timeout=180)
-            log.info(f"[核心準備] 金鑰驗證請求完成，狀態碼: {response.status_code}")
-            if response.status_code != 200:
-                log.warning(f"[核心準備] 金鑰驗證伺服器回應: {response.text[:200]}")
-        except Exception as req_e:
-            log.error(f"[核心準備] 發送驗證請求時發生網路層錯誤: {req_e}")
-            # 即使驗證失敗，我們也應該繼續並設置就緒信號，因為核心依賴已安裝
-            # UI 可以處理金鑰無效的情況
-
-        # 步驟 4: 發送「完全就緒」信號
+        # 步驟 3: 立即發送「完全就緒」信號，解鎖前端
         log.info("✅ [核心準備] 核心服務準備完畢！發送『完全就緒』信號。")
         full_readiness_event.set()
-        # 建立檔案信號供 api_server 檢查
         READINESS_SIGNAL_FILE.touch()
+
+        # 步驟 4: 在一個新的背景執行緒中，非同步地觸發金鑰驗證
+        def _run_validation_in_background():
+            """此函式在一個獨立的執行緒中執行，不會阻塞主流程。"""
+            log.info("[金鑰驗證-背景] 背景執行緒已啟動，等待2秒後開始。")
+            time.sleep(2) # 短暫延遲，避免與伺服器啟動尖峰競爭
+            validation_url = f"http://127.0.0.1:{api_port}/api/keys/validate"
+            log.info(f"[金鑰驗證-背景] 正在向 {validation_url} 發送 POST 請求...")
+            try:
+                response = requests.post(validation_url, timeout=180)
+                log.info(f"[金鑰驗證-背景] 金鑰驗證請求完成，狀態碼: {response.status_code}")
+                if response.status_code != 200:
+                    log.warning(f"[金鑰驗證-背景] 金鑰驗證伺服器回應: {response.text[:200]}")
+            except Exception as req_e:
+                log.error(f"[金鑰驗證-背景] 發送驗證請求時發生網路層錯誤: {req_e}")
+
+        log.info("[核心準備] 準備在背景啟動金鑰驗證...")
+        validation_thread = threading.Thread(target=_run_validation_in_background, daemon=True)
+        validation_thread.start()
+        log.info("[核心準備] 金鑰驗證已在背景啟動。主準備流程完成。")
 
     except Exception as e:
         log.critical(f"❌ [核心準備] 背景任務發生致命錯誤: {e}", exc_info=True)
