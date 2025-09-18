@@ -85,3 +85,7 @@ async def serve_page8(request: Request):
 @router.get("/page9", response_class=HTMLResponse)
 async def serve_page9(request: Request):
     return templates.TemplateResponse("page9_dashboard.html", {"request": request})
+
+@router.get("/page10_service_test.html", response_class=HTMLResponse)
+async def serve_page10(request: Request):
+    return templates.TemplateResponse("page10_service_test.html", {"request": request})

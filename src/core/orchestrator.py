@@ -9,6 +9,7 @@ import subprocess
 import sys
 import threading
 import time
+import json
 from pathlib import Path
 import requests # V5.5 新增導入
 
@@ -33,134 +34,12 @@ threads = []
 stop_event = threading.Event()
 db_client = None
 
+# --- V6.0 微服務架構變數 ---
+SERVICE_REGISTRY_FILE = Path("/tmp/service_registry.json")
+
 # --- V5.5 啟動優化: 新增全域就緒信號 ---
 full_readiness_event = threading.Event()
 READINESS_SIGNAL_FILE = Path("/tmp/full_ready.signal")
-
-# --- V5.5 啟動優化: 從 colabPro.py 移入的依賴安裝邏輯 ---
-def _install_dependencies(req_files: list[Path], log_prefix=""):
-    """
-    智慧地檢查並只安裝缺失的依賴。
-    這是從 colabPro.py 的 ServerManager 移植過來的核心邏輯。
-    """
-    log.info(f"[{log_prefix}] 開始檢查與安裝依賴...")
-    install_start_time = time.monotonic()
-
-    # ROOT_DIR 是在檔案頂部定義的專案根目錄
-    checker_script = ROOT_DIR / "scripts" / "check_deps.py"
-    if not checker_script.is_file():
-        log.critical(f"[{log_prefix}] 依賴檢查腳本 'check_deps.py' 不存在！")
-        raise FileNotFoundError("Dependency checker script not found.")
-
-    req_file_paths = [str(p.resolve()) for p in req_files if p.is_file()]
-    if not req_file_paths:
-        log.info(f"[{log_prefix}] 找不到任何有效的依賴檔案。")
-        return
-
-    try:
-        check_command = [sys.executable, str(checker_script.resolve())] + req_file_paths
-        result = subprocess.run(check_command, capture_output=True, text=True, encoding='utf-8')
-
-        # 如果檢查腳本出錯，為保險起見，假設所有套件都需要安裝
-        missing_packages = result.stdout.strip().splitlines() if result.returncode == 0 and result.stdout.strip() else []
-        if result.returncode != 0:
-            log.warning(f"[{log_prefix}] 依賴檢查腳本執行失敗，將嘗試安裝所有套件。Stderr: {result.stderr}")
-            # 從檔案中讀取所有套件
-            all_packages = []
-            for p in req_files:
-                all_packages.extend(p.read_text(encoding='utf-8').strip().splitlines())
-            missing_packages = [line for line in all_packages if line and not line.startswith("#")]
-
-
-        if not missing_packages:
-            log.info(f"✅ [{log_prefix}] 所有依賴均已滿足，無需安裝。")
-            return
-
-        log.info(f"[{log_prefix}] 偵測到 {len(missing_packages)} 個缺失的套件，開始安裝...")
-
-        # 使用 pip 進行安裝
-        pip_command = [sys.executable, "-m", "pip", "install"] + missing_packages
-        log.info(f"[{log_prefix}] 使用 'pip' 進行安裝。")
-
-        result = subprocess.run(pip_command, capture_output=True, text=True, encoding='utf-8')
-
-        if result.stdout and result.stdout.strip():
-            log.debug(f"[{log_prefix}] pip stdout:\n{result.stdout}")
-
-        if result.returncode != 0:
-            error_log = f"pip install 失敗！返回碼: {result.returncode}\n"
-            if result.stderr and result.stderr.strip():
-                error_log += f"STDERR:\n{result.stderr}\n"
-            log.error(error_log)
-            raise subprocess.CalledProcessError(result.returncode, pip_command, output=result.stdout, stderr=result.stderr)
-
-        log.info(f"✅ [{log_prefix}] 依賴安裝完成。 (耗時: {time.monotonic() - install_start_time:.2f} 秒)")
-    except (subprocess.CalledProcessError, FileNotFoundError) as e:
-        log.critical(f"[{log_prefix}] 依賴安裝失敗！ {e}")
-        raise
-
-# --- V5.5 啟動優化: 新增核心服務準備任務 ---
-def prepare_core_services(api_port: int, api_ready_event: threading.Event):
-    """
-    在背景執行緒中準備所有核心服務。
-    根據使用者要求，此函式現在會立即發送就緒信號，並將耗時的金鑰驗證放到另一個背景執行緒中，
-    避免阻塞主啟動流程。
-
-    流程:
-    1. 安裝核心依賴。
-    2. 等待 API 伺服器基礎服務就緒。
-    3. **立即發送「完全就緒」信號**，讓前端 UI 解鎖。
-    4. **在新的背景執行緒中非同步觸發金鑰驗證**。
-    """
-    try:
-        log.info("[核心準備] 背景任務已啟動。")
-
-        # 步驟 1: 安裝核心依賴
-        core_req_path = ROOT_DIR / "requirements" / "features_core.txt"
-        _install_dependencies([core_req_path], log_prefix="核心服務")
-
-        # 步驟 2: 等待 API 伺服器就緒
-        log.info("[核心準備] 等待 API 伺服器就緒...")
-        server_is_ready = api_ready_event.wait(timeout=60)
-
-        if not server_is_ready:
-            log.error("[核心準備] 等待 API 伺服器就緒超時，無法觸發金鑰驗證。")
-            # 即使如此，我們仍然發送就緒信號，讓基礎 UI 可用
-            full_readiness_event.set()
-            READINESS_SIGNAL_FILE.touch()
-            return
-
-        # 步驟 3: 立即發送「完全就緒」信號，解鎖前端
-        log.info("✅ [核心準備] 核心服務準備完畢！發送『完全就緒』信號。")
-        full_readiness_event.set()
-        READINESS_SIGNAL_FILE.touch()
-
-        # 步驟 4: 在一個新的背景執行緒中，非同步地觸發金鑰驗證
-        def _run_validation_in_background():
-            """此函式在一個獨立的執行緒中執行，不會阻塞主流程。"""
-            log.info("[金鑰驗證-背景] 背景執行緒已啟動，等待2秒後開始。")
-            time.sleep(2) # 短暫延遲，避免與伺服器啟動尖峰競爭
-            validation_url = f"http://127.0.0.1:{api_port}/api/keys/validate"
-            log.info(f"[金鑰驗證-背景] 正在向 {validation_url} 發送 POST 請求...")
-            try:
-                response = requests.post(validation_url, timeout=180)
-                log.info(f"[金鑰驗證-背景] 金鑰驗證請求完成，狀態碼: {response.status_code}")
-                if response.status_code != 200:
-                    log.warning(f"[金鑰驗證-背景] 金鑰驗證伺服器回應: {response.text[:200]}")
-            except Exception as req_e:
-                log.error(f"[金鑰驗證-背景] 發送驗證請求時發生網路層錯誤: {req_e}")
-
-        log.info("[核心準備] 準備在背景啟動金鑰驗證...")
-        validation_thread = threading.Thread(target=_run_validation_in_background, daemon=True)
-        validation_thread.start()
-        log.info("[核心準備] 金鑰驗證已在背景啟動。主準備流程完成。")
-
-    except Exception as e:
-        log.critical(f"❌ [核心準備] 背景任務發生致命錯誤: {e}", exc_info=True)
-        # 即使失敗，也發出信號，讓前端知道發生了問題，而不是無限期等待
-        full_readiness_event.set()
-        if not READINESS_SIGNAL_FILE.exists():
-             READINESS_SIGNAL_FILE.write_text(f"Error: {e}", encoding="utf-8")
 
 
 def find_free_port():
@@ -168,11 +47,163 @@ def find_free_port():
         s.bind(('', 0))
         return s.getsockname()[1]
 
-def stream_reader(stream, prefix, ready_event=None, ready_signal=None, port_list=None, port_regex=None):
+def run_command(command, cwd=None, check=True, log_prefix=""):
+    """執行一個命令並記錄其輸出。"""
+    log.info(f"[{log_prefix}] 執行命令: {' '.join(str(c) for c in command)}")
+    try:
+        result = subprocess.run(
+            command, capture_output=True, text=True, encoding='utf-8',
+            cwd=cwd, check=check, timeout=300 # 5分鐘超時以防萬一
+        )
+        # 即使成功，也記錄輸出以供除錯
+        if result.stdout and result.stdout.strip():
+            log.debug(f"[{log_prefix}] STDOUT:\n{result.stdout.strip()}")
+        if result.stderr and result.stderr.strip():
+            log.debug(f"[{log_prefix}] STDERR:\n{result.stderr.strip()}")
+        return result
+    except subprocess.CalledProcessError as e:
+        log.error(f"[{log_prefix}] 命令執行失敗！返回碼: {e.returncode}")
+        log.error(f"[{log_prefix}] STDOUT: {e.stdout.strip() if e.stdout else 'N/A'}")
+        log.error(f"[{log_prefix}] STDERR: {e.stderr.strip() if e.stderr else 'N/A'}")
+        raise
+    except subprocess.TimeoutExpired as e:
+        log.error(f"[{log_prefix}] 命令執行超時！")
+        raise
+
+# --- V6.0 微服務啟動器 ---
+def launch_microservice(service_path: Path):
+    """
+    為單個微服務建立環境、安裝依賴並啟動它。
+    """
+    service_name = service_path.name
+    log_prefix = f"Service:{service_name}"
+    log.info(f"--- 正在啟動微服務: {service_name} ---")
+
+    venv_dir = service_path / ".venv"
+    req_file = service_path / "requirements.txt"
+    main_script = service_path / "main.py"
+    python_exec = venv_dir / "bin" / "python"
+
+    # 步驟 1: 建立虛擬環境
+    if not venv_dir.exists():
+        run_command(["uv", "venv", venv_dir, "--seed"], log_prefix=log_prefix)
+    else:
+        log.info(f"[{log_prefix}] 虛擬環境已存在，跳過建立。")
+
+    # 步驟 2: 安裝依賴
+    if req_file.exists():
+        run_command([
+            "uv", "pip", "install",
+            "-p", str(python_exec),
+            "-r", str(req_file)
+        ], log_prefix=log_prefix)
+    else:
+        log.warning(f"[{log_prefix}] 找不到 requirements.txt，跳過依賴安裝。")
+
+    # 步驟 3: 啟動服務
+    port = find_free_port()
+    proc_env = os.environ.copy()
+    proc_env["PORT"] = str(port)
+
+    process = subprocess.Popen(
+        [str(python_exec), str(main_script)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        encoding='utf-8',
+        env=proc_env
+    )
+
+    # 為每個服務的日誌建立一個獨立的 reader thread
+    log_thread = threading.Thread(
+        target=stream_reader,
+        args=(process.stdout, log_prefix),
+        daemon=True
+    )
+    log_thread.start()
+    threads.append(log_thread)
+
+    log.info(f"✅ 微服務 '{service_name}' 已在埠號 {port} 上啟動，進程 PID: {process.pid}")
+    return service_name, port, process
+
+def start_all_microservices():
+    """
+    掃描 `services` 目錄並啟動所有找到的微服務。
+    """
+    services_dir = ROOT_DIR / "services"
+    if not services_dir.is_dir():
+        log.info("`services` 目錄不存在，跳過微服務啟動。")
+        return
+
+    service_paths = [d for d in services_dir.iterdir() if d.is_dir() and (d / "main.py").exists()]
+    if not service_paths:
+        log.info("在 `services` 目錄中未找到任何有效的微服務。")
+        return
+
+    log.info(f"偵測到 {len(service_paths)} 個微服務，準備啟動...")
+
+    service_registry = {}
+    # 順序啟動，也可以改為並行
+    for service_path in service_paths:
+        try:
+            service_name, port, process = launch_microservice(service_path)
+            service_registry[service_name] = {"port": port, "status": "running"}
+            processes.append(process) # 將進程加入全域列表以便監控和清理
+        except Exception as e:
+            log.error(f"啟動服務 {service_path.name} 失敗: {e}", exc_info=True)
+            service_registry[service_path.name] = {"port": None, "status": "failed"}
+
+    # 將服務註冊資訊寫入檔案
+    with open(SERVICE_REGISTRY_FILE, 'w', encoding='utf-8') as f:
+        json.dump(service_registry, f, indent=2)
+    log.info(f"✅ 服務註冊資訊已寫入: {SERVICE_REGISTRY_FILE}")
+
+
+# --- V5.5 舊有邏輯 (待移除) ---
+def prepare_core_services(api_port: int, api_ready_event: threading.Event):
+    """
+    V6.0 更新：此函式的依賴安裝部分已被移除。
+    它現在只負責觸發舊有的金鑰驗證流程。
+    """
+    try:
+        log.info("[核心準備] 背景任務已啟動。")
+
+        # 步驟 1: 等待 API 伺服器就緒
+        log.info("[核心準備] 等待 API 伺服器就緒...")
+        if not api_ready_event.wait(timeout=60):
+            log.error("[核心準備] 等待 API 伺服器就緒超時。")
+            full_readiness_event.set()
+            READINESS_SIGNAL_FILE.touch()
+            return
+
+        # 步驟 2: 立即發送「完全就緒」信號
+        log.info("✅ [核心準備] 核心服務準備完畢！發送『完全就緒』信號。")
+        full_readiness_event.set()
+        READINESS_SIGNAL_FILE.touch()
+
+        # 步驟 3: 背景觸發金鑰驗證 (舊流程)
+        def _run_validation_in_background():
+            log.info("[金鑰驗證-背景] 等待2秒後開始...")
+            time.sleep(2)
+            validation_url = f"http://127.0.0.1:{api_port}/api/keys/validate"
+            log.info(f"[金鑰驗證-背景] 正在向 {validation_url} 發送 POST 請求...")
+            try:
+                requests.post(validation_url, timeout=180)
+            except Exception as req_e:
+                log.error(f"[金鑰驗證-背景] 發送驗證請求時發生錯誤: {req_e}")
+
+        log.info("[核心準備] 準備在背景啟動金鑰驗證...")
+        validation_thread = threading.Thread(target=_run_validation_in_background, daemon=True)
+        validation_thread.start()
+
+    except Exception as e:
+        log.critical(f"❌ [核心準備] 背景任務發生致命錯誤: {e}", exc_info=True)
+
+
+def stream_reader(stream, prefix, ready_event=None, ready_signal=None):
     try:
         for line in iter(stream.readline, ''):
-            if not line:
-                break
+            if not line: break
             stripped_line = line.strip()
             log.info(f"[{prefix}] {stripped_line}")
 
@@ -180,12 +211,6 @@ def stream_reader(stream, prefix, ready_event=None, ready_signal=None, port_list
                 ready_event.set()
                 log.info(f"✅ 偵測到來自 '{prefix}' 的就緒信號 '{ready_signal}'！")
 
-            if port_list is not None and port_regex:
-                match = re.search(port_regex, stripped_line)
-                if match:
-                    port = int(match.group(1))
-                    port_list.append(port)
-                    log.info(f"✅ 偵測到來自 '{prefix}' 的埠號: {port}")
     except Exception as e:
         log.error(f"讀取流 '{prefix}' 時發生錯誤: {e}", exc_info=True)
 
@@ -198,73 +223,63 @@ def main():
 
     global db_client
     try:
-        log.info("--- [協調器啟動 V5.5] ---")
+        log.info("--- [協調器啟動 V6.0] ---")
 
-        # 清理上一次執行的信號檔案
-        if READINESS_SIGNAL_FILE.exists():
-            READINESS_SIGNAL_FILE.unlink()
-            log.info("已清理舊的就緒信號檔案。")
+        # 清理舊的信號和註冊檔案
+        for f in [READINESS_SIGNAL_FILE, SERVICE_REGISTRY_FILE]:
+            if f.exists():
+                f.unlink()
+                log.info(f"已清理舊的檔案: {f}")
 
+        # 步驟 1: 啟動核心後端服務 (DB Manager, API Server)
         api_port = args.port if args.port else find_free_port()
         proxy_url = f"http://127.0.0.1:{api_port}"
         print(f"PROXY_URL: {proxy_url}", flush=True)
-        log.info(f"已向外部監聽器提前報告代理 URL: {proxy_url}")
 
-        log.info("🔧 正在啟動基於 Uvicorn 的資料庫管理器...")
+        log.info("🔧 正在啟動資料庫管理器...")
         db_manager_port = find_free_port()
         os.environ['DB_MANAGER_PORT'] = str(db_manager_port)
         db_manager_cmd = [sys.executable, "-m", "uvicorn", "src.db.manager:app", "--host", "127.0.0.1", "--port", str(db_manager_port), "--log-level", "info"]
         proc_env = os.environ.copy()
-        python_path = proc_env.get("PYTHONPATH", "")
-        proc_env["PYTHONPATH"] = str(SRC_DIR) + os.pathsep + python_path
+        proc_env["PYTHONPATH"] = str(SRC_DIR) + os.pathsep + proc_env.get("PYTHONPATH", "")
 
         db_ready_event = threading.Event()
-        uvicorn_ready_signal = "Application startup complete"
         db_manager_proc = subprocess.Popen(db_manager_cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8', env=proc_env)
         processes.append(db_manager_proc)
-
-        db_stdout_thread = threading.Thread(target=stream_reader, args=(db_manager_proc.stdout, 'db_manager'), kwargs={'ready_event': db_ready_event, 'ready_signal': uvicorn_ready_signal})
+        db_stdout_thread = threading.Thread(target=stream_reader, args=(db_manager_proc.stdout, 'db_manager', db_ready_event, "Application startup complete"))
         db_stdout_thread.daemon = True
         threads.append(db_stdout_thread)
         db_stdout_thread.start()
 
-        log.info(f"等待資料庫管理器發出就緒信號 ('{uvicorn_ready_signal}')...")
         if not db_ready_event.wait(timeout=30): raise RuntimeError("等待資料庫管理器就緒超時。")
-        if db_manager_proc.poll() is not None: raise RuntimeError(f"資料庫管理器程序在啟動期間意外終止，返回碼: {db_manager_proc.returncode}")
         log.info(f"✅ 資料庫管理器 API 已在埠號 {db_manager_port} 上就緒。")
 
         db_client = DBClient()
         log.info("✅ DB 客戶端初始化完成。")
 
-        log.info("🔧 正在啟動 API 伺服器...")
-        # V5.5: 建立一個事件，讓核心準備任務可以知道 API 伺服器何時就緒
+        log.info("🔧 正在啟動主 API 伺服器...")
         api_ready_event = threading.Event()
         api_server_cmd = [sys.executable, "-m", "api.api_server", "--port", str(api_port)]
         if args.mock: api_server_cmd.append("--mock")
-        api_env = os.environ.copy()
-        if args.mock: api_env["API_MODE"] = "mock"
-        api_env["PYTHONPATH"] = str(SRC_DIR) + os.pathsep + api_env.get("PYTHONPATH", "")
 
-        api_proc = subprocess.Popen(api_server_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding='utf-8', env=api_env)
+        api_proc = subprocess.Popen(api_server_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding='utf-8', env=proc_env)
         processes.append(api_proc)
-
-        # V5.5: 修改 stream_reader 的呼叫，讓它在偵測到 Uvicorn 啟動信號時設置 api_ready_event
-        api_ready_signal = "Uvicorn running on"
-        # V5.5.1 修正: 將就緒信號的監聽同時應用於 stdout 和 stderr，以確保捕捉到 Uvicorn 的啟動訊息
-        api_ready_kwargs = {'ready_event': api_ready_event, 'ready_signal': api_ready_signal}
-        api_stdout_thread = threading.Thread(target=stream_reader, args=(api_proc.stdout, 'api_server'), kwargs=api_ready_kwargs)
-        api_stderr_thread = threading.Thread(target=stream_reader, args=(api_proc.stderr, 'api_server_stderr'), kwargs=api_ready_kwargs)
+        api_stdout_thread = threading.Thread(target=stream_reader, args=(api_proc.stdout, 'api_server', api_ready_event, "Uvicorn running on"))
+        api_stderr_thread = threading.Thread(target=stream_reader, args=(api_proc.stderr, 'api_server_stderr', api_ready_event, "Uvicorn running on"))
         threads.extend([api_stdout_thread, api_stderr_thread])
-        for t in [api_stdout_thread, api_stderr_thread]:
-            t.daemon = True
-            t.start()
+        api_stdout_thread.daemon = True
+        api_stderr_thread.daemon = True
+        api_stdout_thread.start()
+        api_stderr_thread.start()
 
-        # --- V5.5 啟動優化: 啟動核心服務準備執行緒 ---
+        # 步驟 2: 啟動所有微服務
+        start_all_microservices()
+
+        # 步驟 3: 執行舊的核心準備任務 (發送就緒信號等)
         log.info("🚀 正在啟動核心服務準備任務 (背景執行)...")
         core_prep_thread = threading.Thread(target=prepare_core_services, args=(api_port, api_ready_event), daemon=True)
         threads.append(core_prep_thread)
         core_prep_thread.start()
-        # --- V5.5 啟動優化結束 ---
 
         log.info("--- [協調器進入監控模式] ---")
         while not stop_event.is_set():
@@ -281,9 +296,9 @@ def main():
     finally:
         log.info("--- [協調器開始關閉程序] ---")
         stop_event.set()
-        # 清理信號檔案
-        if READINESS_SIGNAL_FILE.exists():
-            READINESS_SIGNAL_FILE.unlink()
+        for f in [READINESS_SIGNAL_FILE, SERVICE_REGISTRY_FILE]:
+            if f.exists():
+                f.unlink()
         for p in reversed(processes):
             try:
                 if p.poll() is None:
@@ -291,7 +306,6 @@ def main():
                     p.terminate()
                     p.wait(timeout=5)
             except subprocess.TimeoutExpired:
-                log.warning(f"程序 {p.pid} 未能在5秒內終止，將強制終止。")
                 p.kill()
             except Exception as kill_e:
                 log.error(f"終止程序 {p.pid} 時發生錯誤: {kill_e}")

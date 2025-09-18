@@ -152,15 +152,15 @@ def _prewarm_heavy_modules():
     # 稍微延遲，避免在伺服器啟動的最尖峰時刻競爭資源
     time.sleep(10)
     try:
-        log.info("🔥 [預熱] 正在預熱 AI 分析模組...")
-        from tools import gemini_manager
-        from tools import quantitative_analyzer
-        log.info("  -> ✅ AI 分析模組預熱完畢。")
+        # log.info("🔥 [預熱] 正在預熱 AI 分析模組...")
+        # from tools import gemini_manager # V6.3: 已移至 analyzer_service
+        # from tools import quantitative_analyzer # V6.3: 已移至 analyzer_service
+        # log.info("  -> ✅ AI 分析模組預熱完畢。")
 
         log.info("🔥 [預熱] 正在預熱檔案處理模組...")
         from tools import image_compressor
         from tools import file_hasher
-        from tools import content_extractor
+        # from tools import content_extractor # V6.2: 已移至 processor_service
         log.info("  -> ✅ 檔案處理模組預熱完畢。")
 
         log.info("🔥 [預熱] 正在預熱下載器模組...")
@@ -248,7 +248,7 @@ async def add_server_port_to_state(request: Request, call_next):
 
 # --- 整合模組化路由 ---
 from core import config_manager
-from api.routes import ui, page1, page2_downloader, page3_processor, page4_analyzer, page5_backup, page6_keys, page7_prompts, page8_details, page9_dashboard
+from api.routes import ui, page1, page2_downloader, page3_processor, page4_analyzer, page5_backup, page6_keys, page7_prompts, page8_details, page9_dashboard, page10_test
 
 # --- JULES (2025-09-15): 在應用程式啟動時載入設定 ---
 # 將設定載入到 app.state 中，使其在整個應用程式中可用。
@@ -269,6 +269,7 @@ app.include_router(page6_keys.router, prefix="/api/keys", tags=["API: 金鑰管�
 app.include_router(page7_prompts.router, prefix="/api", tags=["API: 提示詞管理"])
 app.include_router(page8_details.router, prefix="/api", tags=["API: 檔案總覽"])
 app.include_router(page9_dashboard.router, prefix="/api/dashboard", tags=["API: 績效儀表板"])
+app.include_router(page10_test.router, prefix="/api/service_test", tags=["API: 微服務測試"])
 
 # --- 路徑設定 ---
 # 新的上傳檔案儲存目錄
