@@ -785,51 +785,86 @@ async def update_dates_batch(payload: UpdateDatesBatchRequest, db: DBClient = De
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# JULES (2025-09-17): 新增用於生成 Word 報告的 API 端點
-from fastapi.responses import FileResponse
-from tools.report_generator_docx import create_docx_report
-import os
+# JULES (2025-09-18): 重構為呼叫 report_service 微服務
+import requests
+from fastapi.responses import StreamingResponse
+from core.config_manager import get_service_url
 
 class GenerateReportRequest(BaseModel):
     task_ids: List[int]
 
-@router.post("/generate_report", response_class=FileResponse)
+@router.post("/generate_report")
 async def generate_report_endpoint(
     payload: GenerateReportRequest,
-    background_tasks: BackgroundTasks,
     db: DBClient = Depends(get_db)
 ):
     """
-    接收一個或多個分析任務 ID，呼叫服務層生成一份包含這些報告的 Word (.docx) 文件，
-    並將其作為檔案下載回傳。
+    (V6 重構) 接收任務 ID，從資料庫準備資料，
+    並呼叫獨立的 `report_service` 來生成 .docx 報告，
+    然後將結果串流回傳給客戶端。
     """
     if not payload.task_ids:
         raise HTTPException(status_code=400, detail="任務 ID 列表不可為空。")
 
+    # 步驟 1: 從主資料庫準備資料
+    tasks_data_for_service = {}
+    for task_id in payload.task_ids:
+        task_data = db.get_analysis_task(task_id=task_id)
+        if not task_data:
+            log.warning(f"找不到任務 {task_id} 的資料，將在報告中跳過。")
+            continue
+
+        # 讀取 JSON 檔案內容並將其加入到要傳送的資料中
+        json_path_str = task_data.get("stage1_json_path")
+        if not json_path_str or not Path(json_path_str).exists():
+            log.warning(f"任務 {task_id} 的 JSON 檔案路徑不存在或遺失。")
+            tasks_data_for_service[str(task_id)] = {
+                "filename": task_data.get('filename', '未知檔案'),
+                "report_content": None  # 標記內容遺失
+            }
+            continue
+
+        with open(json_path_str, "r", encoding="utf-8") as f:
+            report_content = json.load(f)
+
+        tasks_data_for_service[str(task_id)] = {
+            "filename": task_data.get('filename', '未知檔案'),
+            "report_content": report_content
+        }
+
+    if not tasks_data_for_service:
+        raise HTTPException(status_code=404, detail="所有指定的任務 ID 都找不到有效的資料。")
+
+    # 步驟 2: 呼叫微服務
     try:
-        # 步驟 1: 呼叫服務層函式來生成報告
-        task_ids_str = ", ".join(map(str, payload.task_ids))
-        log.info(f"API 層：正在為任務 {task_ids_str} 調用報告生成服務...")
+        service_url = get_service_url("report_service")
+        if not service_url:
+            raise HTTPException(status_code=503, detail="報告生成服務目前不可用或未設定。")
 
-        report_path = create_docx_report(task_ids=payload.task_ids, db_client=db)
+        service_endpoint = f"{service_url}/generate_report"
+        log.info(f"正在向報告生成服務發送請求: {service_endpoint}")
 
-        log.info(f"API 層：報告生成服務完成，檔案位於 {report_path}")
-
-        # 步驟 2: 設定一個背景任務，在檔案回傳後將其刪除
-        background_tasks.add_task(os.remove, report_path)
-
-        # 步驟 3: 使用 FileResponse 回傳檔案
-        download_filename = f"綜合績效報告_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.docx"
-
-        return FileResponse(
-            path=report_path,
-            filename=download_filename,
-            media_type='application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+        # 使用 stream=True 來處理可能的大檔案
+        response = requests.post(
+            service_endpoint,
+            json={"tasks_data": tasks_data_for_service},
+            stream=True,
+            timeout=180 # 3 分鐘超時
         )
+        response.raise_for_status()
 
-    except FileNotFoundError as e:
-        log.error(f"生成報告時發生錯誤：找不到必要的檔案。{e}", exc_info=True)
-        raise HTTPException(status_code=404, detail=f"找不到生成報告所需的資料檔案：{e}")
+        # 步驟 3: 將微服務的回應串流回傳給原始客戶端
+        download_filename = f"綜合績效報告_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.docx"
+        headers = {
+            'Content-Disposition': f'attachment; filename="{download_filename}"',
+            'Content-Type': response.headers.get('content-type', 'application/octet-stream')
+        }
+
+        return StreamingResponse(response.iter_content(chunk_size=8192), headers=headers)
+
+    except requests.exceptions.RequestException as e:
+        log.error(f"呼叫報告生成服務時發生網路錯誤: {e}", exc_info=True)
+        raise HTTPException(status_code=503, detail=f"與報告生成服務通訊失敗: {e}")
     except Exception as e:
         log.error(f"生成報告時發生未預期的伺服器錯誤: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"生成報告時發生內部錯誤: {e}")
