@@ -197,6 +197,24 @@ async def lifespan(app: FastAPI):
     prewarm_thread = threading.Thread(target=_prewarm_heavy_modules, daemon=True)
     prewarm_thread.start()
 
+    # 5. JULES V7 (微服務重構): 啟動核心服務的 Redis 監聽器
+    from services import processor_service
+    processor_listener_thread = threading.Thread(
+        target=processor_service.start_redis_processor_listener,
+        daemon=True
+    )
+    processor_listener_thread.start()
+    log.info("🚀 已啟動 Processor Service 的 Redis 監聽器。")
+
+    from services import analyzer_service
+    analyzer_listener_thread = threading.Thread(
+        target=analyzer_service.start_redis_analyzer_listener,
+        daemon=True
+    )
+    analyzer_listener_thread.start()
+    log.info("🚀 已啟動 Analyzer Service 的 Redis 監聽器。")
+
+
     yield # 應用程式在此處運行
 
     # --- 應用程式關閉時 ---

@@ -88,86 +88,108 @@ async def get_completed_downloads(db: DBClient = Depends(get_db)):
 class DownloadRequest(BaseModel):
     ids: List[int]
 
-# --- 背景任務函式 (重構後) ---
+import uuid
+import datetime
+import redis
 
-def _run_download_blocking_task(url_id: int, db_client, queue: asyncio.Queue, loop: asyncio.AbstractEventLoop):
+# --- V7 微服務重構 ---
+
+REDIS_HOST = "localhost"
+REDIS_PORT = 6379
+DOWNLOAD_COMPLETE_CHANNEL = "tasks:download_complete"
+
+def publish_download_complete(task_id: str, status: str, file_path: str, original_filename: str):
     """
-    執行單一檔案下載的同步阻塞部分。
-    現在透過 queue 和 loop 來發送非同步通知。
+    將下載完成的訊息發布到 Redis。
     """
-    log.info(f"背景任務：開始處理下載 URL ID: {url_id}")
-    final_status = 'failed' # 預設為失敗
-    status_message = ''
-    result_payload = {}
+    redis_client = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=True)
+
+    payload = {
+        "file_path": file_path,
+        "original_filename": original_filename,
+    }
+
+    message = {
+        "task_id": task_id,
+        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "source_service": "downloader_service",
+        "status": "success" if status == "download_complete" else "failure",
+        "payload": payload
+    }
 
     try:
-        # 步驟 1: 獲取所有命名所需的資訊
-        url_record = db_client.get_url_by_id(url_id)
-        if not url_record:
-            raise ValueError(f"在資料庫中找不到 ID 為 {url_id} 的 URL。")
+        redis_client.publish(DOWNLOAD_COMPLETE_CHANNEL, json.dumps(message))
+        log.info(f"[Downloader] 已將任務 {task_id} 的下載完成訊息發布至頻道 '{DOWNLOAD_COMPLETE_CHANNEL}'")
+    except Exception as e:
+        log.error(f"[Downloader] 發布訊息至 Redis 時失敗: {e}", exc_info=True)
 
-        url_to_download = url_record['url']
-        author = url_record['author']
-        message_date = url_record['message_date']
-        message_time = url_record['message_time']
-        log.info(f"背景任務：準備從 {url_to_download} 下載 (ID: {url_id})...")
 
-        # 步驟 2: 執行智慧化下載
-        from tools.drive_downloader import download_file
+def _run_download_blocking_task(task_id: str, db_client: DBClient, queue: asyncio.Queue, loop: asyncio.AbstractEventLoop):
+    """
+    (V7 重構後) 執行單一檔案下載的同步阻塞部分。
+    現在由 task_id 驅動，並在成功後發布 Redis 訊息。
+    """
+    log.info(f"背景任務：開始處理下載任務 ID: {task_id}")
+    final_status = 'download_failed'
+
+    try:
+        task_record = db_client.get_task_status(task_id)
+        if not task_record:
+            raise ValueError(f"在資料庫中找不到任務 ID 為 {task_id} 的任務。")
+
+        payload = json.loads(task_record['payload'])
+        url_to_download = payload['url']
+        original_filename_from_title = payload.get('title', 'untitled')
+
+        log.info(f"背景任務：準備從 {url_to_download} 下載 (任務 ID: {task_id})...")
+
+        from tools.universal_downloader import download_file # 使用通用下載器
         download_dir = SRC_DIR.parent / "downloads"
 
-        downloaded_path = download_file(
+        # Universal downloader 返回 (檔案路徑, 原始檔名) 或 (None, None)
+        downloaded_path, original_filename = download_file(
             url=url_to_download,
-            output_dir=str(download_dir),
-            url_id=url_id,
-            author=author,
-            message_date=message_date,
-            message_time=message_time
+            output_dir=str(download_dir)
         )
 
-        # 步驟 3: 根據下載結果更新資料庫
         if downloaded_path:
-            final_status = 'completed'
-            status_message = '下載成功'
-            result_payload = {"local_path": downloaded_path}
-            db_client.update_url(url_id, {"status": final_status, "local_path": downloaded_path, "status_message": status_message})
-            log.info(f"背景任務：URL ID {url_id} 下載成功，路徑: {downloaded_path}")
+            final_status = 'download_complete'
+            result_payload = {"local_path": downloaded_path, "original_filename": original_filename}
+            db_client.update_task_status(task_id, final_status, result_payload)
+            log.info(f"背景任務：任務 {task_id} 下載成功，路徑: {downloaded_path}")
+
+            # 發射信號彈！
+            publish_download_complete(task_id, final_status, downloaded_path, original_filename)
         else:
-            final_status = 'download_failed'
-            status_message = '下載失敗，請檢查日誌'
-            result_payload = {"error": status_message}
-            db_client.update_url(url_id, {"status": final_status, "status_message": status_message})
-            log.error(f"背景任務：URL ID {url_id} 下載失敗。")
+            raise Exception("通用下載器未能成功下載檔案。")
 
     except Exception as e:
-        log.error(f"背景任務：處理 URL ID {url_id} 時發生嚴重錯誤: {e}", exc_info=True)
-        final_status = 'failed'
-        status_message = f"發生未預期錯誤: {e}"
-        result_payload = {"error": str(e)}
-        db_client.update_url(url_id, {"status": final_status, "status_message": status_message})
+        error_message = f"處理下載任務 {task_id} 時發生嚴重錯誤: {e}"
+        log.error(error_message, exc_info=True)
+        db_client.update_task_status(task_id, 'download_failed', {"error": error_message})
     finally:
-        # 步驟 4: 無論成功或失敗，都將通知放入佇列
-        # 確保我們有最新的資料
-        final_record = db_client.get_url_by_id(url_id)
+        # WebSocket 通知仍然保留，以便 UI 即時更新
+        final_record = db_client.get_task_status(task_id)
         notification_msg = {
             "type": "task_update",
             "task_type": "download",
-            "task_id": str(url_id),
+            "task_id": str(task_id),
             "status": final_status,
-            "result": final_record # 回傳整個紀錄，讓前端可以更新所有欄位
+            "result": final_record
         }
         asyncio.run_coroutine_threadsafe(queue.put(notification_msg), loop)
-        log.info(f"背景任務：已為 URL ID {url_id} 發送完成通知至佇列。")
+        log.info(f"背景任務：已為任務 ID {task_id} 發送完成通知至佇列。")
 
 
-async def run_task_wrapper(task_id: int, semaphore: asyncio.Semaphore, blocking_func, queue: asyncio.Queue, loop: asyncio.AbstractEventLoop, **kwargs):
+async def run_task_wrapper(task_id: str, semaphore: asyncio.Semaphore, blocking_func, queue: asyncio.Queue, loop: asyncio.AbstractEventLoop, **kwargs):
     """
-    一個通用的非同步包裝函式，用於控制併發並執行阻塞的任務。
+    (V7 修改) 通用非同步包裝函式，現在使用字串類型的 task_id。
     """
     async with semaphore:
         log.info(f"任務 {task_id} 已取得信號量，準備執行...")
         try:
-            partial_func = functools.partial(blocking_func, url_id=task_id, queue=queue, loop=loop, **kwargs)
+            # 修改了這裡，傳遞 task_id 而不是 url_id
+            partial_func = functools.partial(blocking_func, task_id=task_id, queue=queue, loop=loop, **kwargs)
             await loop.run_in_executor(None, partial_func)
         except Exception as e:
             log.error(f"包裝函式捕獲到未預期的錯誤 (任務 {task_id}): {e}", exc_info=True)
@@ -183,7 +205,8 @@ async def start_downloads(
     db: DBClient = Depends(get_db)
 ):
     """
-    (V4 優化後) 接收要下載的 URL ID 列表，並使用共享的 DBClient 實例來建立背景任務。
+    (V7 重構後) 接收 URL ID 列表，為每個 ID 建立一個新的、獨立的任務，
+    並使用新的 task_id 啟動背景下載。
     """
     url_ids = payload.ids
     if not url_ids:
@@ -191,7 +214,6 @@ async def start_downloads(
 
     log.info(f"API: 收到 {len(url_ids)} 個項目的下載請求。")
 
-    # 從 app.state 獲取佇列和信號量
     semaphore = request.app.state.download_semaphore
     queue = request.app.state.notification_queue
     loop = asyncio.get_running_loop()
@@ -199,27 +221,40 @@ async def start_downloads(
     if not semaphore or not queue:
         raise HTTPException(status_code=500, detail="伺服器狀態未完全初始化（缺少佇列或信號量）。")
 
-    try:
-        # V4 優化：使用透過 Depends 注入的共享 db 實例，而不是全域變數
-        for url_id in url_ids:
-            db.update_url(url_id, {"status": "downloading", "status_message": "已加入下載佇列"})
-        log.info(f"API: 已將 {len(url_ids)} 個 URL 的狀態更新為 'downloading'。")
+    created_tasks_count = 0
+    for url_id in url_ids:
+        url_record = db.get_url_by_id(url_id)
+        if not url_record:
+            log.warning(f"找不到 URL ID: {url_id}，已跳過。")
+            continue
 
-        # 為每個 URL 新增一個背景任務
-        for url_id in url_ids:
-            background_tasks.add_task(
-                run_task_wrapper,
-                task_id=url_id,
-                semaphore=semaphore,
-                blocking_func=_run_download_blocking_task,
-                queue=queue,
-                loop=loop,
-                db_client=db  # V4 優化：將共享的 db 實例傳遞到背景任務中
-            )
+        # 為每個下載請求建立一個新的、唯一的任務
+        task_id = str(uuid.uuid4())
+        task_payload = {
+            "url": url_record['url'],
+            "author": url_record['author'],
+            "message_date": url_record['message_date'],
+            "message_time": url_record['message_time'],
+            "title": url_record['title'],
+            "original_url_id": url_id # 保留原始關聯
+        }
 
-        return JSONResponse(
-            content={"message": f"已成功為 {len(url_ids)} 個項目建立背景下載任務。"}
+        # 在資料庫中建立新任務
+        db.add_task(task_id, json.dumps(task_payload), task_type='download', status='pending')
+        log.info(f"已為 URL ID {url_id} 建立新任務，任務 ID: {task_id}")
+
+        # 使用新的 task_id 啟動背景任務
+        background_tasks.add_task(
+            run_task_wrapper,
+            task_id=task_id,
+            semaphore=semaphore,
+            blocking_func=_run_download_blocking_task,
+            queue=queue,
+            loop=loop,
+            db_client=db
         )
-    except Exception as e:
-        log.error(f"API: 啟動下載任務時發生錯誤: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="啟動下載任務時發生伺服器內部錯誤。")
+        created_tasks_count += 1
+
+    return JSONResponse(
+        content={"message": f"已成功為 {created_tasks_count} 個項目建立背景下載任務。"}
+    )

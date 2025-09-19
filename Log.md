@@ -1,3 +1,42 @@
+## 1106號 - 以 Redis 為核心的非同步微服務架構重構 (2025-09-19)
+
+### 動機
+為了從根本上解決系統服務間的緊耦合問題、提升系統的擴展性與可靠性，本次任務旨在將整個系統的核心工作流，從同步的 API 呼叫和背景任務模式，重構為一個以 Redis 訊息佇列為中心的、完全非同步的微服務架構。
+
+### 核心變更
+
+#### 1. 引入 Redis 非同步工作流
+- **建立核心通道**: 建立了 `tasks:download_complete` 和 `tasks:processing_complete` 兩個 Redis `Pub/Sub` 通道，作為服務間通訊的神經中樞。
+- **改造 `downloader_service` (生產者)**:
+    - 重構了下載流程，使其在下載成功後，不再直接結束，而是向 `tasks:download_complete` 頻道發布一個包含 `task_id` 和檔案路徑的標準化 JSON 訊息。
+    - 統一了任務模型，確保下載任務在啟動時會建立一個唯一的 `task_id`，並以此 ID 貫穿整個工作流。
+- **改造 `processor_service` (消費者/生產者)**:
+    - 建立了一個新的獨立服務模組 `src/services/processor_service.py`。
+    - 該服務在背景執行緒中永久監聽 `tasks:download_complete` 頻道。
+    - 收到訊息後，執行內容提取，並將結果附加到 `payload` 中，再發布一條新訊息到 `tasks:processing_complete` 頻道。
+- **改造 `analyzer_service` (消費者)**:
+    - 同樣建立了獨立的服務模組 `src/services/analyzer_service.py`。
+    - 該服務在背景監聽 `tasks:processing_complete` 頻道，收到訊息後執行 AI 分析，並將最終結果更新回資料庫中對應 `task_id` 的任務記錄。
+    - 徹底解除了 AI 分析與舊有 `analysis_tasks` 表的耦合，使其完全融入新的統一任務模型。
+
+#### 2. 遷移剩餘服務為獨立微服務
+- **遵循代理模式**: 根據專案中已有的 `key_service` 成功範例，將 `backup_service` (`page5`) 和 `ingestion_service` (`page1`) 也重構為獨立的微服務。
+- **建立新服務**:
+    - `services/backup_service/main.py`: 包含備份邏輯的獨立 FastAPI 應用。
+    - `services/ingestion_service/main.py`: 包含 URL 提取、總覽、匯出邏輯的獨立 FastAPI 應用。
+- **改造 API 閘道**: 將 `src/api/routes/page5_backup.py` 和 `src/api/routes/page1.py` 中的 API 端點改造為純粹的代理，它們會從服務註冊中心查找對應服務的位址並轉發請求。
+
+#### 3. 建立全面的自動化測試
+- **端到端流程測試**: 建立了 `tests/test_full_pipeline_redis.py`，使用 `fakeredis` 在記憶體中完整地模擬並驗證了「下載 -> 處理 -> 分析」的整個 Redis 訊息傳遞鏈。
+- **獨立服務測試**: 為新建立的 `backup_service` 和 `ingestion_service` 編寫了基於 `TestClient` 的單元/整合測試，確保其自身邏輯的正確性。
+- **代理層測試**: 為 `key_service` 的代理路由 `page6_keys.py` 編寫了測試，確保代理轉發邏輯的正確性。
+
+### 成果
+本次大規模重構成功地將一個耦合的單體應用，轉型為一個現代化的、以訊息佇列為核心的微服務架構。
+- **解耦與擴展性**: 核心服務之間不再直接依賴，可以獨立部署、擴展和失敗，大幅提升了系統的健壯性。
+- **非同步與高效能**: 使用者觸發的長時間任務可以立即獲得回應，所有繁重工作都在後端非同步處理，顯著改善了使用者體驗。
+- **可測試性**: 透過為每個新元件編寫高品質的自動化測試，確保了此次大規模重構的穩定性和正確性，為未來的開發和維護奠定了堅實的基礎。
+
 ## 1105號 - PoC: 建立微服務與其健壯的自動化測試流程 (2025-09-19 17:24)
 
 ### 動機
