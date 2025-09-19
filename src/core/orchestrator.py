@@ -90,14 +90,25 @@ def launch_microservice(service_path: Path):
     else:
         log.info(f"[{log_prefix}] 虛擬環境已存在，跳過建立。")
 
-    # 步驟 2: 安裝依賴
-    if req_file.exists():
+    # 步驟 2: 安裝依賴 (優化後)
+    lock_file = venv_dir / ".install_lock"
+    should_install = True
+    if lock_file.exists() and req_file.exists():
+        # 如果 lock 檔案的修改時間比 requirements.txt 新，則表示依賴未變更
+        if lock_file.stat().st_mtime > req_file.stat().st_mtime:
+            log.info(f"[{log_prefix}] 依賴未變更，跳過安裝。")
+            should_install = False
+
+    if should_install and req_file.exists():
+        log.info(f"[{log_prefix}] 正在安裝或更新依賴...")
         run_command([
             "uv", "pip", "install",
             "-p", str(python_exec),
             "-r", str(req_file)
         ], log_prefix=log_prefix)
-    else:
+        # 成功安裝後，建立或更新 lock 檔案
+        lock_file.touch()
+    elif not req_file.exists():
         log.warning(f"[{log_prefix}] 找不到 requirements.txt，跳過依賴安裝。")
 
     # 步驟 3: 啟動服務

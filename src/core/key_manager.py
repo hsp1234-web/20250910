@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 from typing import List, Dict, Optional, Any, Tuple
 from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # --- 路徑修正與設定 ---
 SRC_DIR = Path(__file__).resolve().parent.parent
@@ -63,31 +64,31 @@ def _hash_key(key: str) -> str:
 def _validate_single_key(api_key: str) -> bool:
     """
     呼叫 gemini_processor.py 工具來驗證單一金鑰的有效性。
-    此函式保持不變，但注意它包含重試機制。
+    此版本已移除內部重試迴圈，僅執行單次驗證。
     """
     tool_script_path = ROOT_DIR / "src" / "tools" / "gemini_processor.py"
     cmd = [sys.executable, str(tool_script_path), "--command=validate_key"]
     env = os.environ.copy()
     env["GOOGLE_API_KEY"] = api_key
-    max_retries = 3
-    retry_delay_seconds = 2
 
-    for attempt in range(max_retries):
-        try:
-            result = subprocess.run(
-                cmd, capture_output=True, text=True, encoding='utf-8',
-                env=env, check=False, timeout=45
-            )
-            if result.returncode == 0:
-                return True
-            print(f"金鑰驗證嘗試 {attempt + 1}/{max_retries} 失敗。錯誤: {result.stderr or result.stdout}", file=sys.stderr)
-        except subprocess.TimeoutExpired:
-            print(f"金鑰驗證嘗試 {attempt + 1}/{max_retries} 超時。", file=sys.stderr)
-        except Exception as e:
-            print(f"金鑰驗證嘗試 {attempt + 1}/{max_retries} 發生例外: {e}", file=sys.stderr)
-        if attempt < max_retries - 1:
-            time.sleep(retry_delay_seconds)
-    return False
+    try:
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, encoding='utf-8',
+            env=env, check=False, timeout=20  # 縮短單次超時
+        )
+        if result.returncode == 0:
+            return True
+        else:
+            # 在背景執行緒中，只記錄簡短的錯誤訊息
+            error_msg = (result.stderr or result.stdout or "未知錯誤").strip()
+            # print(f"金鑰驗證失敗: {error_msg}", file=sys.stderr)
+            return False
+    except subprocess.TimeoutExpired:
+        # print(f"金鑰驗證超時。", file=sys.stderr)
+        return False
+    except Exception:
+        # print(f"金鑰驗證發生例外: {e}", file=sys.stderr)
+        return False
 
 # --- 公開 API (介面維持不變) ---
 
@@ -141,14 +142,27 @@ def delete_key(key_hash: str) -> bool:
     return affected_rows > 0
 
 def validate_all_keys() -> List[Dict[str, Any]]:
-    """重新驗證所有已儲存的金鑰。"""
+    """
+    並行重新驗證所有已儲存的金鑰，以提升效率。
+    """
     keys_to_validate = _execute_query("SELECT id, key_value FROM api_keys", fetch='all')
+    if not keys_to_validate:
+        return []
 
-    for key in keys_to_validate:
-        is_valid = _validate_single_key(key["key_value"])
-        validation_time = datetime.now().isoformat()
-        query = "UPDATE api_keys SET is_valid = ?, last_validated_at = ? WHERE id = ?"
-        _execute_query(query, (is_valid, validation_time, key["id"]))
+    # 使用執行緒池並行處理所有金鑰的驗證
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        # 建立 future 到 key_id 的映射
+        future_to_key_id = {executor.submit(_validate_single_key, key["key_value"]): key["id"] for key in keys_to_validate}
+
+        for future in as_completed(future_to_key_id):
+            key_id = future_to_key_id[future]
+            try:
+                is_valid = future.result()
+                validation_time = datetime.now().isoformat()
+                query = "UPDATE api_keys SET is_valid = ?, last_validated_at = ? WHERE id = ?"
+                _execute_query(query, (is_valid, validation_time, key_id))
+            except Exception as exc:
+                print(f"處理金鑰 ID {key_id} 的驗證時產生錯誤: {exc}", file=sys.stderr)
 
     return get_all_keys()
 

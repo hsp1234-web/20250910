@@ -89,3 +89,8 @@ async def serve_page9(request: Request):
 @router.get("/page10_service_test.html", response_class=HTMLResponse)
 async def serve_page10(request: Request):
     return templates.TemplateResponse("page10_service_test.html", {"request": request})
+
+@router.get("/line-extractor", response_class=HTMLResponse)
+async def serve_line_extractor(request: Request):
+    """ 提供獨立的 LINE 貼文批量整理工具頁面。 """
+    return templates.TemplateResponse("line_extractor.html", {"request": request})

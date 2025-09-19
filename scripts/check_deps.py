@@ -26,6 +26,7 @@ PACKAGE_TO_MODULE_MAP = {
     "psutil": "psutil",
     "requests": "requests",
     "pydub": "pydub",
+    "PyMuPDF": "fitz",
 }
 
 def check_dependency(package_name: str) -> bool:

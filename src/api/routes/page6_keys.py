@@ -65,10 +65,10 @@ async def remove_key(key_hash: str):
         raise HTTPException(status_code=404, detail="找不到具有該雜湊值的金鑰。")
 
 @router.post("/validate", summary="重新驗證所有金鑰")
-async def validate_all_stored_keys():
+def validate_all_stored_keys():
     """
     觸發對金鑰池中所有金鑰的重新驗證。
-    這是一個耗時操作，客戶端應準備等待。
+    這是一個耗時操作，會由 FastAPI 在背景執行緒中處理，不會阻塞主事件迴圈。
     """
     try:
         validated_keys = key_manager.validate_all_keys()
