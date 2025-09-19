@@ -248,7 +248,7 @@ async def add_server_port_to_state(request: Request, call_next):
 
 # --- 整合模組化路由 ---
 from core import config_manager
-from api.routes import ui, page1, page2_downloader, page3_processor, page4_analyzer, page5_backup, page6_keys, page7_prompts, page8_details, page9_dashboard, page10_test
+from api.routes import ui, page1, page2_downloader, page3_processor, page4_analyzer, page5_backup, page6_keys, page7_prompts, page8_details, page9_dashboard
 
 # --- JULES (2025-09-15): 在應用程式啟動時載入設定 ---
 # 將設定載入到 app.state 中，使其在整個應用程式中可用。
@@ -269,7 +269,6 @@ app.include_router(page6_keys.router, prefix="/api/keys", tags=["API: 金鑰管�
 app.include_router(page7_prompts.router, prefix="/api", tags=["API: 提示詞管理"])
 app.include_router(page8_details.router, prefix="/api", tags=["API: 檔案總覽"])
 app.include_router(page9_dashboard.router, prefix="/api/dashboard", tags=["API: 績效儀表板"])
-app.include_router(page10_test.router, prefix="/api/service_test", tags=["API: 微服務測試"])
 
 # --- 路徑設定 ---
 # 新的上傳檔案儲存目錄
