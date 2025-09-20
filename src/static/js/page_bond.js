@@ -15,7 +15,13 @@ document.addEventListener('DOMContentLoaded', () => {
             console.log("正在從主應用程式獲取服務註冊資訊...");
             const response = await fetch('/api/service_registry');
             if (!response.ok) {
-                throw new Error('無法獲取服務註冊資訊。');
+                throw new Error(`無法獲取服務註冊資訊 (狀態: ${response.status})。`);
+            }
+            const contentType = response.headers.get("content-type");
+            if (!contentType || !contentType.includes("application/json")) {
+                // 嘗試讀取文字內容以幫助除錯
+                const textContent = await response.text();
+                throw new Error(`回應的 Content-Type 不是 JSON。收到的內容: ${textContent.substring(0, 100)}...`);
             }
             const registry = await response.json();
             const bondServiceInfo = registry['bond_data_service'];
@@ -86,9 +92,33 @@ document.addEventListener('DOMContentLoaded', () => {
             const rawData = await response.json();
 
             if (rawData.length === 0) {
-                renderChart(chartId, label, [], []); // 畫一個空圖表
-                statusEl.textContent = '尚無資料';
-                return;
+                // 如果沒有資料，自動觸發一次抓取
+                console.log(`指標 '${id}' 在資料庫中沒有資料，正在觸發自動抓取...`);
+                statusEl.textContent = '首次載入，正在從遠端更新...';
+
+                const fetchResponse = await fetch(`${baseUrl}/fetch/${id}`, { method: 'POST' });
+                if (!fetchResponse.ok) {
+                    const errorResult = await fetchResponse.json().catch(() => ({ detail: '無法解析錯誤訊息' }));
+                    throw new Error(`從 /fetch/${id} 觸發抓取失敗: ${errorResult.detail}`);
+                }
+
+                // 抓取成功後，重新獲取一次數據
+                console.log(`指標 '${id}' 伺服器端抓取觸發成功，正在重新獲取數據...`);
+                const newDataResponse = await fetch(`${baseUrl}/data/${id}`);
+                if (!newDataResponse.ok) {
+                    throw new Error(`第二次從 /data/${id} 獲取數據時網路回應不正常: ${newDataResponse.statusText}`);
+                }
+                const newRawData = await newDataResponse.json();
+
+                // 重新賦值並繼續執行
+                rawData = newRawData;
+
+                if (rawData.length === 0) {
+                    console.warn(`指標 '${id}' 在嘗試更新後依然沒有數據。`);
+                    renderChart(chartId, label, [], []);
+                    statusEl.textContent = '尚無資料';
+                    return;
+                }
             }
 
             const labels = rawData.map(d => d.date);

@@ -97,3 +97,35 @@ def test_ping_endpoint(bond_service):
     assert "Bond Data Service is running" in data.get("message", ""), "回應訊息不符合預期"
 
     print("Ping 端點測試成功！")
+
+
+def test_get_data_endpoint(bond_service):
+    """
+    測試 /data/{indicator} 端點，確保它能返回正確格式的資料。
+    """
+    indicator = "gdp"
+    data_url = f"{bond_service}/data/{indicator}"
+    print(f"向服務 {data_url} 發送請求...")
+
+    response = requests.get(data_url)
+
+    # 1. 驗證狀態碼
+    assert response.status_code == 200, f"預期狀態碼為 200，但收到 {response.status_code}"
+
+    # 2. 驗證回應標頭
+    assert "application/json" in response.headers.get("Content-Type", ""), "回應的 Content-Type 應為 application/json"
+
+    # 3. 驗證回應內容
+    data = response.json()
+    assert isinstance(data, list), f"預期回應是一個列表，但收到 {type(data)}"
+
+    # 4. (可選) 如果有資料，驗證資料結構
+    if data:
+        first_item = data[0]
+        assert "date" in first_item, "資料項目中應包含 'date' 鍵"
+        assert "value" in first_item, "資料項目中應包含 'value' 鍵"
+        print(f"成功驗證了 {len(data)} 筆資料的結構。")
+    else:
+        print("回應為空列表，這是一個有效的回應。")
+
+    print(f"/data/{indicator} 端點測試成功！")
