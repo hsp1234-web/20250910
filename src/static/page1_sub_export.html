@@ -20,6 +20,14 @@
         </div>
 
         <div class="panel">
+            <h3>匯出樣式 (僅適用於 PDF/HTML)</h3>
+            <div class="style-options">
+                <label><input type="radio" name="export_style" value="cards" checked> 卡片樣式 (適合少量資料)</label>
+                <label><input type="radio" name="export_style" value="table"> 表格樣式 (適合大量資料)</label>
+            </div>
+        </div>
+
+        <div class="panel">
             <h2>請選擇您想要的匯出格式:</h2>
             <div class="export-grid">
                 <button class="export-button" data-format="pdf">匯出 PDF</button>
@@ -68,8 +76,16 @@
                 button.addEventListener('click', () => {
                     const format = button.dataset.format;
                     let exportUrl = `/api/page1/export?format=${format}`;
+
+                    // 附加日期範圍參數
                     if (startDate !== '未設定') exportUrl += `&start_date=${startDate}`;
                     if (endDate !== '未設定') exportUrl += `&end_date=${endDate}`;
+
+                    // 僅在格式為 PDF 或 HTML 時附加樣式參數
+                    if (format === 'pdf' || format === 'html') {
+                        const selectedStyle = document.querySelector('input[name="export_style"]:checked').value;
+                        exportUrl += `&style=${selectedStyle}`;
+                    }
 
                     window.open(exportUrl, '_blank');
                 });

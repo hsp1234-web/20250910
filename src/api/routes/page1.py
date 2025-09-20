@@ -83,29 +83,68 @@ async def get_overview_data(
 
 from weasyprint import HTML
 from docx import Document
+from docx.shared import Pt
+from docx.oxml.ns import qn
+from docx.opc.constants import RELATIONSHIP_TYPE as RT
+from docx.oxml import OxmlElement
+
+def add_hyperlink(paragraph, text, url):
+    """
+    在段落中新增一個超連結。
+    :param paragraph: 要新增超連結的 `docx.text.paragraph.Paragraph` 物件。
+    :param text: 超連結的顯示文字。
+    :param url: 超連結的目標 URL。
+    :return: 新增的 `docx.text.run.Run` 物件。
+    """
+    # 獲取文件 part
+    part = paragraph.part
+    # 建立一個唯一的關聯 ID (rId)
+    r_id = part.relate_to(url, RT.HYPERLINK, is_external=True)
+
+    # 建立 <w:hyperlink> 元素
+    hyperlink = OxmlElement('w:hyperlink')
+    hyperlink.set(qn('r:id'), r_id)
+
+    # 建立 <w:r> (Run) 元素
+    new_run = OxmlElement('w:r')
+
+    # 建立 <w:rPr> (Run Properties) 元素並設定樣式
+    rPr = OxmlElement('w:rPr')
+    rStyle = OxmlElement('w:rStyle')
+    rStyle.set(qn('w:val'), 'Hyperlink') # 使用 Word 的內建超連結樣式
+    rPr.append(rStyle)
+    new_run.append(rPr)
+
+    # 設定超連結的顯示文字
+    new_run.text = text
+    hyperlink.append(new_run)
+
+    # 將超連結元素新增到段落中
+    paragraph._p.append(hyperlink)
+
+    return new_run
 
 @router.get("/api/page1/export")
 async def export_data(
-    request: Request, # V36.8: 加入 request 以便使用 templates
+    request: Request,
     format: str,
     start_date: Optional[str] = Query(None),
     end_date: Optional[str] = Query(None),
+    style: str = Query('cards'), # 新增 style 參數
     db: DBClient = Depends(get_db)
 ):
     """
-    (V36.8 更新) 使用 DBClient 獲取資料並根據指定格式匯出。
-    - 新增 HTML 和 PDF 匯出功能。
-    - HTML/PDF 使用卡片式佈局。
-    - 修正了 Excel 匯出的依賴問題。
+    (V38 效能優化) 使用 DBClient 獲取資料並根據指定格式匯出。
+    - 更新 DOCX 匯出功能，使其包含所有欄位並支援超連結。
+    - HTML/PDF 現在會顯示完整的卡片資訊。
+    - 新增 HTML/PDF 的表格樣式選項，以應對大量資料匯出的效能問題。
     """
     try:
         # 獲取資料
         results = db.get_filtered_urls(start_date=start_date, end_date=end_date)
-        # V36.8: 直接使用字典列表，不再轉換為 DataFrame，以便範本處理
-        # 確保 'message_date' 欄位存在
+        # 組合日期和時間欄位
         for r in results:
-            if 'date' in r:
-                r['message_date'] = r.pop('date')
+            r['datetime_str'] = f"{r.get('message_date', '')} {r.get('message_time', '')}".strip()
 
     except Exception as e:
         log.error(f"匯出時讀取資料庫失敗: {e}", exc_info=True)
@@ -113,11 +152,45 @@ async def export_data(
              raise HTTPException(status_code=503, detail=f"資料庫服務通訊失敗: {e}")
         raise HTTPException(status_code=500, detail="讀取資料庫失敗")
 
-    if format == "excel":
+    # 根據匯出格式與樣式準備內容
+    if format in ["html", "pdf"]:
+        template_name = "export_table.html" if style == "table" else "export_cards.html"
+        html_content = templates.TemplateResponse(
+            template_name,
+            {
+                "request": request,
+                "data": results,
+                "start_date": start_date,
+                "end_date": end_date
+            }
+        ).body.decode("utf-8")
+
+        if format == "html":
+            return Response(
+                content=html_content,
+                media_type="text/html",
+                headers={"Content-Disposition": "attachment; filename=export.html"}
+            )
+
+        if format == "pdf":
+            pdf_output = BytesIO()
+            HTML(string=html_content).write_pdf(pdf_output)
+            pdf_output.seek(0)
+            return Response(
+                pdf_output.read(),
+                media_type="application/pdf",
+                headers={"Content-Disposition": "attachment; filename=export.pdf"}
+            )
+
+    elif format == "excel":
         df = pd.DataFrame(results)
+        # 重新排序與命名欄位以符合需求
+        df_export = df[['id', 'title', 'author', 'datetime_str', 'status', 'url']]
+        df_export.columns = ['ID', '標題', '作者', '時間', '狀態', '連結']
+
         output = BytesIO()
         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-            df.to_excel(writer, index=False, sheet_name='資料匯出')
+            df_export.to_excel(writer, index=False, sheet_name='資料匯出')
         output.seek(0)
         return Response(
             output.read(),
@@ -126,27 +199,15 @@ async def export_data(
         )
     elif format == "csv":
         df = pd.DataFrame(results)
-        output = df.to_csv(index=False, encoding='utf-8-sig')
+        # 重新排序與命名欄位以符合需求
+        df_export = df[['id', 'title', 'author', 'datetime_str', 'status', 'url']]
+        df_export.columns = ['ID', '標題', '作者', '時間', '狀態', '連結']
+
+        output = df_export.to_csv(index=False, encoding='utf-8-sig')
         return Response(
             content=output,
             media_type="text/csv",
             headers={"Content-Disposition": "attachment; filename=export.csv"}
-        )
-    elif format == "html":
-        # V36.8: 實作 HTML 匯出
-        html_content = templates.TemplateResponse(
-            "export_cards.html",
-            {
-                "request": request,
-                "data": results,
-                "start_date": start_date,
-                "end_date": end_date
-            }
-        ).body.decode("utf-8")
-        return Response(
-            content=html_content,
-            media_type="text/html",
-            headers={"Content-Disposition": "attachment; filename=export.html"}
         )
     elif format == "pdf":
         # V36.8: 實作 PDF 匯出
@@ -161,6 +222,7 @@ async def export_data(
         ).body.decode("utf-8")
 
         pdf_output = BytesIO()
+        # 使用 weasyprint 將 HTML 轉為 PDF，它會自動處理超連結
         HTML(string=html_content).write_pdf(pdf_output)
         pdf_output.seek(0)
 
@@ -170,7 +232,7 @@ async def export_data(
             headers={"Content-Disposition": "attachment; filename=export.pdf"}
         )
     elif format == "docx":
-        # V36.8.2: 優化 DOCX 匯出標題
+        # V37.5: 全面改造 DOCX 匯出功能
         document = Document()
         document.add_heading('資料總覽報告', level=1)
 
@@ -178,21 +240,37 @@ async def export_data(
         p = document.add_paragraph()
         p.add_run('篩選範圍: ').bold = True
         p.add_run(f"{start_date or '所有時間'} 至 {end_date or '所有時間'}")
+        document.add_paragraph() # 新增一個間距
 
-        # 建立表格
-        table = document.add_table(rows=1, cols=3)
+        # 建立包含所有欄位的表格
+        table = document.add_table(rows=1, cols=6)
         table.style = 'Table Grid'
+        table.autofit = True
+
+        # 設定表頭
         hdr_cells = table.rows[0].cells
-        hdr_cells[0].text = '日期'
-        hdr_cells[1].text = '作者'
-        hdr_cells[2].text = 'URL'
+        headers = ['ID', '標題', '作者', '時間', '狀態', '連結']
+        for i, header_text in enumerate(headers):
+            hdr_cells[i].text = header_text
+            # V37.5: 讓表頭文字自動換行
+            hdr_cells[i].paragraphs[0].runs[0].font.bold = True
 
         # 填入資料
         for item in results:
             row_cells = table.add_row().cells
-            row_cells[0].text = item.get('message_date', 'N/A')
-            row_cells[1].text = item.get('author', 'N/A')
-            row_cells[2].text = item.get('url', 'N/A')
+            row_cells[0].text = str(item.get('id', ''))
+            row_cells[1].text = item.get('title', 'N/A')
+            row_cells[2].text = item.get('author', 'N/A')
+            row_cells[3].text = item.get('datetime_str', 'N/A')
+            row_cells[4].text = item.get('status', 'N/A')
+
+            # 新增超連結
+            url = item.get('url')
+            if url:
+                # 清空儲存格預設段落
+                cell_paragraph = row_cells[5].paragraphs[0]
+                cell_paragraph.clear()
+                add_hyperlink(cell_paragraph, url, url)
 
         # 儲存至記憶體
         output = BytesIO()

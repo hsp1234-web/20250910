@@ -146,7 +146,8 @@ def initialize_database(conn: sqlite3.Connection = None):
                 extracted_text TEXT
             )
             ''')
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_url ON extracted_urls (url)")
+            # 方案 A: 建立唯一索引以優化 URL 去重效能
+            cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS uidx_url ON extracted_urls (url)")
             # Jules @ 2025-09-17: 為狀態查詢優化新增索引
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_extracted_urls_status ON extracted_urls (status)")
 
@@ -884,7 +885,8 @@ def get_analysis_task_by_file_id(file_id: int) -> dict | None:
 
 def add_new_urls(parsed_data: list[dict], source_text: str) -> int:
     """
-    (V4 優化新增) 將解析後的結構化資料儲存到資料庫，並進行去重。
+    (V38 效能優化) 將解析後的結構化資料儲存到資料庫。
+    使用 INSERT OR IGNORE 和 UNIQUE 索引來高效處理重複資料。
     返回新增的紀錄數量。
     """
     if not parsed_data:
@@ -897,36 +899,36 @@ def add_new_urls(parsed_data: list[dict], source_text: str) -> int:
         return 0
 
     try:
+        # 延遲匯入以避免循環依賴
+        from core.time_utils import get_current_taipei_time_iso
+        created_at_iso = get_current_taipei_time_iso()
+
+        data_to_insert = [
+            (item['url'], item['author'], item['date'], item['time'], item.get('title', '無標題'), source_text, created_at_iso)
+            for item in parsed_data
+        ]
+
         with conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT url FROM extracted_urls")
-            existing_urls = {row[0] for row in cursor.fetchall()}
 
-            new_items = []
-            for item in parsed_data:
-                if item['url'] not in existing_urls:
-                    new_items.append(item)
-                    existing_urls.add(item['url'])
+            # 記錄操作前的總變更數
+            before_changes = conn.total_changes
 
-            if not new_items:
-                log.info("所有解析出的網址都已存在於資料庫中，無需新增。")
-                return 0
-
-            # 延遲匯入以避免循環依賴
-            from core.time_utils import get_current_taipei_time_iso
-            created_at_iso = get_current_taipei_time_iso()
-            data_to_insert = [
-                (item['url'], item['author'], item['date'], item['time'], item.get('title', '無標題'), source_text, created_at_iso)
-                for item in new_items
-            ]
-
+            # 使用 INSERT OR IGNORE，如果 URL 已存在，資料庫會自動忽略該筆，不會報錯
             cursor.executemany(
-                "INSERT INTO extracted_urls (url, author, message_date, message_time, title, source_text, created_at, status) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')",
+                "INSERT OR IGNORE INTO extracted_urls (url, author, message_date, message_time, title, source_text, created_at, status) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')",
                 data_to_insert
             )
 
-        count = len(data_to_insert)
-        log.info(f"成功將 {count} 筆新的解析資料儲存到資料庫。")
+            # 計算實際新增的筆數
+            after_changes = conn.total_changes
+            count = after_changes - before_changes
+
+        if count > 0:
+            log.info(f"✅ 成功新增 {count} 筆資料至資料庫 (忽略了 {len(data_to_insert) - count} 筆重複資料)。")
+        else:
+            log.info("所有解析出的網址都已存在於資料庫中，無需新增。")
+
         return count
     except sqlite3.Error as e:
         log.error(f"儲存解析資料到資料庫時發生錯誤: {e}", exc_info=True)

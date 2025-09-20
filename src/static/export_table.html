@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <title>資料匯出 (表格)</title>
+    <style>
+        @font-face {
+          font-family: 'Noto Sans TC';
+          font-style: normal;
+          font-weight: 400;
+          src: url(https://fonts.gstatic.com/s/notosanstc/v38/-nFuOG829Oofr2wohFbTp9ifNAn722rq0MXz76Cy_Co.ttf) format('truetype');
+        }
+        @font-face {
+          font-family: 'Noto Sans TC';
+          font-style: normal;
+          font-weight: 700;
+          src: url(https://fonts.gstatic.com/s/notosanstc/v38/-nFuOG829Oofr2wohFbTp9ifNAn722rq0MXz70e1_Co.ttf) format('truetype');
+        }
+        body {
+            font-family: 'Noto Sans TC', sans-serif;
+            margin: 20px;
+            color: #333;
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 14px;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+            word-wrap: break-word;
+        }
+        th {
+            background-color: #f2f2f2;
+            font-weight: 700;
+        }
+        tr:nth-child(even) {
+            background-color: #f9f9f9;
+        }
+        .url {
+            color: #007bff;
+            text-decoration: none;
+        }
+        .url:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>資料總覽報告 (表格)</h1>
+        <p class="date-range">
+            篩選範圍: {{ start_date or '所有時間' }} 至 {{ end_date or '所有時間' }}
+        </p>
+    </div>
+    <table>
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>標題</th>
+                <th>作者</th>
+                <th>時間</th>
+                <th>狀態</th>
+                <th>連結</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for item in data %}
+            <tr>
+                <td>{{ item.id }}</td>
+                <td>{{ item.title or 'N/A' }}</td>
+                <td>{{ item.author or 'N/A' }}</td>
+                <td>{{ item.datetime_str or 'N/A' }}</td>
+                <td>{{ item.status or 'N/A' }}</td>
+                <td><a href="{{ item.url }}" class="url">{{ item.url }}</a></td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</body>
+</html>
