@@ -81,26 +81,30 @@ async def get_overview_data(
              raise HTTPException(status_code=503, detail=f"資料庫服務通訊失敗: {e}")
         raise HTTPException(status_code=500, detail="資料庫查詢失敗")
 
+from weasyprint import HTML
+
 @router.get("/api/page1/export")
 async def export_data(
+    request: Request, # V36.8: 加入 request 以便使用 templates
     format: str,
     start_date: Optional[str] = Query(None),
     end_date: Optional[str] = Query(None),
     db: DBClient = Depends(get_db)
 ):
-    """(V4 優化後) 使用 DBClient 獲取資料並匯出。"""
+    """
+    (V36.8 更新) 使用 DBClient 獲取資料並根據指定格式匯出。
+    - 新增 HTML 和 PDF 匯出功能。
+    - HTML/PDF 使用卡片式佈局。
+    - 修正了 Excel 匯出的依賴問題。
+    """
     try:
         # 獲取資料
         results = db.get_filtered_urls(start_date=start_date, end_date=end_date)
-        # 將字典列表轉換為 DataFrame
-        df = pd.DataFrame(results)
-        # 為了匯出，將 'date' 欄位重新命名回 'message_date'
-        if 'date' in df.columns:
-            df.rename(columns={'date': 'message_date'}, inplace=True)
-        # 確保匯出欄位的順序與舊版一致
-        export_columns = ['message_date', 'author', 'url']
-        # 有些紀錄可能沒有 message_time，所以這裡不加入
-        df = df[export_columns]
+        # V36.8: 直接使用字典列表，不再轉換為 DataFrame，以便範本處理
+        # 確保 'message_date' 欄位存在
+        for r in results:
+            if 'date' in r:
+                r['message_date'] = r.pop('date')
 
     except Exception as e:
         log.error(f"匯出時讀取資料庫失敗: {e}", exc_info=True)
@@ -109,6 +113,7 @@ async def export_data(
         raise HTTPException(status_code=500, detail="讀取資料庫失敗")
 
     if format == "excel":
+        df = pd.DataFrame(results)
         output = BytesIO()
         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
             df.to_excel(writer, index=False, sheet_name='資料匯出')
@@ -119,17 +124,40 @@ async def export_data(
             headers={"Content-Disposition": "attachment; filename=export.xlsx"}
         )
     elif format == "csv":
+        df = pd.DataFrame(results)
         output = df.to_csv(index=False, encoding='utf-8-sig')
         return Response(
             content=output,
             media_type="text/csv",
             headers={"Content-Disposition": "attachment; filename=export.csv"}
         )
-    else:
-        # 對於純文字預留位置，明確使用 utf-8-sig 編碼以包含BOM，防止在 Windows 上出現亂碼
-        content = f"此為 {format} 格式的預留位置匯出。\n\n篩選範圍:\n開始日期: {start_date or '未設定'}\n結束日期: {end_date or '未設定'}\n\n資料內容:\n{df.to_string()}"
+    elif format == "html":
+        # V36.8: 實作 HTML 匯出
+        html_content = templates.TemplateResponse(
+            "export_cards.html",
+            {"request": request, "data": results}
+        ).body.decode("utf-8")
         return Response(
-            content=content.encode('utf-8-sig'),
-            media_type="text/plain; charset=utf-8",
-            headers={"Content-Disposition": f"attachment; filename=export.{format}.txt"}
+            content=html_content,
+            media_type="text/html",
+            headers={"Content-Disposition": "attachment; filename=export.html"}
         )
+    elif format == "pdf":
+        # V36.8: 實作 PDF 匯出
+        html_content = templates.TemplateResponse(
+            "export_cards.html",
+            {"request": request, "data": results}
+        ).body.decode("utf-8")
+
+        pdf_output = BytesIO()
+        HTML(string=html_content).write_pdf(pdf_output)
+        pdf_output.seek(0)
+
+        return Response(
+            pdf_output.read(),
+            media_type="application/pdf",
+            headers={"Content-Disposition": "attachment; filename=export.pdf"}
+        )
+    else:
+        # 對於不支援的格式，回傳錯誤
+        raise HTTPException(status_code=400, detail=f"不支援的匯出格式: {format}")
