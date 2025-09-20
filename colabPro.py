@@ -383,7 +383,11 @@ class ServerManager:
 
             # --- 階段 1: 同步安裝核心依賴 (強制使用 Pip) ---
             self._log_manager.log("INFO", "步驟 1/3: 正在快速安裝核心伺服器依賴 (使用 Pip)...")
-            core_requirements = [project_path / "requirements" / "core.txt"]
+            core_requirements = [
+                project_path / "requirements" / "core.txt",
+                project_path / "requirements" / "features_core.txt",
+                project_path / "requirements" / "analysis.txt"
+            ]
             install_requirements(core_requirements, "核心伺服器", force_pip=True)
 
             # --- 階段 2: 啟動後端服務 ---

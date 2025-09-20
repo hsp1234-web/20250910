@@ -1,3 +1,20 @@
+## 1105號 - 修復因依賴不完整導致的 Excel 匯出與啟動失敗問題 (2025-09-20T01:55:47.853726+08:00)
+
+### 動機
+使用者回報，在點擊「匯出 EXCEL」按鈕後，系統會發生錯誤。經查閱日誌，發現根本原因為 `ModuleNotFoundError: No module named 'xlsxwriter'`，即缺少處理 Excel 檔案的必要依賴。此外，日誌中也顯示，伺服器在預熱階段因缺少 `pptx` 模組而發生另一個 `ModuleNotFoundError`。追查發現，這是因為 Colab 啟動腳本 (`colabPro.py`) 只安裝了 `requirements/core.txt`，而忽略了 `features_core.txt` 和 `analysis.txt` 中的其他重要依賴。
+
+### 核心變更
+1.  **`requirements/analysis.txt`**:
+    - 新增了 `XlsxWriter==3.2.0` 這一行。此套件是 `pandas` 函式庫用來寫入 `.xlsx` 格式檔案所必需的，直接解決了 Excel 匯出失敗的問題。
+
+2.  **`colabPro.py`**:
+    - 修改了核心依賴的安裝邏輯。將原本只安裝 `core.txt` 的程式碼，擴充為同時安裝 `requirements/core.txt`, `requirements/features_core.txt`, 和 `requirements/analysis.txt` 這三個檔案。
+    - 此修改確保了所有核心功能（如 `pptx` 檔案處理）和分析功能（如 `pandas` 及其周邊）所需的依賴，都能在系統啟動時被正確安裝。
+
+### 成果
+本次提交從根本上解決了因依賴安裝不完整而導致的兩個問題。現在，系統啟動時會安裝所有必要的套件，Excel 匯出功能應已恢復正常，同時也消除了伺服器啟動時的 `pptx` 模組載入錯誤，提升了系統的穩定性與功能的完整性。
+
+---
 ## 1104號 - 修正 AI 分析頁面的詳細資料連結錯誤 (2025-09-15T18:09:57.784987+08:00)
 
 ### 動機
