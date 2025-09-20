@@ -83,7 +83,7 @@
         const renderTaskList = async () => {
             try {
                 logStatus('正在從後端獲取可供下載的報告列表...');
-                const response = await fetch('/api/analyzer/files_for_stage2');
+                const response = await fetch('/files_for_stage2');
                 if (!response.ok) throw new Error(`無法獲取任務 (HTTP ${response.status})`);
                 const tasks = await response.json();
                 logStatus(`成功獲取 ${tasks.length} 個任務的資訊。`, 'green');
@@ -143,7 +143,7 @@
             logStatus(`正在為 ${taskIds.length} 個任務請求 Word 報告...`, 'blue');
 
             try {
-                const response = await fetch('/api/analyzer/generate_report', {
+                const response = await fetch('/generate_report', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ task_ids: taskIds }),
