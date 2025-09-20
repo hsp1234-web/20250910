@@ -1,74 +1,130 @@
-# 專案架構分析與債券分析功能實作方案
+# 專案架構分析與債券分析功能實作方案 (V3 - 最終詳盡版)
 
 ## 一、 現有專案架構分析
 
-經過深入研究，我將專案的現有架構總結如下：
+### 1. 完整檔案樹狀結構圖
 
-### 1. 總體架構圖 (文字版)
-
+以下是專案的完整檔案結構，以利全面理解：
 ```
-[使用者] <--> [瀏覽器] <--> [主 API 服務 (api_server.py on FastAPI)]
-                         |                                |
-                         | (WebSocket)                    | (HTTP Request)
-                         |                                v
-                         +----------------------> [資料庫管理服務 (db/manager.py on FastAPI)]
-                                                                   |
-                                                                   v
-                                                            [資料庫 (tasks.db on SQLite)]
-
-[背景任務執行緒/Orchestrator] <--> [資料庫管理服務]
+.
+├── AGENTS.md
+├── Log.md
+├── Plan3.md, Plan4.md, Plan5.md
+├── TOOLS_README.md
+├── colabPro.py
+├── config/
+│   ├── circus.ini.template
+│   └── config.json.template
+├── pyproject.toml
+├── pytest.ini
+├── requirements/
+│   ├── analysis.txt
+│   ├── core.txt
+│   ├── features_core.txt
+│   ├── features_non_core.txt
+│   ├── gemini.txt
+│   ├── test.txt
+│   └── transcriber.txt
+├── scripts/
+│   └── ... (多個腳本)
+├── services/
+│   └── key_service/
+│       ├── main.py
+│       └── requirements.txt
+├── src/
+│   ├── api/
+│   │   ├── api_server.py
+│   │   ├── dependencies.py
+│   │   └── routes/
+│   │       ├── ui.py
+│   │       └── page1.py, ... (共 11 個頁面路由)
+│   ├── core/
+│   │   └── ... (共 7 個核心模組)
+│   ├── db/
+│   │   ├── database.sqlite3
+│   │   ├── client.py
+│   │   ├── database.py
+│   │   ├── initialize_database.py
+│   │   ├── log_handler.py
+│   │   └── manager.py
+│   ├── prompts/
+│   │   └── default_prompts.json
+│   ├── static/
+│   │   ├── css/
+│   │   └── ... (共 28 個 HTML 檔案)
+│   └── tools/
+│       └── ... (共 22 個工具模組)
+├── tests/
+│   └── conftest.py
+└── 一級交易pro.py
 ```
 
-### 2. 技術棧 (Tech Stack)
+### 2. 核心檔案與所有頁面功能註解
 
-- **後端框架**: `FastAPI` (搭配 `Uvicorn` 伺服器)
-- **資料庫**: `SQLite` (透過獨立的管理器服務進行存取)
-- **服務間通訊**: `httpx` (用於 `api_server` 和 `db_manager` 之間的 HTTP 呼叫)
-- **即時通訊**: `WebSocket` (由 `api_server` 管理)
-- **數據分析**: `pandas`, `yfinance`, `fredapi`
-- **前端**: 原生 `HTML`, `CSS`, `JavaScript` (構成一個多頁面應用 MPA)
+#### 核心後端檔案
+- **`src/api/api_server.py`**: **主後端服務**。負責接收所有前端 HTTP 請求、管理 WebSocket，並將耗時任務非同步地交由背景處理。
+- **`src/db/manager.py`**: **資料庫管理器服務**。獨立的 FastAPI 服務，是唯一能直接存取資料庫的元件。
+- **`src/db/client.py`**: **資料庫客戶端**。讓主後端服務可以安全地請求「資料庫管理器服務」來操作資料庫。
+- **`src/db/database.py`**: **資料庫 Schema 定義**。定義了專案的所有資料表結構和 SQL 操作函式。
+- **`src/api/routes/ui.py`**: **UI 路由管理器**。定義了 URL 路徑與 HTML 頁面的對應關係。
+- **`一級交易pro.py` / `colabPro.py`**: **核心分析腳本/啟動器**。包含了主要的金融分析流程，並可能是整個應用的啟動統籌腳本。
 
-### 3. 系統啟動方式
+#### 所有前端頁面 (`src/static/*.html`)
+- **`main.html`**: **專案入口主頁 (鳳凰主頁)**，提供各大功能模組的選擇。
+- **`mp3.html`**: **(舊版) 音訊轉錄儀介面**。
+- **`page1.html`**: **文件分析儀主介面**。
+- **`page1_sub_ingestion.html`**, **`page1_sub_overview.html`**, **`page1_sub_export.html`**: 文件分析儀的子頁面，分別對應資料匯入、總覽和匯出。
+- **`page2_downloader.html`**: **批次下載器介面**。
+- **`page3_processor.html`**: **檔案處理與轉檔介面**。
+- **`page4_stage1_ai.html`** 到 **`page4_stage4_download.html`**: **多階段 AI 分析流程**的各個步驟介面。
+- **`page5_backup.html`**: **備份管理介面**。
+- **`page6_keys.html`**: **API 金鑰管理介面**。
+- **`page7_prompts.html`**: **AI 提示詞管理介面**。
+- **`page8_file_details.html`**: **單一檔案的詳細資訊檢視器**。
+- **`page9_dashboard.html`**: **績效儀表板介面**。
+- **`page10_service_test.html`**: **微服務測試頁面**。
+- **`history.html`**: **歷史紀錄頁面**。
+- **`report_viewer.html`**: **報告檢視器頁面**。
+- **`line_extractor.html`**: **LINE 貼文整理工具介面**。
+- **`json_viewer.html`**, **`export_cards.html`**, **`export_table.html`**: 用於資料展示和匯出的輔助頁面。
 
-從程式碼註解和結構推斷，系統的標準啟動方式如下：
-1.  一個**統籌腳本 (Orchestrator)** 作為主要進入點 (可能是 `colabPro.py` 或一個未見的 `orchestrator.py`)。
-2.  此腳本首先啟動**「資料庫管理服務」** (`db/manager.py`)，使其在一個獨立的埠號上監聽。
-3.  接著，它啟動**「主 API 服務」** (`api_server.py`)，使其在另一個埠號上監聽。
-4.  `api_server` 內部可能還會啟動一個或多個**背景執行緒 (Worker)**，這些 Worker 會定期透過 `DBClient` 向「資料庫管理服務」請求並執行待辦任務。
+### 3. 依賴管理檔案詳細用途
+- **`pyproject.toml`**: 專案的標準設定檔，定義了專案名稱、版本等元數據。
+- **`requirements/` 目錄**:
+    - **`core.txt`**: **核心框架依賴**。提供 `api_server` 和 `db_manager` 運行的基礎，如 `fastapi`, `uvicorn`。
+    - **`analysis.txt`**: **量化分析依賴**。為 `quantitative_analyzer.py` 提供股票分析所需套件。
+    - **`gemini.txt`**: **AI 功能依賴**。為 `gemini_processor.py` 提供 Google Gemini AI 服務所需套件。
+    - **`test.txt`**: **測試環境依賴**。執行自動化測試時才需要。
+    - **`transcriber.txt`**: **音訊轉錄依賴**。為 `transcriber.py` 提供 Whisper 語音辨識所需套件。
+    - **`features_core.txt` / `features_non_core.txt`**: **功能集依賴**。可能是為了區分部署時需要安裝的核心功能與非核心功能。
+- **`services/key_service/requirements.txt`**: **獨立服務依賴**。`key_service` 擁有自己的依賴檔案，表明它可以作為一個獨立的微服務部署。
 
-### 4. 頁面與資料傳輸流程 (MPA 模式)
-
-1.  **入口頁面**: 使用者在瀏覽器中開啟根目錄 `/`，`api_server.py` 接收請求，並回傳 `src/static/main.html` 的內容。
-2.  **功能選擇**: `main.html` (鳳凰主頁) 包含多個功能按鈕（如「音訊轉錄儀」）。使用者點擊按鈕，例如連結到 `/page1`。
-3.  **載入功能頁面**: 瀏覽器向 `/page1` 發出請求。`api_server` 中的 `ui.py` 路由接收此請求，並回傳對應的 `src/static/page1.html` 頁面。
-4.  **觸發非同步任務**: 在 `page1.html` 頁面中，使用者執行操作（例如上傳檔案）。頁面中的 JavaScript 會使用 `fetch` 向後端的 API 端點 (例如 `/api/transcribe`) 發送請求。
-5.  **任務入隊**: `api_server` 的 API 端點接收到請求後，**不會立即執行**，而是將任務的相關資訊（如檔案路徑、參數等）打包，並透過 `DBClient` 將一個新任務記錄新增到資料庫的 `tasks` 表中。
-6.  **即時狀態更新**: 前端頁面透過 WebSocket 與 `api_server` 保持長連線。`api_server` 中的背景任務廣播員會將任務狀態的更新（如「處理中」、「已完成」）即時推送給前端，前端 JavaScript 收到後更新 UI。
+### 4. 服務間通訊方式
+- **瀏覽器 <-> 主 API 服務**:
+    - **HTTP**: 使用者透過瀏覽器發送 GET 請求獲取 HTML 頁面，透過 `fetch` API 發送 POST 請求來觸發後端任務。
+    - **WebSocket**: 用於即時雙向通訊，伺服器可主動將任務的進度（如 `downloading`, `processing`, `completed`）推送給前端，實現動態更新。
+- **主 API 服務 <-> 資料庫管理服務**:
+    - **HTTP**: `api_server` 中的 `DBClient` 將所有資料庫操作（`add_task`, `get_status` 等）封裝成 JSON 格式的 HTTP POST 請求，發送給 `db_manager` 的 `/execute` 端點。這種方式確保了服務間的完全解耦。
 
 ---
 
 ## 二、 債券分析功能實作方案
 
-基於對現有架構的理解，以及您對效能、隔離性和未來擴充性的要求，先前討論的三種方案依然適用，且現在我們對它們的理解更為深刻：
+基於以上極度詳細的分析，我們對三個方案的評估更具信心：
 
 ### 方案 A：最小改動整合方案
-- **說明**：將新功能直接整合到現有的雙服務架構和任務佇列中。
-- **作法**：在 `api_server.py` 中新增路由，在 `database.py` 中新增資料表，讓現有的 Worker 執行緒去處理 `bond_analysis` 類型的新任務。
-- **優點**：開發快速，架構一致。
-- **缺點**：資料庫負擔增加，高耦合，可能影響現有系統效能。
+- **說明**：直接在現有架構上擴充，修改 `database.py` 新增資料表，修改 `api_server.py` 新增任務類型。
+- **優點**：開發快速，符合現有模式。
+- **缺點**：高耦合，未來債券分析的龐大數據量可能拖慢整個系統。
 
 ### 方案 B：獨立進程，共享資料庫服務方案
-- **說明**：建立一個獨立的 Python 程序來執行耗時的債券分析計算，但與主應用共享同一個資料庫服務 (`DB Manager`)。
-- **作法**：`api_server` 透過 `subprocess` 啟動一個 `bond_analysis_worker.py`。此 Worker 再透過 `DBClient` 與 `DB Manager` 溝通。
-- **優點**：計算被隔離，不會阻塞 `api_server`。
-- **缺點**：資料庫服務仍是共享瓶頸，且進程管理較為複雜。
+- **說明**：計算獨立，但仍透過 `DBClient` 將結果寫入同一個 `DB Manager` 服務。
+- **優點**：計算過程不影響主服務的回應速度。
+- **缺點**：資料庫服務仍是共享瓶頸。
 
 ### 方案 C：完全微服務化方案 (獨立資料庫 + 訊息佇列)
-- **說明**：為債券分析功能建立一個完全獨立的微服務，擁有自己的進程和資料庫，透過訊息佇列與主應用通訊。
-- **作法**：
-    1.  建立一個新的 FastAPI 應用 `bond_service.py`，管理自己的 `bonds.db`。
-    2.  引入 **Redis** 作為訊息佇列。
-    3.  `api_server` 接收請求後，僅將任務訊息發布到 Redis。
-    4.  `bond_service` 監聽 Redis，執行任務，並將結果存入自己的資料庫。
-- **優點**：完全解耦，高效能，高可靠性，完美符合您「新增而不修改、獨立運作」的要求。
-- **缺點**：架構複雜度稍高，需要引入 Redis。
+- **說明**：為債券分析建立全新的、獨立的服務、資料庫，並引入 Redis 作為通訊中介。
+- **優點**：**最符合您「新增而不修改、獨立運作、高效能」的長遠目標**。完全解耦，擴充性最強。
+- **缺點**：初期開發和部署需要引入並設定 Redis。
+
+我將等待您的最終方案選擇，然後為您制定該方案的詳細開發計畫。
