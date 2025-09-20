@@ -1,0 +1,4 @@
+fastapi
+uvicorn[standard]
+pandas==2.2.2
+fredapi==0.5.2

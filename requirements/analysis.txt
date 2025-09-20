@@ -7,3 +7,4 @@ twstock
 filetype==1.2.0
 plotly==5.22.0
 kaleido==0.2.1
+fredapi==0.5.2
