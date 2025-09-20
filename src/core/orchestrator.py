@@ -116,13 +116,20 @@ def launch_microservice(service_path: Path):
     proc_env = os.environ.copy()
     proc_env["PORT"] = str(port)
 
+    command = [
+        str(python_exec), "-m", "uvicorn",
+        f"{main_script.stem}:app",
+        "--host", "127.0.0.1",
+        "--port", str(port)
+    ]
     process = subprocess.Popen(
-        [str(python_exec), str(main_script)],
+        command,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
         encoding='utf-8',
-        env=proc_env
+        env=proc_env,
+        cwd=service_path
     )
 
     # 為每個服務的日誌建立一個獨立的 reader thread
