@@ -40,27 +40,52 @@
             padding: 15px;
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
             word-wrap: break-word;
+            display: flex;
+            flex-direction: column;
         }
-        .card h3 {
-            margin-top: 0;
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+            padding-bottom: 5px;
+            border-bottom: 1px solid #eee;
+        }
+        .card-body p {
+            margin: 8px 0;
+        }
+        .card-body p strong {
+            color: #333;
+        }
+        .id {
             font-size: 1.1em;
+            font-weight: bold;
             color: #0056b3;
         }
-        .card p {
-            margin: 5px 0;
-        }
-        .card .url {
+        .status {
             font-size: 0.9em;
+            font-weight: bold;
+            padding: 3px 8px;
+            border-radius: 12px;
+            color: #fff;
+        }
+        .status-pending {
+            background-color: #f0ad4e;
+        }
+        .status-completed {
+            background-color: #5cb85c;
+        }
+        .status-failed {
+            background-color: #d9534f;
+        }
+        .url {
+            font-size: 0.95em;
             color: #007bff;
             text-decoration: none;
+            word-break: break-all;
         }
-        .card .url:hover {
+        .url:hover {
             text-decoration: underline;
-        }
-        .card .date {
-            font-size: 0.8em;
-            color: #666;
-            text-align: right;
         }
     </style>
 </head>
@@ -73,12 +98,19 @@
     </div>
     <div class="container">
         {% for item in data %}
-        <div class="card">
-            <h3>作者: {{ item.author }}</h3>
-            <p>
-                <a href="{{ item.url }}" target="_blank" class="url">{{ item.url }}</a>
-            </p>
-            <p class="date">{{ item.message_date }}</p>
+        <div class="card" role="article" aria-labelledby="card-title-{{ item.id }}">
+            <div class="card-header">
+                <span class="id">ID: {{ item.id }}</span>
+                {% if item.status %}
+                <span class="status status-{{ item.status | lower }}">{{ item.status | upper }}</span>
+                {% endif %}
+            </div>
+            <div class="card-body">
+                <p id="card-title-{{ item.id }}"><strong>標題:</strong> {{ item.title or '無' }}</p>
+                <p><strong>作者:</strong> {{ item.author or '無' }}</p>
+                <p><strong>時間:</strong> {{ item.message_date or '' }} {{ item.message_time or '' }}</p>
+                <p><strong>連結:</strong> <a href="{{ item.url }}" target="_blank" class="url">{{ item.url }}</a></p>
+            </div>
         </div>
         {% endfor %}
     </div>
