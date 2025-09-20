@@ -1,0 +1,11 @@
+fastapi
+uvicorn
+SQLAlchemy
+pandas
+numpy
+yfinance
+fredapi
+openpyxl
+requests
+scipy
+matplotlib

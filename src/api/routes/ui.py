@@ -94,3 +94,8 @@ async def serve_page10(request: Request):
 async def serve_line_extractor(request: Request):
     """ 提供獨立的 LINE 貼文批量整理工具頁面。 """
     return templates.TemplateResponse("line_extractor.html", {"request": request})
+
+@router.get("/bond-analysis-demo", response_class=HTMLResponse)
+async def serve_bond_analysis_demo(request: Request):
+    """ 提供債券分析功能的 Demo 頁面。 """
+    return templates.TemplateResponse("bond_analysis_demo.html", {"request": request})
