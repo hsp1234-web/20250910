@@ -86,9 +86,11 @@ document.addEventListener('DOMContentLoaded', () => {
             const rawData = await response.json();
 
             if (rawData.length === 0) {
-                renderChart(chartId, label, [], []); // 畫一個空圖表
-                statusEl.textContent = '尚無資料';
-                return;
+                // 如果沒有資料，自動觸發一次抓取
+                console.log(`指標 '${id}' 在資料庫中沒有資料，正在觸發自動抓取...`);
+                statusEl.textContent = '首次載入，正在從遠端更新...';
+                await handleFetchClick({ id, chartId, label }); // 自動觸發更新
+                return; // handleFetchClick 會處理後續的渲染
             }
 
             const labels = rawData.map(d => d.date);
