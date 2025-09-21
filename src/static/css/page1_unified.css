@@ -74,6 +74,9 @@ textarea {
 
 /* --- Sub-navigation --- */
 .sub-nav {
+    display: flex;
+    flex-wrap: wrap; /* 當空間不足時自動換行 */
+    gap: 10px; /* 按鈕之間的間隙 */
     margin-bottom: 20px;
     border-bottom: 1px solid var(--border-color);
     padding-bottom: 10px;
