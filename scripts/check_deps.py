@@ -5,7 +5,6 @@
 
 import importlib
 import sys
-import pkg_resources
 
 # 套件安裝名與導入名之間的對應關係
 # 有些套件的安裝名稱與在 Python 中導入時使用的名稱不同。
@@ -45,13 +44,20 @@ def check_dependency(package_name: str) -> bool:
     module_name = PACKAGE_TO_MODULE_MAP.get(package_name_base, package_name_base)
 
     try:
-        importlib.import_module(module_name)
+        module = importlib.import_module(module_name)
+        # [JULES_DEBUG] 將找到的模組位置輸出到 stderr 以供除錯
+        if hasattr(module, '__file__') and module.__file__:
+            print(f"[DEBUG_CHECK] '{package_name_base}' -> '{module_name}' found at: {module.__file__}", file=sys.stderr)
+        else:
+            print(f"[DEBUG_CHECK] '{package_name_base}' -> '{module_name}' found (built-in or namespace package).", file=sys.stderr)
+
         # 對於 uvicorn，我們需要確保 standard 依賴也存在
         if package_name_base == "uvicorn" and "[standard]" in package_name:
              # 檢查 uvloop 是否存在，它是 [standard] 的一個關鍵部分
             importlib.import_module("uvloop")
         return True
     except ImportError:
+        print(f"[DEBUG_CHECK] '{package_name_base}' -> '{module_name}' NOT found.", file=sys.stderr)
         return False
 
 def main():
