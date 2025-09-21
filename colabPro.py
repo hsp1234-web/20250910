@@ -381,8 +381,42 @@ class ServerManager:
                     if temp_req_path.exists():
                         temp_req_path.unlink()
 
-            # --- 階段 1: 同步安裝核心依賴 (強制使用 Pip) ---
-            self._log_manager.log("INFO", "步驟 1/3: 正在快速安裝核心伺服器依賴 (使用 Pip)...")
+            # --- JULES'S FIX (2025-09-21): 強制安裝下載器依賴 ---
+            # 為了繞過在某些 Colab 環境中不穩定的依賴檢查，我們為下載器建立了一個
+            # 獨立的安裝階段。此階段不使用 check_deps.py，而是直接強制安裝，
+            # 確保 yt-dlp 和 gdown 等關鍵套件一定存在。
+            def force_install_packages(req_file: Path, log_prefix: str):
+                """一個簡化的安裝函式，不檢查，直接安裝。"""
+                if not req_file.is_file():
+                    self._log_manager.log("WARN", f"[{log_prefix}] 依賴檔案 '{req_file.name}' 不存在，跳過。")
+                    return
+                self._log_manager.log("INFO", f"[{log_prefix}] 開始強制安裝依賴...")
+                install_start_time = time.monotonic()
+                try:
+                    # 移除 -q 參數以獲取詳細日誌
+                    pip_command = [sys.executable, "-m", "pip", "install", "-r", str(req_file.resolve())]
+                    result = subprocess.run(pip_command, capture_output=True, text=True, encoding='utf-8')
+                    if result.stdout and result.stdout.strip():
+                        self._log_manager.log("DEBUG", f"[{log_prefix}] pip stdout:\n{result.stdout}", "Installer")
+                    if result.returncode != 0:
+                        error_log = f"pip install 失敗！返回碼: {result.returncode}\n"
+                        if result.stderr and result.stderr.strip():
+                            error_log += f"STDERR:\n{result.stderr}\n"
+                        self._log_manager.log("ERROR", error_log, "Installer")
+                        raise subprocess.CalledProcessError(result.returncode, pip_command, output=result.stdout, stderr=result.stderr)
+                    self._log_manager.log("SUCCESS", f"✅ [{log_prefix}] 強制依賴安裝完成。")
+                    self._log_manager.log("INFO", f"--- [{log_prefix}] 安裝耗時: {time.monotonic() - install_start_time:.2f} 秒 ---")
+                except subprocess.CalledProcessError as e:
+                    self._log_manager.log("CRITICAL", f"[{log_prefix}] 強制依賴安裝失敗！", "Installer")
+                    raise
+
+            # --- 階段 0: 強制安裝下載器依賴 ---
+            self._log_manager.log("INFO", "步驟 1/4: 正在強制安裝下載器核心依賴...")
+            downloader_req_file = project_path / "requirements" / "downloader.txt"
+            force_install_packages(downloader_req_file, "下載器")
+
+            # --- 階段 2: 同步安裝核心依賴 (強制使用 Pip) ---
+            self._log_manager.log("INFO", "步驟 2/4: 正在快速安裝核心伺服器依賴 (使用 Pip)...")
             core_requirements = [
                 project_path / "requirements" / "core.txt",
                 project_path / "requirements" / "features_core.txt",
@@ -390,8 +424,8 @@ class ServerManager:
             ]
             install_requirements(core_requirements, "核心伺服器", force_pip=True)
 
-            # --- 階段 2: 啟動後端服務 ---
-            self._log_manager.log("INFO", "步驟 2/3: 正在啟動後端協調器...")
+            # --- 階段 3: 啟動後端服務 ---
+            self._log_manager.log("INFO", "步驟 3/4: 正在啟動後端協調器...")
             launch_command = [sys.executable, "src/core/orchestrator.py"]
             process_env = os.environ.copy()
             src_path_str = str((project_path / "src").resolve())
