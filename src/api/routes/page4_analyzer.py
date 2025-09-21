@@ -73,6 +73,10 @@ class Stage2Request(BaseModel):
     task_ids: List[int]
     model_name: str
 
+class SummaryRequest(BaseModel):
+    task_ids: List[int]
+    model_name: str
+
 # --- WebSocket 通知輔助函式 (已由佇列取代) ---
 # JULES (2025-09-13): 移除了舊的 _send_websocket_notification 函式。
 # 現在所有通知都將透過一個從主應用程式傳入的 asyncio.Queue 來發送。
@@ -389,6 +393,69 @@ def _run_stage2_blocking_task(task_id: int, model_name: str, queue: asyncio.Queu
         db_client.update_analysis_task(task_id=task_id, updates={"stage2_status": "failed", "stage2_error_log": error_message})
 
 
+def _run_summary_generation_blocking_task(task_id: int, model_name: str, queue: asyncio.Queue, loop: asyncio.AbstractEventLoop, db_client: DBClient):
+    """
+    (Jules @ 2025-09-21) 執行「重點摘要」生成的同步阻塞部分。
+    """
+    log.info(f"重點摘要任務實際執行開始：task_id={task_id}, model={model_name}")
+    try:
+        # JULES V6 啟動優化：延遲載入
+        from core import key_manager, prompt_manager
+        from tools.gemini_manager import GeminiManager
+
+        task_data = db_client.get_analysis_task(task_id=task_id)
+        if not task_data or not task_data.get("file_content_for_analysis"):
+            raise ValueError(f"找不到任務 {task_id} 或其可供分析的內容。")
+
+        text_content = task_data['file_content_for_analysis']
+
+        from core.config_manager import get_config_value
+        api_timeout = get_config_value("api_timeout_seconds", 35)
+
+        all_prompts = prompt_manager.get_all_prompts()
+        prompt_template = all_prompts.get("summary_generation_prompt")
+        if not prompt_template:
+            # 如果找不到專用提示詞，則使用一個通用的後備提示詞
+            log.warning("在提示詞庫中找不到 'summary_generation_prompt'，將使用通用摘要提示詞。")
+            prompt_template = "請為以下文件生成一段約 200-300 字的簡潔中文摘要：\n\n{document_text}"
+
+
+        valid_keys = key_manager.get_all_valid_keys_for_manager()
+        if not valid_keys:
+            raise ValueError("在金鑰池中找不到任何有效的 API 金鑰。")
+        gemini = GeminiManager(api_keys=valid_keys, timeout=api_timeout)
+
+        prompt = prompt_template.format(document_text=text_content)
+
+        db_client.update_analysis_task(task_id=task_id, updates={"summary_status": "gemini_processing"})
+        notification_msg = {"type": "analysis_update", "task_id": task_id, "result": db_client.get_analysis_task(task_id)}
+        asyncio.run_coroutine_threadsafe(queue.put(notification_msg), loop)
+
+        summary_content, error, used_key, token_usage = gemini.prompt_for_text(prompt=prompt, model_name=model_name)
+
+        if error:
+            raise error
+
+        if used_key and token_usage > 0:
+            key_manager.record_token_usage(key_name=used_key, tokens_used=token_usage)
+
+        db_client.update_analysis_task(
+            task_id=task_id,
+            updates={
+                "summary_status": "completed",
+                "summary_content": summary_content,
+                "summary_token_usage": token_usage,
+                "summary_model": model_name
+            }
+        )
+        log.info(f"重點摘要任務成功：task_id={task_id}")
+
+    except Exception as e:
+        error_message = f"錯誤: {type(e).__name__}: {str(e)}"
+        log.error(f"重點摘要任務失敗：task_id={task_id}，{error_message}", exc_info=True)
+        db_client.update_analysis_task(task_id=task_id, updates={"summary_status": "failed", "summary_error_log": error_message})
+
+
 # --- 新的非同步包裝函式 (用於併發控制) ---
 async def run_analysis_task_wrapper(task_id: int, semaphore: asyncio.Semaphore, blocking_func, queue: asyncio.Queue, loop: asyncio.AbstractEventLoop, db_client: DBClient, **kwargs):
     """
@@ -406,6 +473,9 @@ async def run_analysis_task_wrapper(task_id: int, semaphore: asyncio.Semaphore, 
         elif stage == 'date_inference':
             status_field = "date_inference_status"
             update_payload = {status_field: "processing"}
+        elif stage == 'summary':
+            status_field = "summary_status"
+            update_payload = {status_field: "processing", "summary_model": kwargs.get("model_name")}
         elif stage in [1, 2]:
             status_field = f"stage{stage}_status"
             update_payload = {status_field: "processing", f"stage{stage}_model": kwargs.get("model_name")}
@@ -636,6 +706,44 @@ async def start_stage2_analysis(request: Request, payload: Stage2Request, backgr
 
     return {"message": f"已為 {len(payload.task_ids)} 個符合條件的任務啟動第二階段分析。"}
 
+
+@router.post("/start_summary_generation")
+async def start_summary_generation(request: Request, payload: SummaryRequest, background_tasks: BackgroundTasks, db: DBClient = Depends(get_db)):
+    """(Jules @ 2025-09-21) 啟動重點摘要生成"""
+    if not payload.task_ids:
+        raise HTTPException(status_code=400, detail="任務 ID 列表不可為空。")
+
+    semaphore = request.app.state.analysis_semaphore
+    queue = request.app.state.notification_queue
+    loop = asyncio.get_running_loop()
+
+    if not semaphore or not queue:
+        raise HTTPException(status_code=500, detail="伺服器狀態未完全初始化（缺少佇列或信號量）。")
+
+    for task_id in payload.task_ids:
+        # 重設狀態以允許重新生成
+        db.update_analysis_task(task_id=task_id, updates={
+            "summary_status": "pending",
+            "summary_content": None,
+            "summary_error_log": None,
+            "summary_token_usage": None,
+            "summary_model": None
+        })
+        background_tasks.add_task(
+            run_analysis_task_wrapper,
+            task_id=task_id,
+            semaphore=semaphore,
+            blocking_func=_run_summary_generation_blocking_task,
+            queue=queue,
+            loop=loop,
+            db_client=db,
+            model_name=payload.model_name,
+            stage="summary"
+        )
+
+    return {"message": f"已為 {len(payload.task_ids)} 個任務啟動重點摘要生成。"}
+
+
 @router.get("/files_for_stage1")
 async def get_files_for_stage1(db: DBClient = Depends(get_db)):
     """(V4 優化後) 獲取所有已處理、可供第一階段分析的檔案列表。"""
@@ -677,7 +785,42 @@ async def get_files_for_performance_analysis(db: DBClient = Depends(get_db)):
     tasks = db.get_all_analysis_tasks()
     return [t for t in tasks if t.get('date_inference_status') == 'completed']
 
-@router.get("/files_for_summary") # JULES (2025-09-21): 為「重點摘要」頁面新增的端點別名，修復 404 錯誤。
+@router.get("/files_for_summary")
+async def get_files_for_summary_page(db: DBClient = Depends(get_db)):
+    """
+    (Jules @ 2025-09-21) 獲取所有可供生成「重點摘要」的檔案列表。
+    這包括所有已成功完成「檔案處理」的項目。
+    """
+    try:
+        # 邏輯與 get_files_for_stage1 相似，因為它們都是分析流程的起點
+        processed_files = db.get_urls_by_statuses(statuses=['processed', 'processing_failed'])
+
+        if not processed_files:
+            return []
+
+        results = []
+        for file_row in processed_files:
+            file_id = file_row['id']
+            filename = Path(file_row['local_path']).name if file_row['local_path'] else f"未知檔案_{file_id}"
+
+            # 為每個檔案獲取或創建對應的分析任務記錄
+            task_data = db.create_or_get_analysis_task(file_id=file_id, filename=filename)
+
+            if task_data:
+                # 附加原始文件資訊以便在 UI 中顯示
+                task_data['title'] = file_row.get('title', filename)
+                task_data['author'] = file_row.get('author')
+                task_data['message_date'] = file_row.get('message_date')
+                results.append(task_data)
+
+        return results
+    except Exception as e:
+        log.error(f"API: 獲取待摘要檔案列表時出錯: {e}", exc_info=True)
+        if isinstance(e, (ConnectionError, RuntimeError)):
+             raise HTTPException(status_code=503, detail=f"資料庫服務通訊失敗: {e}")
+        raise HTTPException(status_code=500, detail="獲取待摘要檔案列表時發生伺服器內部錯誤。")
+
+
 @router.get("/files_for_stage2")
 async def get_files_for_stage2(db: DBClient = Depends(get_db)):
     """(V4 優化後) 獲取已完成績效分析，可供生成報告的任務列表。"""

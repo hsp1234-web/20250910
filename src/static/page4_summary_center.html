@@ -133,19 +133,29 @@
 
             const populateModelSelector = (models) => {
                 modelSelect.innerHTML = '';
+                // 修正模型排序與過濾邏輯
                 const sortedModels = [...models].sort((a, b) => {
+                    const aIsFlash = a.includes('flash');
+                    const bIsFlash = b.includes('flash');
                     const aIsVision = a.includes('vision');
                     const bIsVision = b.includes('vision');
-                    if (aIsVision && !bIsVision) return -1;
-                    if (!aIsVision && bIsVision) return 1;
+
+                    // 規則1：優先顯示 'flash' 模型
+                    if (aIsFlash && !bIsFlash) return -1;
+                    if (!aIsFlash && bIsFlash) return 1;
+
+                    // 規則2：其次，非 'vision' 模型優先
+                    if (!aIsVision && bIsVision) return -1;
+                    if (aIsVision && !bIsVision) return 1;
+
+                    // 規則3：最後按字母順序排序
                     return a.localeCompare(b);
                 });
 
+                // 移除僅顯示 vision 模型的錯誤過濾，顯示所有模型
                 sortedModels.forEach(modelName => {
-                    if (modelName.includes("vision")) {
-                        const option = new Option(modelName.replace('models/', ''), modelName);
-                        modelSelect.add(option);
-                    }
+                    const option = new Option(modelName.replace('models/', ''), modelName);
+                    modelSelect.add(option);
                 });
             };
 
