@@ -5,6 +5,7 @@ import logging
 import json
 import subprocess
 import sys
+import importlib.util
 import threading
 import re
 import asyncio
@@ -497,15 +498,16 @@ async def system_readiness_check():
     """
     檢查核心依賴（如 yt-dlp）是否已準備就緒。
     """
-    # 使用 shutil.which 檢查 yt-dlp 是否在系統 PATH 中且可執行
-    yt_dlp_path = shutil.which("yt-dlp")
-    is_ready = yt_dlp_path is not None
+    # 新的檢查方式：檢查 'yt_dlp' 模組是否可被匯入，
+    # 這與新的執行方式 (python -m yt_dlp) 保持一致，更為穩健。
+    yt_dlp_spec = importlib.util.find_spec("yt_dlp")
+    is_ready = yt_dlp_spec is not None
 
     if is_ready:
-        log.info(f"✅ 系統就緒檢查：成功找到 yt-dlp 於 {yt_dlp_path}")
+        log.info(f"✅ 系統就緒檢查：成功找到 yt_dlp 模組。")
         return {"ready": True}
     else:
-        log.warning("⚠️ 系統就緒檢查：找不到 yt-dlp。前端功能可能受限。")
+        log.warning("⚠️ 系統就緒檢查：找不到 yt-dlp 模組。前端功能可能受限。")
         return {"ready": False}
 
 @app.get("/api/system_stats")
