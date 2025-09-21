@@ -390,6 +390,24 @@ class ServerManager:
             ]
             install_requirements(core_requirements, "核心伺服器", force_pip=True)
 
+            # --- JULES'S FIX (2025-09-21): 強制安裝/升級關鍵工具 ---
+            # 為了應對 Colab 環境中可能存在的、不完整的預裝套件（「幽靈模組」），
+            # 我們在此新增一個強制步驟，確保 yt-dlp 和 gdown 總是被更新到最新且完整的版本。
+            self._log_manager.log("INFO", "步驟 1.5/3: 正在強制更新關鍵下載工具...")
+            try:
+                critical_tools = ["yt-dlp", "gdown"]
+                pip_upgrade_command = [sys.executable, "-m", "pip", "install", "--upgrade"] + critical_tools
+                upgrade_result = subprocess.run(pip_upgrade_command, capture_output=True, text=True, encoding='utf-8', check=True)
+                if upgrade_result.stdout and upgrade_result.stdout.strip():
+                    self._log_manager.log("DEBUG", f"[強制更新] pip stdout:\n{upgrade_result.stdout}", "Installer")
+                self._log_manager.log("SUCCESS", "✅ 關鍵下載工具更新完畢。")
+            except subprocess.CalledProcessError as e:
+                error_log = f"強制更新關鍵工具失敗！返回碼: {e.returncode}\n"
+                if e.stderr and e.stderr.strip():
+                    error_log += f"STDERR:\n{e.stderr}\n"
+                self._log_manager.log("CRITICAL", error_log, "Installer")
+                raise
+
             # --- 階段 2: 啟動後端服務 ---
             self._log_manager.log("INFO", "步驟 2/3: 正在啟動後端協調器...")
             launch_command = [sys.executable, "src/core/orchestrator.py"]
