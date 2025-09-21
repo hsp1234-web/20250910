@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>摘要中心</title>
+    <link rel="stylesheet" href="/static/css/common.css">
+    <link rel="stylesheet" href="/static/css/nav.css">
+    <link rel="stylesheet" href="/static/css/page11.css">
+</head>
+<body>
+    <nav class="top-nav">
+        <ul>
+            <li><a href="/main">鳳凰主頁</a></li>
+            <li><a href="/page1">資料擷取</a></li>
+            <li><a href="/page2">批次下載</a></li>
+            <li><a href="/page3">檔案處理</a></li>
+            <li><a href="/page4_stage1_ai">AI分析</a></li>
+            <li><a href="/page11_summary_center" class="active">摘要中心</a></li>
+            <li><a href="/page5">系統備份</a></li>
+            <li><a href="/page6">金鑰管理</a></li>
+            <li><a href="/page7">提示詞管理</a></li>
+            <li><a href="/page8">檔案總覽</a></li>
+            <li><a href="/page9">績效儀表板</a></li>
+            <li><a href="/page_bond">債券分析</a></li>
+        </ul>
+    </nav>
+
+    <div class="container">
+        <h1>摘要中心 (重點摘要產生器)</h1>
+        <p>在此處，您可以為已完成內容提取的文件，生成 AI 重點摘要。</p>
+
+        <div class="controls">
+            <button id="select-all">全選</button>
+            <button id="deselect-all">取消全選</button>
+            <div class="model-selector">
+                <label for="model-select">分析模型:</label>
+                <select id="model-select" disabled>
+                    <option>正在載入模型...</option>
+                </select>
+            </div>
+            <button id="start-summary-btn" class="start-btn" disabled>✨ 開始生成重點摘要</button>
+            <button id="toggle-all-summaries">📖 全部展開/收合</button>
+        </div>
+
+        <div id="card-container">
+            <!-- 卡片將由 JS 動態生成於此 -->
+        </div>
+    </div>
+
+    <script>
+        const modelSelect = document.getElementById('model-select');
+        const startBtn = document.getElementById('start-summary-btn');
+        const cardContainer = document.getElementById('card-container');
+        const selectAllBtn = document.getElementById('select-all');
+        const deselectAllBtn = document.getElementById('deselect-all');
+        const toggleAllBtn = document.getElementById('toggle-all-summaries');
+
+        let tasks = [];
+
+        // 渲染卡片
+        function renderCards() {
+            cardContainer.innerHTML = '';
+            tasks.forEach(task => {
+                const card = document.createElement('div');
+                card.className = 'card';
+                card.dataset.taskId = task.id;
+
+                const statusClass = getStatusClass(task.summary_status);
+                const statusText = translateStatus(task.summary_status);
+
+                let summaryHTML = '';
+                if (task.summary_status === 'completed' && task.summary_content) {
+                    summaryHTML = `
+                        <div class="summary-content" style="display: none;">
+                            <pre>${escapeHtml(task.summary_content)}</pre>
+                        </div>
+                    `;
+                }
+
+                let errorHTML = '';
+                if (task.summary_status === 'failed' && task.summary_error_log) {
+                     errorHTML = `<div class="error-log"><strong>錯誤:</strong> ${escapeHtml(task.summary_error_log)}</div>`;
+                }
+
+                card.innerHTML = `
+                    <div class="card-header">
+                        <input type="checkbox" class="task-checkbox" value="${task.id}" ${task.summary_status !== 'pending' ? '' : ''}>
+                        <h3 class="title">${escapeHtml(task.title || task.filename)}</h3>
+                    </div>
+                    <div class="metadata">
+                        <span>作者: ${escapeHtml(task.author || 'N/A')}</span>
+                        <span>日期: ${escapeHtml(task.message_date || 'N/A')}</span>
+                    </div>
+                    <div class="status-bar">
+                        <span class="status ${statusClass}">${statusText}</span>
+                        ${task.summary_token_usage ? `<span>Token消耗: ${task.summary_token_usage}</span>` : ''}
+                        ${task.summary_status === 'completed' ? `<button class="toggle-summary">▶️ 展開摘要</button>` : ''}
+                    </div>
+                    ${errorHTML}
+                    ${summaryHTML}
+                `;
+                cardContainer.appendChild(card);
+            });
+            updateButtonStates();
+        }
+
+        function getStatusClass(status) {
+            switch (status) {
+                case 'completed': return 'status-completed';
+                case 'processing': return 'status-processing';
+                case 'failed': return 'status-failed';
+                default: return 'status-pending';
+            }
+        }
+
+        function translateStatus(status) {
+            const map = {
+                'pending': '待處理',
+                'processing': '處理中...',
+                'completed': '✅ 已完成',
+                'failed': '❌ 失敗'
+            };
+            return map[status] || status || '待處理';
+        }
+
+        function escapeHtml(unsafe) {
+            if (unsafe === null || typeof unsafe === 'undefined') return '';
+            return unsafe
+                 .toString()
+                 .replace(/&/g, "&amp;")
+                 .replace(/</g, "&lt;")
+                 .replace(/>/g, "&gt;")
+                 .replace(/"/g, "&quot;")
+                 .replace(/'/g, "&#039;");
+        }
+
+        // 更新按鈕狀態
+        function updateButtonStates() {
+            const anyChecked = document.querySelector('.task-checkbox:checked');
+            startBtn.disabled = !anyChecked || modelSelect.disabled;
+        }
+
+        // 獲取模型列表
+        async function fetchModels() {
+            try {
+                const response = await fetch('/api/keys/models');
+                const models = await response.json();
+                modelSelect.innerHTML = '';
+                if (models && models.length > 0) {
+                    models.forEach(model => {
+                        if (model.includes("vision")) { // 只顯示 vision 模型
+                             const option = new Option(model, model);
+                             modelSelect.add(option);
+                        }
+                    });
+                    modelSelect.disabled = false;
+                } else {
+                    modelSelect.innerHTML = '<option>無可用模型</option>';
+                }
+            } catch (error) {
+                console.error('獲取模型失敗:', error);
+                modelSelect.innerHTML = '<option>獲取模型失敗</option>';
+            }
+            updateButtonStates();
+        }
+
+        // 獲取任務列表
+        async function fetchTasks() {
+            try {
+                const response = await fetch('/api/analyzer/files_for_summary');
+                tasks = await response.json();
+                renderCards();
+            } catch (error) {
+                console.error('獲取任務列表失敗:', error);
+                cardContainer.innerHTML = '<p>獲取任務列表失敗，請稍後再試。</p>';
+            }
+        }
+
+        // 事件監聽
+        selectAllBtn.addEventListener('click', () => {
+            document.querySelectorAll('.task-checkbox').forEach(cb => cb.checked = true);
+            updateButtonStates();
+        });
+
+        deselectAllBtn.addEventListener('click', () => {
+            document.querySelectorAll('.task-checkbox').forEach(cb => cb.checked = false);
+            updateButtonStates();
+        });
+
+        cardContainer.addEventListener('change', (e) => {
+            if (e.target.classList.contains('task-checkbox')) {
+                updateButtonStates();
+            }
+        });
+
+        startBtn.addEventListener('click', async () => {
+            const selectedIds = Array.from(document.querySelectorAll('.task-checkbox:checked')).map(cb => parseInt(cb.value));
+            const modelName = modelSelect.value;
+            if (selectedIds.length === 0 || !modelName) {
+                alert('請至少選擇一個任務和一個模型。');
+                return;
+            }
+
+            startBtn.disabled = true;
+            startBtn.textContent = '正在啟動...';
+
+            try {
+                const response = await fetch('/api/analyzer/start_summary_generation', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ task_ids: selectedIds, model_name: modelName })
+                });
+                const result = await response.json();
+                alert(result.message);
+                // 更新狀態為處理中
+                selectedIds.forEach(id => {
+                    const task = tasks.find(t => t.id === id);
+                    if (task) task.summary_status = 'processing';
+                });
+                renderCards();
+            } catch (error) {
+                console.error('啟動失敗:', error);
+                alert('啟動失敗，請查看控制台日誌。');
+            } finally {
+                 startBtn.textContent = '✨ 開始生成重點摘要';
+                 updateButtonStates();
+            }
+        });
+
+        cardContainer.addEventListener('click', e => {
+            if (e.target.classList.contains('toggle-summary')) {
+                const button = e.target;
+                const summaryContent = button.closest('.card').querySelector('.summary-content');
+                if (summaryContent) {
+                    const isVisible = summaryContent.style.display !== 'none';
+                    summaryContent.style.display = isVisible ? 'none' : 'block';
+                    button.textContent = isVisible ? '▶️ 展開摘要' : '🔽 收合摘要';
+                }
+            }
+        });
+
+        toggleAllBtn.addEventListener('click', () => {
+            const allSummaries = document.querySelectorAll('.summary-content');
+            const allButtons = document.querySelectorAll('.toggle-summary');
+            // 以第一個摘要的狀態為基準來決定全部操作
+            const shouldOpen = allSummaries.length > 0 && allSummaries[0].style.display === 'none';
+
+            allSummaries.forEach(summary => summary.style.display = shouldOpen ? 'block' : 'none');
+            allButtons.forEach(button => button.textContent = shouldOpen ? '🔽 收合摘要' : '▶️ 展開摘要');
+        });
+
+        // WebSocket 連線
+        function connectWebSocket() {
+            const ws = new WebSocket(`ws://${window.location.host}/ws`);
+            ws.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                if (data.type === 'analysis_update' && data.task_id) {
+                    const task = tasks.find(t => t.id === data.task_id);
+                    if (task) {
+                        Object.assign(task, data.result);
+                        renderCards();
+                    }
+                }
+            };
+            ws.onclose = () => {
+                console.log('WebSocket 關閉，5秒後嘗試重連...');
+                setTimeout(connectWebSocket, 5000);
+            };
+        }
+
+        // 初始化
+        document.addEventListener('DOMContentLoaded', () => {
+            fetchTasks();
+            fetchModels();
+            connectWebSocket();
+        });
+    </script>
+</body>
+</html>
