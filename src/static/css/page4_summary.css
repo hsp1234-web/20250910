@@ -1,31 +1,19 @@
 /* src/static/css/page4_summary.css */
-/* Styles for Summary Center, inheriting from page8 for consistency */
+/* Styles for Summary Center, now inheriting from page1_unified.css */
 
-/* --- 變數與基本設定 (from page8.css) --- */
-:root {
-    --primary-color: #007bff;
-    --primary-hover: #0056b3;
-    --border-color: #dee2e6;
-    --card-bg: #ffffff;
-    --body-bg: #f8f9fa;
-    --text-color: #212529;
-    --text-light: #6c757d;
-    --font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-    --mono-font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace;
-}
+/* The main layout, cards, and buttons are now primarily styled by page1_unified.css */
 
-/* --- Controls on top of the page --- */
+/* --- Page-Specific Adjustments --- */
+
+/* Adjustments for the controls within the panel */
 .controls {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
     gap: 15px;
-    padding: 15px;
-    background-color: var(--card-bg);
-    border: 1px solid var(--border-color);
-    border-radius: 8px;
-    margin-bottom: 20px;
-    box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+    padding-top: 15px;
+    margin-top: 15px;
+    border-top: 1px solid var(--border-color);
 }
 
 .model-selector {
@@ -35,88 +23,39 @@
 }
 
 #model-select {
-    padding: 5px;
+    padding: 8px;
     border-radius: 4px;
     border: 1px solid #ccc;
+    background-color: var(--card-bg);
 }
 
-.start-btn {
-    background-color: #28a745;
-    color: white;
-    padding: 8px 15px;
-    border: none;
-    border-radius: 5px;
-    cursor: pointer;
-}
-
-.start-btn:disabled {
-    background-color: #6c757d;
-}
-
-/* --- Card Grid Layout --- */
-#card-container {
-    display: grid;
-    grid-template-columns: 1fr; /* Each card takes full width */
-    gap: 1.5rem;
-}
-
-/* --- Card Styles (from page8.css) --- */
-.card {
-    background: var(--card-bg);
-    border: 1px solid var(--border-color);
-    border-radius: 8px;
-    box-shadow: 0 4px 6px rgba(0,0,0,0.05);
-    display: flex;
-    flex-direction: column; /* Changed to column for header/body structure */
-}
-
-.card-main-header {
+/* Ensure card header checkbox and title are aligned */
+.card-header {
     display: flex;
     align-items: center;
     gap: 15px;
-    padding: 1rem 1.5rem;
-    border-bottom: 1px solid var(--border-color);
 }
 
-.card-main-header input[type="checkbox"] {
+.card-header .card-title {
+    font-size: 1.1em;
+    font-weight: 600;
+}
+
+.card-header input[type="checkbox"] {
     transform: scale(1.4);
 }
 
-.card-main-header .title {
-    font-size: 1.25rem;
-    font-weight: 600;
-    margin: 0;
-}
-
-.card-body {
-    padding: 1.5rem;
-    display: flex;
-    flex-direction: column;
-    gap: 1rem;
-}
-
-/* Info Grid for metadata (from page8.css) */
+/* Info Grid inside the card body */
 .info-grid {
     display: grid;
     grid-template-columns: max-content 1fr;
     align-items: center;
     gap: 0.5rem 1rem;
     font-size: 0.9rem;
+    margin-bottom: 1rem;
 }
 
-.info-label {
-    font-weight: 500;
-    color: var(--text-light);
-    text-align: right;
-}
-
-.info-value {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-}
-
-/* Status Badge Styles (from page8.css) */
+/* Status Badge Styles */
 .status-badge {
     padding: 0.25em 0.6em;
     font-size: 0.8rem;
@@ -125,28 +64,23 @@
     color: #fff;
     white-space: nowrap;
 }
-.status-completed { background-color: #28a745; }
-.status-processing { background-color: #007bff; }
+.status-completed { background-color: var(--success-color); }
+.status-gemini_processing, .status-processing { background-color: var(--primary-color); }
 .status-pending { color: var(--text-color); background-color: #e9ecef; }
-.status-failed { background-color: #dc3545; }
+.status-failed, .status-validation_failed { background-color: var(--error-color); }
 
 
-/* Summary-specific styles */
-.summary-controls {
+/* Summary-specific styles for the expandable content */
+.summary-container {
     margin-top: 1rem;
     border-top: 1px solid var(--border-color);
     padding-top: 1rem;
 }
 
 .toggle-summary {
-    padding: 0.3rem 0.8rem;
-    font-size: 0.85rem;
-    font-weight: 500;
-    color: #fff;
-    background-color: var(--primary-color);
-    border: none;
-    border-radius: 5px;
-    cursor: pointer;
+    /* Use the standard button style */
+    padding: 8px 15px;
+    font-size: 0.9em;
 }
 
 .summary-content {
@@ -169,4 +103,11 @@
     font-family: inherit;
     font-size: 1em;
     line-height: 1.6;
+}
+
+.summary-content pre.error-log {
+    color: var(--error-color);
+    background-color: #fff0f1;
+    padding: 10px;
+    border-radius: 4px;
 }
