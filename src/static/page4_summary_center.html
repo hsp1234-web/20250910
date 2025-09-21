@@ -4,8 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>摘要中心</title>
-    <link rel="stylesheet" href="/static/css/common.css">
     <link rel="stylesheet" href="/static/css/nav.css">
+    <link rel="stylesheet" href="/static/css/page1_unified.css">
     <link rel="stylesheet" href="/static/css/page4_summary.css">
 </head>
 <body>
@@ -24,7 +24,7 @@
         </ul>
     </nav>
 
-    <div class="container">
+    <div class="main-container">
         <h1>AI 分析流程</h1>
 
         <div class="sub-nav">
@@ -36,26 +36,29 @@
             <a href="/page4_stage4_download" class="sub-nav-button">4. Word 報告下載</a>
         </div>
 
-        <div class="panel">
-            <h2>階段零：重點摘要生成</h2>
-            <p>在此處，您可以為已完成內容提取的文件，生成 AI 重點摘要「小作文」。</p>
-        </div>
-
-        <div class="controls">
-            <button id="select-all">全選</button>
-            <button id="deselect-all">取消全選</button>
-            <div class="model-selector">
-                <label for="model-select">分析模型:</label>
-                <select id="model-select" disabled>
-                    <option>正在檢查金鑰...</option>
-                </select>
+        <div class="content">
+            <div class="panel">
+                <h2>階段零：重點摘要生成</h2>
+                <p>在此處，您可以為已完成內容提取的文件，生成 AI 重點摘要「小作文」。</p>
+                <div class="controls">
+                    <button id="select-all">全選</button>
+                    <button id="deselect-all">取消全選</button>
+                    <div class="model-selector">
+                        <label for="model-select">分析模型:</label>
+                        <select id="model-select" disabled>
+                            <option>正在檢查金鑰...</option>
+                        </select>
+                    </div>
+                    <button id="start-summary-btn" class="start-btn" disabled>✨ 開始生成重點摘要</button>
+                    <button id="toggle-all-summaries">📖 全部展開/收合</button>
+                </div>
             </div>
-            <button id="start-summary-btn" class="start-btn" disabled>✨ 開始生成重點摘要</button>
-            <button id="toggle-all-summaries">📖 全部展開/收合</button>
-        </div>
 
-        <div id="card-container">
-            <!-- Cards will be dynamically generated here -->
+            <div class="panel">
+                <div id="card-container" class="card-grid">
+                    <!-- Cards will be dynamically generated here -->
+                </div>
+            </div>
         </div>
     </div>
 
@@ -101,24 +104,26 @@
                     const isActionable = task.summary_status === 'pending' || !task.summary_status;
 
                     card.innerHTML = `
-                        <div class="card-main-header">
+                        <div class="card-header">
                             <input type="checkbox" class="task-checkbox" value="${task.id}" ${!isActionable ? 'disabled' : ''}>
-                            <h3 class="title">${escapeHtml(task.title || task.filename)}</h3>
+                            <span class="card-title">${escapeHtml(task.title || task.filename)}</span>
                         </div>
                         <div class="card-body">
                             <div class="info-grid">
-                                <span class="info-label">作者</span><span class="info-value">${escapeHtml(task.author || 'N/A')}</span>
-                                <span class="info-label">日期</span><span class="info-value">${escapeHtml(task.message_date || 'N/A')}</span>
-                                <span class="info-label">摘要狀態</span><span class="info-value">${getStatusHTML(task.summary_status)}</span>
-                                <span class="info-label">Token 消耗</span><span class="info-value">${task.summary_token_usage || 'N/A'}</span>
+                                <div><strong>作者:</strong></div><div>${escapeHtml(task.author || 'N/A')}</div>
+                                <div><strong>日期:</strong></div><div>${escapeHtml(task.message_date || 'N/A')}</div>
+                                <div><strong>摘要狀態:</strong></div><div>${getStatusHTML(task.summary_status)}</div>
+                                <div><strong>Token 消耗:</strong></div><div>${task.summary_token_usage || 'N/A'}</div>
                             </div>
-                            <div class="summary-controls">
-                                ${task.summary_status === 'completed' ? `<button class="toggle-summary" data-task-id="${task.id}">▶️ 展開摘要</button>` : ''}
+                            ${task.summary_status === 'completed' || task.summary_status === 'failed' ? `
+                            <div class="summary-container">
+                                <button class="toggle-summary" data-task-id="${task.id}">▶️ 顯示詳細資訊</button>
+                                <div class="summary-content" id="summary-${task.id}">
+                                    ${task.summary_status === 'failed' ? `<pre class="error-log">${escapeHtml(task.summary_error_log)}</pre>` : ''}
+                                    ${task.summary_status === 'completed' ? `<pre>${escapeHtml(task.summary_content)}</pre>` : ''}
+                                </div>
                             </div>
-                            <div class="summary-content" id="summary-${task.id}">
-                                ${task.summary_status === 'failed' ? `<pre class="error-log">${escapeHtml(task.summary_error_log)}</pre>` : ''}
-                                ${task.summary_status === 'completed' ? `<pre>${escapeHtml(task.summary_content)}</pre>` : ''}
-                            </div>
+                            ` : ''}
                         </div>
                     `;
                     cardContainer.appendChild(card);
@@ -133,19 +138,29 @@
 
             const populateModelSelector = (models) => {
                 modelSelect.innerHTML = '';
+                // 修正模型排序與過濾邏輯
                 const sortedModels = [...models].sort((a, b) => {
+                    const aIsFlash = a.includes('flash');
+                    const bIsFlash = b.includes('flash');
                     const aIsVision = a.includes('vision');
                     const bIsVision = b.includes('vision');
-                    if (aIsVision && !bIsVision) return -1;
-                    if (!aIsVision && bIsVision) return 1;
+
+                    // 規則1：優先顯示 'flash' 模型
+                    if (aIsFlash && !bIsFlash) return -1;
+                    if (!aIsFlash && bIsFlash) return 1;
+
+                    // 規則2：其次，非 'vision' 模型優先
+                    if (!aIsVision && bIsVision) return -1;
+                    if (aIsVision && !bIsVision) return 1;
+
+                    // 規則3：最後按字母順序排序
                     return a.localeCompare(b);
                 });
 
+                // 移除僅顯示 vision 模型的錯誤過濾，顯示所有模型
                 sortedModels.forEach(modelName => {
-                    if (modelName.includes("vision")) {
-                        const option = new Option(modelName.replace('models/', ''), modelName);
-                        modelSelect.add(option);
-                    }
+                    const option = new Option(modelName.replace('models/', ''), modelName);
+                    modelSelect.add(option);
                 });
             };
 

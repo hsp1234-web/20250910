@@ -108,11 +108,14 @@ async def get_available_models():
         gemini = GeminiManager(api_keys=valid_keys)
         models = gemini.list_available_models()
         return models
+    except HTTPException:
+        # 確保 FastAPI 的 HTTP 例外能被直接拋出，而不是被下面的通用 Exception 捕捉
+        raise
     except ValueError as e:
-        # 可能是金鑰池為空
+        # 可能是金鑰池為空，或 GeminiManager 初始化失敗
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        log.error(f"查詢可用模型時發生錯誤: {e}", exc_info=True)
+        log.error(f"查詢可用模型時發生未預期的錯誤: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"查詢可用模型時發生意外錯誤: {str(e)}")
 
 @router.post("/test", summary="測試一個 API 金鑰的有效性")
