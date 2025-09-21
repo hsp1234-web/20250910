@@ -193,6 +193,15 @@
                 if (!response.ok) throw new Error('無法獲取金鑰列表');
                 const keys = await response.json();
                 renderKeyList(keys);
+
+                // JULES (2025-09-21): 新增邏輯：檢查是否有有效金鑰，若有則觸發模型查詢
+                const hasValidKeys = keys.some(key => key.is_valid);
+                if (hasValidKeys) {
+                    // 自動觸發一次模型查詢
+                    fetchModels();
+                } else {
+                    modelListContainer.innerHTML = '<p>沒有可用的有效金鑰。請先手動驗證或新增有效金鑰。</p>';
+                }
             } catch (error) {
                 keyListContainer.innerHTML = `<p style="color: red;">${error.message}</p>`;
             }
@@ -328,7 +337,8 @@
             }
         });
 
-        fetchModelsBtn.addEventListener('click', async () => {
+        // JULES (2025-09-21): 重構模型查詢邏輯，以便在頁面載入時自動執行
+        const fetchModels = async () => {
             fetchModelsBtn.disabled = true;
             fetchModelsBtn.textContent = '查詢中...';
             modelListContainer.innerHTML = '<p>正在向 Google API 查詢可用的模型，請稍候...</p>';
@@ -337,13 +347,18 @@
                 const response = await fetch('/api/keys/models');
                 const result = await response.json();
                 if (!response.ok) {
+                    // 如果沒有有效金鑰，後端會回傳 400 錯誤
+                    if (response.status === 400) {
+                         throw new Error('查詢失敗：請確保至少有一個有效金鑰。');
+                    }
                     throw new Error(result.detail || '查詢失敗');
                 }
 
                 if (result.length > 0) {
                     let modelHtml = '<ul>';
-                    result.forEach(model => {
-                        modelHtml += `<li>${model}</li>`;
+                    // 增加排序和格式化，使其與另一頁面一致
+                    result.sort().forEach(model => {
+                        modelHtml += `<li>${model.replace('models/', '')}</li>`;
                     });
                     modelHtml += '</ul>';
                     modelListContainer.innerHTML = modelHtml;
@@ -357,7 +372,10 @@
                 fetchModelsBtn.disabled = false;
                 fetchModelsBtn.textContent = '重新查詢可用模型';
             }
-        });
+        };
+
+        // 按鈕現在只負責觸發已重構的函式
+        fetchModelsBtn.addEventListener('click', fetchModels);
 
         // --- JULES (2025-09-15): 超時設定邏輯 ---
         // --- JULES (2025-09-17): 重構為通用設定處理函式 ---
@@ -420,7 +438,7 @@
         saveRotationDelayBtn.addEventListener('click', () => saveSetting('gemini_rotation_delay', rotationDelayInput, rotationDelayStatus, saveRotationDelayBtn));
 
         // --- 初始載入 ---
-        fetchKeys();
+        fetchKeys(); // fetchModels() is now correctly called from within fetchKeys()
         fetchSetting('api_timeout_seconds', timeoutInput, timeoutStatus);
         fetchSetting('gemini_submission_delay', submissionDelayInput, submissionDelayStatus);
         fetchSetting('gemini_rotation_delay', rotationDelayInput, rotationDelayStatus);

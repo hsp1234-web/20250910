@@ -141,6 +141,15 @@ def delete_key(key_hash: str) -> bool:
     affected_rows = _execute_query("DELETE FROM api_keys WHERE key_hash = ?", (key_hash,))
     return affected_rows > 0
 
+def clear_all_keys() -> int:
+    """
+    (Jules @ 2025-09-21) 從資料庫中刪除所有 API 金鑰，用於啟動時的環境清理。
+    """
+    # SQLite 特有的語法，用於重設自動遞增的主鍵
+    _execute_query("DELETE FROM sqlite_sequence WHERE name='api_keys'")
+    affected_rows = _execute_query("DELETE FROM api_keys")
+    return affected_rows
+
 def validate_all_keys() -> List[Dict[str, Any]]:
     """
     並行重新驗證所有已儲存的金鑰，以提升效率。
