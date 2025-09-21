@@ -1,191 +1,62 @@
 // src/static/js/page_bond.js
 
 document.addEventListener('DOMContentLoaded', () => {
-    console.log("Bond Analysis Page script loaded.");
+    console.log("簡化版債券分析頁面腳本已載入。");
 
-    let apiBaseUrl = null; // 將動態設定
-    const chartInstances = {}; // 用來存放我們的圖表物件
+    const indicators = ['gdp', 'cpi', 'fedfunds', 'ism'];
+    const statusDiv = document.getElementById('update-status');
 
-    // --- 服務發現 ---
-    async function getApiBaseUrl() {
-        if (apiBaseUrl) {
-            return apiBaseUrl;
-        }
-        try {
-            console.log("正在從主應用程式獲取服務註冊資訊...");
-            const response = await fetch('/api/service_registry');
-            if (!response.ok) {
-                throw new Error(`無法獲取服務註冊資訊 (狀態: ${response.status})。`);
-            }
-            const contentType = response.headers.get("content-type");
-            if (!contentType || !contentType.includes("application/json")) {
-                // 嘗試讀取文字內容以幫助除錯
-                const textContent = await response.text();
-                throw new Error(`回應的 Content-Type 不是 JSON。收到的內容: ${textContent.substring(0, 100)}...`);
-            }
-            const registry = await response.json();
-            const bondServiceInfo = registry['bond_data_service'];
-            if (!bondServiceInfo || !bondServiceInfo.port) {
-                throw new Error('在註冊資訊中找不到 bond_data_service 的埠號。');
-            }
-            apiBaseUrl = `http://127.0.0.1:${bondServiceInfo.port}`;
-            console.log(`服務發現成功！ Bond Data Service 位址: ${apiBaseUrl}`);
-            return apiBaseUrl;
-        } catch (error) {
-            console.error("服務發現失敗:", error);
-            const statusDiv = document.getElementById('update-status');
-            if(statusDiv) statusDiv.textContent = `❌ 錯誤：無法連接到後端微服務。請確認主服務和子服務都已啟動。 ${error.message}`;
-            throw error; // 重新拋出錯誤以停止後續執行
-        }
-    }
-
-    const indicators = [
-        { id: 'gdp', chartId: 'gdp-chart', label: '美國實質GDP (十億美元)' },
-        { id: 'cpi', chartId: 'cpi-chart', label: '美國CPI' },
-        { id: 'fedfunds', chartId: 'fedfunds-chart', label: '聯準會基準利率 (%)' }
-    ];
-
-    // 渲染圖表的函式
-    function renderChart(chartId, label, labels, data) {
-        const ctx = document.getElementById(chartId);
-        if (!ctx) {
-            console.error(`找不到 ID 為 ${chartId} 的 canvas。`);
-            return;
-        }
-
-        if (chartInstances[chartId]) {
-            chartInstances[chartId].destroy();
-        }
-
-        chartInstances[chartId] = new Chart(ctx, {
-            type: 'line',
-            data: {
-                labels: labels,
-                datasets: [{
-                    label: label,
-                    data: data,
-                    borderColor: 'rgba(0, 123, 255, 1)',
-                    backgroundColor: 'rgba(0, 123, 255, 0.1)',
-                    fill: true,
-                    tension: 0.1
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                scales: { y: { beginAtZero: false } }
-            }
-        });
-    }
-
-    // 抓取數據並渲染圖表的函式
-    async function fetchAndRenderChart(indicator) {
-        const { id, chartId, label } = indicator;
-        const statusEl = document.getElementById(`${id}-last-updated`);
-        try {
-            const baseUrl = await getApiBaseUrl();
-            statusEl.textContent = '載入中...';
-            const response = await fetch(`${baseUrl}/data/${id}`);
-            if (!response.ok) {
-                throw new Error(`網路回應不正常: ${response.statusText}`);
-            }
-            const rawData = await response.json();
-
-            if (rawData.length === 0) {
-                // 如果沒有資料，自動觸發一次抓取
-                console.log(`指標 '${id}' 在資料庫中沒有資料，正在觸發自動抓取...`);
-                statusEl.textContent = '首次載入，正在從遠端更新...';
-
-                const fetchResponse = await fetch(`${baseUrl}/fetch/${id}`, { method: 'POST' });
-                if (!fetchResponse.ok) {
-                    const errorResult = await fetchResponse.json().catch(() => ({ detail: '無法解析錯誤訊息' }));
-                    throw new Error(`從 /fetch/${id} 觸發抓取失敗: ${errorResult.detail}`);
-                }
-
-                // 抓取成功後，重新獲取一次數據
-                console.log(`指標 '${id}' 伺服器端抓取觸發成功，正在重新獲取數據...`);
-                const newDataResponse = await fetch(`${baseUrl}/data/${id}`);
-                if (!newDataResponse.ok) {
-                    throw new Error(`第二次從 /data/${id} 獲取數據時網路回應不正常: ${newDataResponse.statusText}`);
-                }
-                const newRawData = await newDataResponse.json();
-
-                // 重新賦值並繼續執行
-                rawData = newRawData;
-
-                if (rawData.length === 0) {
-                    console.warn(`指標 '${id}' 在嘗試更新後依然沒有數據。`);
-                    renderChart(chartId, label, [], []);
-                    statusEl.textContent = '尚無資料';
+    // 為每個指標的按鈕設定事件監聽器
+    indicators.forEach(id => {
+        const button = document.getElementById(`btn-fetch-${id}`);
+        if (button) {
+            button.addEventListener('click', () => {
+                // ism 按鈕是禁用的，但我們還是為它加上邏輯以備未來使用
+                if (button.disabled) {
+                    console.log(`按鈕 ${id} 目前被禁用。`);
                     return;
                 }
-            }
-
-            const labels = rawData.map(d => d.date);
-            const data = rawData.map(d => d.value);
-
-            renderChart(chartId, label, labels, data);
-
-            const lastDate = labels[labels.length - 1];
-            statusEl.textContent = lastDate ? new Date(lastDate).toLocaleDateString('zh-TW') : 'N/A';
-
-        } catch (error) {
-            console.error(`抓取或渲染 ${id} 失敗:`, error);
-            statusEl.textContent = '讀取失敗';
-        }
-    }
-
-    // 初始載入所有圖表
-    function loadAllCharts() {
-        getApiBaseUrl().then(() => {
-            console.log("正在載入所有圖表...");
-            indicators.forEach(fetchAndRenderChart);
-        }).catch(error => {
-            console.error("因服務位址獲取失敗，無法載入圖表。");
-        });
-    }
-
-    // --- 手動更新邏輯 ---
-    async function handleFetchClick(indicator) {
-        const { id } = indicator;
-        const button = document.getElementById(`btn-fetch-${id}`);
-        const statusDiv = document.getElementById('update-status');
-
-        if (!button) return;
-
-        button.disabled = true;
-        button.textContent = '更新中...';
-        statusDiv.textContent = `正在為 ${id.toUpperCase()} 觸發伺服器端資料更新...`;
-
-        try {
-            const baseUrl = await getApiBaseUrl();
-            const response = await fetch(`${baseUrl}/fetch/${id}`, { method: 'POST' });
-            const result = await response.json();
-
-            if (!response.ok) {
-                throw new Error(result.detail || '伺服器返回錯誤');
-            }
-
-            statusDiv.textContent = `✅ ${result.message} 現在將刷新圖表。`;
-
-            await fetchAndRenderChart(indicator);
-
-        } catch (error) {
-            console.error(`觸發 ${id} 的抓取失敗:`, error);
-            statusDiv.textContent = `❌ 更新 ${id.toUpperCase()} 失敗: ${error.message}`;
-        } finally {
-            button.disabled = false;
-            button.textContent = `更新${id.toUpperCase()}數據`;
-        }
-    }
-
-    // 為按鈕加上事件監聽器
-    indicators.forEach(indicator => {
-        const button = document.getElementById(`btn-fetch-${indicator.id}`);
-        if (button) {
-            button.addEventListener('click', () => handleFetchClick(indicator));
+                updateChart(id);
+            });
         }
     });
 
-    loadAllCharts();
+    function updateChart(indicatorId) {
+        const imgElement = document.getElementById(`${indicatorId}-chart-img`);
+        if (!imgElement) {
+            console.error(`找不到 ID 為 ${indicatorId}-chart-img 的圖片元素。`);
+            return;
+        }
+
+        console.log(`正在為 ${indicatorId} 更新圖表...`);
+        statusDiv.textContent = `正在為 ${indicatorId.toUpperCase()} 生成圖表，請稍候...`;
+
+        // 建立 API 端點 URL。
+        // 注意：我們假設主伺服器會有一個代理將此請求轉發到 bond_data_service
+        // 這樣可以避免在前端處理服務發現和CORS問題。
+        const apiUrl = `/api/bond_service/chart/${indicatorId}`;
+
+        // 附加時間戳以避免瀏覽器快取舊圖片
+        const finalUrl = `${apiUrl}?t=${new Date().getTime()}`;
+
+        // 先顯示一個載入中的提示
+        imgElement.src = ""; // 清空 src 以顯示 alt 文字
+        imgElement.alt = "圖表載入中...";
+
+        // 設定圖片載入成功和失敗的事件處理
+        imgElement.onload = () => {
+            console.log(`${indicatorId} 圖表載入成功。`);
+            statusDiv.textContent = `✅ ${indicatorId.toUpperCase()} 圖表已更新。`;
+            imgElement.alt = `指標 ${indicatorId} 的圖表`; // 成功後更新 alt
+        };
+
+        imgElement.onerror = () => {
+            console.error(`${indicatorId} 圖表載入失敗。`);
+            statusDiv.textContent = `❌ ${indicatorId.toUpperCase()} 圖表載入失敗。請檢查後端服務日誌。`;
+            imgElement.alt = "圖表載入失敗。";
+        };
+
+        // 開始載入圖片
+        imgElement.src = finalUrl;
+    }
 });

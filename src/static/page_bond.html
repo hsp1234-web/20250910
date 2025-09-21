@@ -14,10 +14,14 @@
         }
         .chart-container {
             width: 100%;
-            height: 400px; /* Or any desired height */
+            /* Let height be auto */
+        }
+        .chart-container img {
+            width: 100%;
+            height: auto;
+            border: 1px solid #ddd;
         }
     </style>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
     <nav class="navbar">
@@ -44,30 +48,26 @@
             <div class="panel">
                 <h2>美國實質GDP (季)</h2>
                 <div class="chart-container">
-                    <canvas id="gdp-chart"></canvas>
+                    <img id="gdp-chart-img" src="" alt="點擊上方按鈕以生成圖表" />
                 </div>
-                <small>最後更新時間: <span id="gdp-last-updated">N/A</span></small>
             </div>
             <div class="panel">
                 <h2>美國CPI年增率</h2>
                 <div class="chart-container">
-                    <canvas id="cpi-chart"></canvas>
+                    <img id="cpi-chart-img" src="" alt="點擊上方按鈕以生成圖表" />
                 </div>
-                <small>最後更新時間: <span id="cpi-last-updated">N/A</span></small>
             </div>
             <div class="panel">
                 <h2>聯準會基準利率</h2>
                 <div class="chart-container">
-                    <canvas id="fedfunds-chart"></canvas>
+                    <img id="fedfunds-chart-img" src="" alt="點擊上方按鈕以生成圖表" />
                 </div>
-                <small>最後更新時間: <span id="fedfunds-last-updated">N/A</span></small>
             </div>
             <div class="panel">
                 <h2>美國ISM製造業PMI</h2>
                 <div class="chart-container">
-                    <canvas id="ism-chart"></canvas>
+                    <img id="ism-chart-img" src="" alt="點擊上方按鈕以生成圖表" />
                 </div>
-                <small>最後更新時間: <span id="ism-last-updated">N/A</span></small>
             </div>
         </div>
     </div>
