@@ -73,6 +73,10 @@ class Stage2Request(BaseModel):
     task_ids: List[int]
     model_name: str
 
+class SummaryGenerationRequest(BaseModel):
+    task_ids: List[int]
+    model_name: str
+
 # --- WebSocket 通知輔助函式 (已由佇列取代) ---
 # JULES (2025-09-13): 移除了舊的 _send_websocket_notification 函式。
 # 現在所有通知都將透過一個從主應用程式傳入的 asyncio.Queue 來發送。
@@ -389,6 +393,75 @@ def _run_stage2_blocking_task(task_id: int, model_name: str, queue: asyncio.Queu
         db_client.update_analysis_task(task_id=task_id, updates={"stage2_status": "failed", "stage2_error_log": error_message})
 
 
+def _run_indexing_blocking_task(task_id: int, queue: asyncio.Queue, loop: asyncio.AbstractEventLoop, db_client: DBClient):
+    """
+    執行精簡索引生成的同步阻塞部分。
+    """
+    log.info(f"索引生成任務實際執行開始：task_id={task_id}")
+    try:
+        # JULES V6 啟動優化：延遲載入
+        from tools.index_generator import generate_concise_index
+
+        # 呼叫新的工具函式
+        index_file_path = generate_concise_index(task_id=task_id, db_client=db_client)
+
+        # 更新資料庫
+        db_client.update_analysis_task(
+            task_id=task_id,
+            updates={
+                "index_status": "completed",
+                "index_result_path": index_file_path
+            }
+        )
+        log.info(f"索引生成任務成功：task_id={task_id}")
+
+    except Exception as e:
+        error_message = f"錯誤: {type(e).__name__}: {str(e)}"
+        log.error(f"索引生成任務失敗：task_id={task_id}，{error_message}", exc_info=True)
+        db_client.update_analysis_task(task_id=task_id, updates={"index_status": "failed", "index_error_log": error_message})
+
+
+def _run_summary_generation_blocking_task(task_id: int, model_name: str, queue: asyncio.Queue, loop: asyncio.AbstractEventLoop, db_client: DBClient):
+    """
+    執行重點摘要生成的同步阻塞部分。
+    """
+    log.info(f"重點摘要生成任務實際執行開始：task_id={task_id}, model={model_name}")
+    try:
+        # 延遲載入
+        from tools.summary_generator import generate_summary_essay
+
+        task_data = db_client.get_analysis_task(task_id=task_id)
+        if not task_data:
+            raise ValueError(f"找不到任務 {task_id} 的資料。")
+
+        # 呼叫新的工具函式
+        summary_content, token_usage = generate_summary_essay(
+            task=task_data,
+            db_client=db_client,
+            model_name=model_name
+        )
+
+        # 更新資料庫
+        db_client.update_analysis_task(
+            task_id=task_id,
+            updates={
+                "summary_status": "completed",
+                "summary_content": summary_content,
+                "summary_model": model_name,
+                "summary_token_usage": token_usage,
+            }
+        )
+        log.info(f"重點摘要任務成功：task_id={task_id}")
+
+    except Exception as e:
+        error_message = f"錯誤: {type(e).__name__}: {str(e)}"
+        log.error(f"重點摘要任務失敗：task_id={task_id}，{error_message}", exc_info=True)
+        db_client.update_analysis_task(
+            task_id=task_id,
+            updates={"summary_status": "failed", "summary_error_log": error_message}
+        )
+
+
 # --- 新的非同步包裝函式 (用於併發控制) ---
 async def run_analysis_task_wrapper(task_id: int, semaphore: asyncio.Semaphore, blocking_func, queue: asyncio.Queue, loop: asyncio.AbstractEventLoop, db_client: DBClient, **kwargs):
     """
@@ -406,6 +479,9 @@ async def run_analysis_task_wrapper(task_id: int, semaphore: asyncio.Semaphore, 
         elif stage == 'date_inference':
             status_field = "date_inference_status"
             update_payload = {status_field: "processing"}
+        elif stage == 'summary':
+            status_field = "summary_status"
+            update_payload = {status_field: "processing", "summary_model": kwargs.get("model_name")}
         elif stage in [1, 2]:
             status_field = f"stage{stage}_status"
             update_payload = {status_field: "processing", f"stage{stage}_model": kwargs.get("model_name")}
@@ -635,6 +711,70 @@ async def start_stage2_analysis(request: Request, payload: Stage2Request, backgr
             log.warning(f"跳過任務 ID {task_id} 的第二階段分析，因為其績效分析未完成。")
 
     return {"message": f"已為 {len(payload.task_ids)} 個符合條件的任務啟動第二階段分析。"}
+
+
+@router.post("/start_summary_generation")
+async def start_summary_generation(request: Request, payload: SummaryGenerationRequest, background_tasks: BackgroundTasks, db: DBClient = Depends(get_db)):
+    """啟動重點摘要生成"""
+    if not payload.task_ids:
+        raise HTTPException(status_code=400, detail="任務 ID 列表不可為空。")
+
+    semaphore = request.app.state.analysis_semaphore
+    queue = request.app.state.notification_queue
+    loop = asyncio.get_running_loop()
+
+    for task_id in payload.task_ids:
+        # 在啟動前重設狀態
+        db.update_analysis_task(
+            task_id=task_id,
+            updates={
+                "summary_status": "pending",
+                "summary_content": None,
+                "summary_error_log": None,
+                "summary_token_usage": None,
+                "summary_model": None,
+            }
+        )
+        background_tasks.add_task(
+            run_analysis_task_wrapper,
+            task_id=task_id,
+            semaphore=semaphore,
+            blocking_func=_run_summary_generation_blocking_task,
+            queue=queue,
+            loop=loop,
+            db_client=db,
+            model_name=payload.model_name,
+            stage="summary"
+        )
+
+    return {"message": f"已成功為 {len(payload.task_ids)} 個任務排入重點摘要生成佇列。"}
+
+
+@router.get("/files_for_summary")
+async def get_files_for_summary(db: DBClient = Depends(get_db)):
+    """獲取所有已完成內容提取，可供生成重點摘要的任務列表。"""
+    # 任何只要有 file_content_for_analysis 的任務都可以生成摘要
+    tasks = db.get_all_analysis_tasks()
+    # 為了效能，只回傳必要的欄位給前端卡片
+    results = []
+    for t in tasks:
+        if t.get('file_content_for_analysis'):
+            # 從關聯的 eu (extracted_urls) 中獲取標題和日期
+            # 注意：get_all_analysis_tasks 已經 JOIN 過了
+            results.append({
+                "id": t["id"],
+                "filename": t["filename"],
+                "author": t.get("author"),
+                "message_date": t.get("message_date"),
+                "title": t.get("title"), # 假設 eu 已有 title
+                "summary_status": t.get("summary_status"),
+                "summary_content": t.get("summary_content"),
+                "summary_model": t.get("summary_model"),
+                "summary_token_usage": t.get("summary_token_usage"),
+                "summary_error_log": t.get("summary_error_log")
+            })
+    return results
+
 
 @router.get("/files_for_stage1")
 async def get_files_for_stage1(db: DBClient = Depends(get_db)):
