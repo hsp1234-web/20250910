@@ -381,8 +381,52 @@ class ServerManager:
                     if temp_req_path.exists():
                         temp_req_path.unlink()
 
-            # --- 階段 1: 同步安裝核心依賴 (強制使用 Pip) ---
-            self._log_manager.log("INFO", "步驟 1/3: 正在快速安裝核心伺服器依賴 (使用 Pip)...")
+            # --- JULES'S FIX (2025-09-21): 強制安裝下載器依賴 ---
+            # 為了繞過在某些 Colab 環境中不穩定的依賴檢查，我們為下載器建立了一個
+            # 獨立的安裝階段。此階段不使用 check_deps.py，而是直接強制安裝，
+            # 確保 yt-dlp 和 gdown 等關鍵套件一定存在。
+            def force_install_packages(req_file: Path, log_prefix: str):
+                """一個簡化的安裝函式，不檢查，直接安裝。優先使用 uv 加速器。"""
+                if not req_file.is_file():
+                    self._log_manager.log("WARN", f"[{log_prefix}] 依賴檔案 '{req_file.name}' 不存在，跳過。")
+                    return
+                self._log_manager.log("INFO", f"[{log_prefix}] 開始強制安裝依賴...")
+                install_start_time = time.monotonic()
+                try:
+                    # 檢查 uv 是否存在，並決定安裝指令
+                    use_uv = self._ensure_uv_installed()
+                    if use_uv:
+                        pip_command = [sys.executable, "-m", "uv", "pip", "install", "--system", "-r", str(req_file.resolve())]
+                        self._log_manager.log("INFO", f"[{log_prefix}] 使用 'uv' 進行快速強制安裝...")
+                    else:
+                        pip_command = [sys.executable, "-m", "pip", "install", "-r", str(req_file.resolve())]
+                        self._log_manager.log("INFO", f"[{log_prefix}] 使用 'pip' 進行強制安裝。")
+
+                    result = subprocess.run(pip_command, capture_output=True, text=True, encoding='utf-8')
+
+                    if result.stdout and result.stdout.strip():
+                        self._log_manager.log("DEBUG", f"[{log_prefix}] 安裝程式 stdout:\n{result.stdout}", "Installer")
+
+                    if result.returncode != 0:
+                        error_log = f"安裝失敗！返回碼: {result.returncode}\n"
+                        if result.stderr and result.stderr.strip():
+                            error_log += f"STDERR:\n{result.stderr}\n"
+                        self._log_manager.log("ERROR", error_log, "Installer")
+                        raise subprocess.CalledProcessError(result.returncode, pip_command, output=result.stdout, stderr=result.stderr)
+
+                    self._log_manager.log("SUCCESS", f"✅ [{log_prefix}] 強制依賴安裝完成。")
+                    self._log_manager.log("INFO", f"--- [{log_prefix}] 安裝耗時: {time.monotonic() - install_start_time:.2f} 秒 ---")
+                except subprocess.CalledProcessError as e:
+                    self._log_manager.log("CRITICAL", f"[{log_prefix}] 強制依賴安裝失敗！", "Installer")
+                    raise
+
+            # --- 階段 0: 強制安裝下載器依賴 ---
+            self._log_manager.log("INFO", "步驟 1/4: 正在強制安裝下載器核心依賴...")
+            downloader_req_file = project_path / "requirements" / "downloader.txt"
+            force_install_packages(downloader_req_file, "下載器")
+
+            # --- 階段 2: 同步安裝核心依賴 (使用 Pip) ---
+            self._log_manager.log("INFO", "步驟 2/4: 正在快速安裝核心伺服器依賴 (使用 Pip)...")
             core_requirements = [
                 project_path / "requirements" / "core.txt",
                 project_path / "requirements" / "features_core.txt",
@@ -390,18 +434,17 @@ class ServerManager:
             ]
             install_requirements(core_requirements, "核心伺服器", force_pip=True)
 
-            # --- 階段 2: 啟動後端服務 ---
-            self._log_manager.log("INFO", "步驟 2/3: 正在啟動後端協調器...")
+            # --- 階段 3: 啟動後端服務 ---
+            self._log_manager.log("INFO", "步驟 3/4: 正在啟動後端協調器...")
             launch_command = [sys.executable, "src/core/orchestrator.py"]
             process_env = os.environ.copy()
             src_path_str = str((project_path / "src").resolve())
             process_env['PYTHONPATH'] = f"{src_path_str}{os.pathsep}{process_env.get('PYTHONPATH', '')}".strip(os.pathsep)
             self.server_process = subprocess.Popen(launch_command, cwd=str(project_path), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8', preexec_fn=os.setsid, env=process_env)
 
-            # --- 階段 3: [已停用] V5.5 之後，大型依賴的安裝由使用者在需要時觸發 ---
+            # --- 階段 4: [已停用] V5.5 之後，大型依賴的安裝由使用者在需要時觸發 ---
             # 背景安裝執行緒已被移除，以支援新的「完全就緒」信號架構。
-            # 核心依賴 (features_core.txt) 的安裝與驗證已移至 orchestrator.py 中處理。
-            self._log_manager.log("INFO", "步驟 3/3: [V5.5] 大型依賴將在需要時由使用者手動安裝。")
+            self._log_manager.log("INFO", "步驟 4/4: [V5.5] 大型依賴將在需要時由使用者手動安裝。")
 
             port_pattern = re.compile(r"PROXY_URL: http://127.0.0.1:(\d+)")
             uvicorn_ready_pattern = re.compile(r"Uvicorn running on")
