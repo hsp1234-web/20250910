@@ -96,6 +96,11 @@ async def serve_line_extractor(request: Request):
     return templates.TemplateResponse("line_extractor.html", {"request": request})
 
 
+@router.get("/page4_summary_center", response_class=HTMLResponse)
+async def serve_page4_summary_center(request: Request):
+    """ 提供重點摘要中心頁面 """
+    return templates.TemplateResponse("page4_summary_center.html", {"request": request})
+
 @router.get("/page_bond", response_class=HTMLResponse)
 async def serve_page_bond(request: Request):
     """ 提供債券分析頁面 """

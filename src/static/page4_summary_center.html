@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>摘要中心</title>
+    <link rel="stylesheet" href="/static/css/common.css">
+    <link rel="stylesheet" href="/static/css/nav.css">
+    <link rel="stylesheet" href="/static/css/page4_summary.css">
+</head>
+<body>
+    <nav class="top-nav">
+        <ul>
+            <li><a href="/">鳳凰主頁</a></li>
+            <li><a href="/page1">資料擷取</a></li>
+            <li><a href="/page2">批次下載</a></li>
+            <li><a href="/page3">檔案處理</a></li>
+            <li><a href="/page4_stage1_ai" class="active">AI分析</a></li>
+            <li><a href="/page5">系統備份</a></li>
+            <li><a href="/page6">金鑰管理</a></li>
+            <li><a href="/page7">提示詞管理</a></li>
+            <li><a href="/page9">績效儀表板</a></li>
+            <li><a href="/page_bond">債券分析</a></li>
+        </ul>
+    </nav>
+
+    <div class="container">
+        <h1>AI 分析流程</h1>
+
+        <div class="sub-nav">
+            <a href="/page4_summary_center" class="sub-nav-button active">0. 重點摘要</a>
+            <a href="/page4_stage1_ai" class="sub-nav-button">1. AI 分析</a>
+            <a href="/page4_stage1_5_date" class="sub-nav-button">1.5. 日期推斷</a>
+            <a href="/page4_stage2_performance" class="sub-nav-button">2. 績效分析</a>
+            <a href="/page4_stage3_report" class="sub-nav-button">3. 報告生成</a>
+            <a href="/page4_stage4_download" class="sub-nav-button">4. Word 報告下載</a>
+        </div>
+
+        <div class="panel">
+            <h2>階段零：重點摘要生成</h2>
+            <p>在此處，您可以為已完成內容提取的文件，生成 AI 重點摘要「小作文」。</p>
+        </div>
+
+        <div class="controls">
+            <button id="select-all">全選</button>
+            <button id="deselect-all">取消全選</button>
+            <div class="model-selector">
+                <label for="model-select">分析模型:</label>
+                <select id="model-select" disabled>
+                    <option>正在檢查金鑰...</option>
+                </select>
+            </div>
+            <button id="start-summary-btn" class="start-btn" disabled>✨ 開始生成重點摘要</button>
+            <button id="toggle-all-summaries">📖 全部展開/收合</button>
+        </div>
+
+        <div id="card-container">
+            <!-- Cards will be dynamically generated here -->
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const modelSelect = document.getElementById('model-select');
+            const startBtn = document.getElementById('start-summary-btn');
+            const cardContainer = document.getElementById('card-container');
+            const selectAllBtn = document.getElementById('select-all');
+            const deselectAllBtn = document.getElementById('deselect-all');
+            const toggleAllBtn = document.getElementById('toggle-all-summaries');
+
+            let tasks = [];
+
+            const getStatusHTML = (status) => {
+                const statusMap = {
+                    'pending': '待處理',
+                    'processing': '處理中...',
+                    'completed': '✅ 已完成',
+                    'failed': '❌ 失敗'
+                };
+                const statusText = statusMap[status] || status || '待處理';
+                const statusClass = status || 'pending';
+                return `<span class="status-badge status-${statusClass}">${statusText}</span>`;
+            };
+
+            const escapeHtml = (unsafe) => {
+                if (unsafe === null || typeof unsafe === 'undefined') return '';
+                return unsafe.toString().replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+            }
+
+            function renderCards() {
+                cardContainer.innerHTML = '';
+                if (tasks.length === 0) {
+                    cardContainer.innerHTML = '<p>沒有可供摘要的檔案。請先完成「檔案處理」步驟。</p>';
+                }
+
+                tasks.forEach(task => {
+                    const card = document.createElement('div');
+                    card.className = 'card';
+                    card.dataset.taskId = task.id;
+
+                    const isActionable = task.summary_status === 'pending' || !task.summary_status;
+
+                    card.innerHTML = `
+                        <div class="card-main-header">
+                            <input type="checkbox" class="task-checkbox" value="${task.id}" ${!isActionable ? 'disabled' : ''}>
+                            <h3 class="title">${escapeHtml(task.title || task.filename)}</h3>
+                        </div>
+                        <div class="card-body">
+                            <div class="info-grid">
+                                <span class="info-label">作者</span><span class="info-value">${escapeHtml(task.author || 'N/A')}</span>
+                                <span class="info-label">日期</span><span class="info-value">${escapeHtml(task.message_date || 'N/A')}</span>
+                                <span class="info-label">摘要狀態</span><span class="info-value">${getStatusHTML(task.summary_status)}</span>
+                                <span class="info-label">Token 消耗</span><span class="info-value">${task.summary_token_usage || 'N/A'}</span>
+                            </div>
+                            <div class="summary-controls">
+                                ${task.summary_status === 'completed' ? `<button class="toggle-summary" data-task-id="${task.id}">▶️ 展開摘要</button>` : ''}
+                            </div>
+                            <div class="summary-content" id="summary-${task.id}">
+                                ${task.summary_status === 'failed' ? `<pre class="error-log">${escapeHtml(task.summary_error_log)}</pre>` : ''}
+                                ${task.summary_status === 'completed' ? `<pre>${escapeHtml(task.summary_content)}</pre>` : ''}
+                            </div>
+                        </div>
+                    `;
+                    cardContainer.appendChild(card);
+                });
+                updateButtonStates();
+            }
+
+            function updateButtonStates() {
+                const anyChecked = document.querySelector('.task-checkbox:checked');
+                startBtn.disabled = !anyChecked || modelSelect.disabled;
+            }
+
+            const populateModelSelector = (models) => {
+                modelSelect.innerHTML = '';
+                const sortedModels = [...models].sort((a, b) => {
+                    const aIsVision = a.includes('vision');
+                    const bIsVision = b.includes('vision');
+                    if (aIsVision && !bIsVision) return -1;
+                    if (!aIsVision && bIsVision) return 1;
+                    return a.localeCompare(b);
+                });
+
+                sortedModels.forEach(modelName => {
+                    if (modelName.includes("vision")) {
+                        const option = new Option(modelName.replace('models/', ''), modelName);
+                        modelSelect.add(option);
+                    }
+                });
+            };
+
+            const checkKeysAndLoadModels = async () => {
+                try {
+                    const response = await fetch('/api/keys');
+                    if (!response.ok) throw new Error('無法獲取 API 金鑰狀態');
+                    const keys = await response.json();
+                    const validKeys = keys.filter(k => k.is_valid);
+
+                    if (validKeys.length > 0) {
+                        const modelResponse = await fetch('/api/keys/models');
+                        if (!modelResponse.ok) throw new Error('無法獲取模型列表');
+                        const models = await modelResponse.json();
+                        populateModelSelector(models);
+                        modelSelect.disabled = false;
+                    } else {
+                        modelSelect.innerHTML = '<option value="">請先在「金鑰管理」頁面新增有效的 API 金鑰</option>';
+                        modelSelect.disabled = true;
+                    }
+                } catch (error) {
+                    console.error('檢查金鑰或載入模型時出錯:', error);
+                    modelSelect.innerHTML = `<option value="">${error.message}</option>`;
+                    modelSelect.disabled = true;
+                }
+                updateButtonStates();
+            };
+
+            const fetchTasks = async () => {
+                try {
+                    const response = await fetch('/api/analyzer/files_for_summary');
+                    if (!response.ok) throw new Error(`獲取任務列表失敗 (HTTP ${response.status})`);
+                    tasks = await response.json();
+                    renderCards();
+                } catch (error) {
+                    cardContainer.innerHTML = `<p style="color:red;">${error.message}</p>`;
+                }
+            };
+
+            // --- Event Listeners ---
+            startBtn.addEventListener('click', async () => {
+                const selectedIds = Array.from(document.querySelectorAll('.task-checkbox:checked')).map(cb => parseInt(cb.value));
+                const modelName = modelSelect.value;
+                if (selectedIds.length === 0 || !modelName) return;
+
+                startBtn.disabled = true;
+                startBtn.textContent = '正在啟動...';
+
+                try {
+                    await fetch('/api/analyzer/start_summary_generation', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ task_ids: selectedIds, model_name: modelName })
+                    });
+                    selectedIds.forEach(id => {
+                        const task = tasks.find(t => t.id === id);
+                        if (task) task.summary_status = 'processing';
+                    });
+                    renderCards();
+                } catch (error) {
+                    alert('啟動失敗，請查看控制台日誌。');
+                } finally {
+                    startBtn.textContent = '✨ 開始生成重點摘要';
+                    updateButtonStates();
+                }
+            });
+
+            selectAllBtn.addEventListener('click', () => {
+                document.querySelectorAll('.task-checkbox:not(:disabled)').forEach(cb => cb.checked = true);
+                updateButtonStates();
+            });
+
+            deselectAllBtn.addEventListener('click', () => {
+                document.querySelectorAll('.task-checkbox:checked').forEach(cb => cb.checked = false);
+                updateButtonStates();
+            });
+
+            cardContainer.addEventListener('change', e => {
+                if (e.target.classList.contains('task-checkbox')) {
+                    updateButtonStates();
+                }
+            });
+
+            cardContainer.addEventListener('click', e => {
+                if (e.target.classList.contains('toggle-summary')) {
+                    const button = e.target;
+                    const summaryContent = button.closest('.card-body').querySelector('.summary-content');
+                    const isVisible = summaryContent.classList.toggle('visible');
+                    button.textContent = isVisible ? '🔽 收合摘要' : '▶️ 展開摘要';
+                }
+            });
+
+            toggleAllBtn.addEventListener('click', () => {
+                const allSummaries = document.querySelectorAll('.summary-content');
+                const allButtons = document.querySelectorAll('.toggle-summary');
+                const shouldOpen = Array.from(allSummaries).some(s => !s.classList.contains('visible'));
+
+                allSummaries.forEach(s => s.classList.toggle('visible', shouldOpen));
+                allButtons.forEach(b => b.textContent = shouldOpen ? '🔽 收合摘要' : '▶️ 展開摘要');
+            });
+
+            // --- WebSocket ---
+            function connectWebSocket() {
+                const ws = new WebSocket(`ws://${window.location.host}/ws`);
+                ws.onmessage = (event) => {
+                    const data = JSON.parse(event.data);
+                    if (data.type === 'analysis_update' && data.task_id) {
+                        const taskIndex = tasks.findIndex(t => t.id === data.task_id);
+                        if (taskIndex !== -1) {
+                            tasks[taskIndex] = data.result;
+                            renderCards();
+                        }
+                    }
+                };
+                ws.onclose = () => setTimeout(connectWebSocket, 5000);
+            }
+
+            // --- Initialization ---
+            checkKeysAndLoadModels();
+            fetchTasks();
+            connectWebSocket();
+        });
+    </script>
+</body>
+</html>
