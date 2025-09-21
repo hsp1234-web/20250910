@@ -1,3 +1,6 @@
 {
-  "GOOGLE_API_KEY": "在這裡貼上您的 Google AI Studio API 金鑰"
+  "GOOGLE_API_KEY": "在這裡貼上您的 Google AI Studio API 金鑰",
+  "api_timeout_seconds": 35.0,
+  "gemini_rotation_delay": 60.0,
+  "gemini_submission_delay": 1.0
 }

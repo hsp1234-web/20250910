@@ -129,6 +129,17 @@ def handle_manual_mode(keys_string: str):
 
 def main():
     """主執行函式，解析參數並分派任務。"""
+    # JULES (2025-09-21): 在注入新金鑰前，先清除所有舊金鑰，確保環境乾淨。
+    try:
+        print("🧹 正在清除所有舊的金鑰記錄...")
+        cleared_count = key_manager.clear_all_keys()
+        print(f"✅ 成功清除了 {cleared_count} 筆舊記錄。")
+    except Exception as e:
+        # 如果資料庫尚未建立或存在權限問題，這個步驟可能會失敗。
+        # 在這種情況下，我們只記錄一個警告，然後繼續嘗試新增金鑰，
+        # 因為後續的 key_manager 操作會提供更詳細的錯誤。
+        print(f"⚠️ 清除舊金鑰時發生警告: {e}，將繼續執行。")
+
     parser = argparse.ArgumentParser(description="Colab 金鑰注入器，支援自動與手動模式。")
     parser.add_argument("--mode", type=str, choices=['auto', 'manual'], required=True, help="金鑰載入模式：'auto' 或 'manual'")
     parser.add_argument("--count", type=int, default=0, help="在自動模式下，要載入的金鑰數量 (0-20)。")

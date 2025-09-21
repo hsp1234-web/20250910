@@ -677,6 +677,7 @@ async def get_files_for_performance_analysis(db: DBClient = Depends(get_db)):
     tasks = db.get_all_analysis_tasks()
     return [t for t in tasks if t.get('date_inference_status') == 'completed']
 
+@router.get("/files_for_summary") # JULES (2025-09-21): 為「重點摘要」頁面新增的端點別名，修復 404 錯誤。
 @router.get("/files_for_stage2")
 async def get_files_for_stage2(db: DBClient = Depends(get_db)):
     """(V4 優化後) 獲取已完成績效分析，可供生成報告的任務列表。"""
