@@ -5,6 +5,7 @@ import logging
 import json
 import subprocess
 import sys
+import importlib.metadata
 import threading
 import re
 import asyncio
@@ -497,15 +498,15 @@ async def system_readiness_check():
     """
     檢查核心依賴（如 yt-dlp）是否已準備就緒。
     """
-    # 使用 shutil.which 檢查 yt-dlp 是否在系統 PATH 中且可執行
-    yt_dlp_path = shutil.which("yt-dlp")
-    is_ready = yt_dlp_path is not None
-
-    if is_ready:
-        log.info(f"✅ 系統就緒檢查：成功找到 yt-dlp 於 {yt_dlp_path}")
+    # 最終修復：使用 importlib.metadata.version() 進行最嚴格的檢查。
+    # 這個方法會直接檢查套件的發行版元數據，只有在套件被 pip 完整安裝後才會成功。
+    # 這樣可以完全避免被空的「幽靈資料夾」所欺騙。
+    try:
+        importlib.metadata.version("yt-dlp")
+        log.info(f"✅ 系統就緒檢查：成功驗證 yt-dlp 套件已完整安裝。")
         return {"ready": True}
-    else:
-        log.warning("⚠️ 系統就緒檢查：找不到 yt-dlp。前端功能可能受限。")
+    except importlib.metadata.PackageNotFoundError:
+        log.warning("⚠️ 系統就緒檢查：yt-dlp 套件未被完整安裝。前端功能可能受限。")
         return {"ready": False}
 
 @app.get("/api/system_stats")

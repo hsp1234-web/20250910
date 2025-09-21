@@ -36,10 +36,10 @@ def download_media(
     output_template = f"{str(output_dir / custom_filename)}.%(ext)s" if custom_filename else f"{str(output_dir / '%(title)s')}.%(ext)s"
     final_suffix = ".mp3" if download_type == "audio" else ".mp4"
 
-    # JULES DEBUG (2025-08-31): 根據最新分析報告，此處是修復環境依賴問題的關鍵。
-    # 雖然 `python -m yt_dlp` 在理論上更具可攜性，但使用者的報告明確指出要直接呼叫 `yt-dlp`。
-    # 為了完全遵循修復建議，我們將呼叫方式改回直接呼叫執行檔，讓作業系統從 PATH 中尋找。
-    command = ["yt-dlp", "--print-json"]
+    # 為了處理複雜環境中 PATH 可能不一致的問題，我們不再直接呼叫 'yt-dlp' 執行檔。
+    # 改為使用 `sys.executable -m yt_dlp` 的方式，這會利用當前運行的 Python 環境來尋找並執行 yt_dlp 模組，
+    # 這種方法更為穩健，可以繞過對系統 PATH 的依賴。
+    command = [sys.executable, "-m", "yt_dlp", "--print-json"]
 
     if download_type == "audio":
         command.extend([

@@ -3,55 +3,41 @@
 一個輕量級的依賴檢查工具，用於在安裝前確定哪些套件是真正缺失的。
 """
 
-import importlib
+import importlib.metadata
 import sys
-import pkg_resources
-
-# 套件安裝名與導入名之間的對應關係
-# 有些套件的安裝名稱與在 Python 中導入時使用的名稱不同。
-# 例如，我們用 `pip install Pillow`，但在程式碼中寫 `import PIL`。
-PACKAGE_TO_MODULE_MAP = {
-    "Pillow": "PIL",
-    "python-dotenv": "dotenv",
-    "PyYAML": "yaml",
-    "websocket-client": "websocket",
-    "opencc-python-reimplemented": "opencc",
-    "faster-whisper": "faster_whisper",
-    "yt-dlp": "yt_dlp",
-    "scikit-learn": "sklearn",
-    "google-generativeai": "google.generativeai",
-    "uvicorn": "uvicorn",
-    "fastapi": "fastapi",
-    "python-multipart": "multipart",
-    "psutil": "psutil",
-    "requests": "requests",
-    "pydub": "pydub",
-    "PyMuPDF": "fitz",
-}
+import os
 
 def check_dependency(package_name: str) -> bool:
     """
-    檢查單一套件是否可以被成功導入。
+    使用 importlib.metadata.version 檢查套件是否已完整安裝。
+    這是最穩健的方法，無法被空的幽靈資料夾欺騙。
 
     Args:
         package_name: 從 requirements 文件中讀取的套件名稱。
 
     Returns:
-        如果套件已安裝且可導入，則為 True，否則為 False。
+        如果套件已安裝，則為 True，否則為 False。
     """
     # 移除版本號、註解和附加選項 (如 [standard])
     package_name_base = package_name.split("==")[0].split(">=")[0].split("<=")[0].split("[")[0].strip()
 
-    module_name = PACKAGE_TO_MODULE_MAP.get(package_name_base, package_name_base)
-
     try:
-        importlib.import_module(module_name)
-        # 對於 uvicorn，我們需要確保 standard 依賴也存在
+        # 嘗試獲取套件的版本。如果成功，表示套件已完整安裝。
+        version = importlib.metadata.version(package_name_base)
+        print(f"  [檢查日誌] 找到了 '{package_name_base}' 版本 {version}", file=sys.stderr)
+
+        # 對於 uvicorn[standard]，還需要額外檢查 uvloop
         if package_name_base == "uvicorn" and "[standard]" in package_name:
-             # 檢查 uvloop 是否存在，它是 [standard] 的一個關鍵部分
-            importlib.import_module("uvloop")
+            try:
+                importlib.metadata.version("uvloop")
+                print(f"  [檢查日誌] 找到了 'uvicorn' 的 'uvloop' 依賴", file=sys.stderr)
+            except importlib.metadata.PackageNotFoundError:
+                print(f"  [檢查日誌] 未找到 'uvicorn' 的 'uvloop' 依賴", file=sys.stderr)
+                return False
         return True
-    except ImportError:
+    except importlib.metadata.PackageNotFoundError:
+        # 如果找不到套件元數據，則視為未安裝。
+        print(f"  [檢查日誌] 找不到套件 '{package_name_base}'", file=sys.stderr)
         return False
 
 def main():
