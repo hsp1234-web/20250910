@@ -74,9 +74,30 @@ textarea {
 
 /* --- Sub-navigation --- */
 .sub-nav {
+    display: flex;
+    overflow-x: auto; /* 啟用水平捲動 */
+    white-space: nowrap; /* 防止按鈕換行 */
     margin-bottom: 20px;
     border-bottom: 1px solid var(--border-color);
     padding-bottom: 10px;
+    /* 為捲軸留出一些空間，使其不與內容重疊 */
+    scrollbar-width: thin; /* For Firefox */
+    scrollbar-color: #888 #f1f1f1; /* For Firefox */
+}
+
+/* 美化捲軸樣式 (適用於 Webkit 核心的瀏覽器) */
+.sub-nav::-webkit-scrollbar {
+    height: 8px;
+}
+.sub-nav::-webkit-scrollbar-track {
+    background: #f1f1f1;
+}
+.sub-nav::-webkit-scrollbar-thumb {
+    background: #888;
+    border-radius: 4px;
+}
+.sub-nav::-webkit-scrollbar-thumb:hover {
+    background: #555;
 }
 
 .sub-nav a {
