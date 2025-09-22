@@ -5,8 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>摘要中心</title>
     <link rel="stylesheet" href="/static/css/nav.css">
-    <link rel="stylesheet" href="/static/css/page1_unified.css">
-    <link rel="stylesheet" href="/static/css/page4_summary.css">
+    <link rel="stylesheet" href="/static/css/common.css">
+    <link rel="stylesheet" href="/static/css/page4.css">
 </head>
 <body>
     <nav class="top-nav">
@@ -77,6 +77,7 @@
                 const statusMap = {
                     'pending': '待處理',
                     'processing': '處理中...',
+                    'gemini_processing': '🤖 AI 分析中...',
                     'completed': '✅ 已完成',
                     'failed': '❌ 失敗'
                 };
@@ -265,17 +266,39 @@
             // --- WebSocket ---
             function connectWebSocket() {
                 const ws = new WebSocket(`ws://${window.location.host}/ws`);
+
+                ws.onopen = () => {
+                    console.log('WebSocket connection established.');
+                };
+
                 ws.onmessage = (event) => {
-                    const data = JSON.parse(event.data);
-                    if (data.type === 'analysis_update' && data.task_id) {
-                        const taskIndex = tasks.findIndex(t => t.id === data.task_id);
-                        if (taskIndex !== -1) {
-                            tasks[taskIndex] = data.result;
-                            renderCards();
+                    console.log('WebSocket message received:', event.data); // 新增的除錯日誌
+                    try {
+                        const data = JSON.parse(event.data);
+                        // 確保 data.result 是一個物件
+                        if (data.type === 'analysis_update' && data.task_id && typeof data.result === 'object' && data.result !== null) {
+                            const taskIndex = tasks.findIndex(t => t.id === data.task_id);
+                            if (taskIndex !== -1) {
+                                // 更新任務物件，而不是完全替換
+                                Object.assign(tasks[taskIndex], data.result);
+                                renderCards();
+                            }
+                        } else {
+                            console.warn('Received WebSocket message is not a valid task update:', data);
                         }
+                    } catch (e) {
+                        console.error('Error parsing WebSocket message:', e);
                     }
                 };
-                ws.onclose = () => setTimeout(connectWebSocket, 5000);
+
+                ws.onerror = (error) => {
+                    console.error('WebSocket Error:', error);
+                };
+
+                ws.onclose = () => {
+                    console.log('WebSocket connection closed. Reconnecting in 5 seconds...');
+                    setTimeout(connectWebSocket, 5000);
+                };
             }
 
             // --- Initialization ---

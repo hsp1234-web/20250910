@@ -223,7 +223,7 @@ app.state.processing_semaphore = asyncio.Semaphore(2) # 檔案處理任務，可
 # JULES: 新增 CORS 中介軟體以允許來自瀏覽器腳本的跨來源請求
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # 允許所有來源
+    allow_origins=["http://localhost", "http://127.0.0.1"],  # 允許本地開發來源
     allow_credentials=True,
     allow_methods=["*"],  # 允許所有方法
     allow_headers=["*"],  # 允許所有標頭
