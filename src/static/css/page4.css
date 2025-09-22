@@ -225,7 +225,8 @@ select {
 
 
 /* --- Card Layout for File List (新增於 2025-09-15) --- */
-#file-cards-container {
+/* JULES: 同時為 #file-cards-container 和 .card-grid 定義網格佈局，以兼容 page3 */
+#file-cards-container, .card-grid {
     display: grid;
     /* For smaller screens, 1 column. For screens > 768px, 2 columns, etc. */
     grid-template-columns: repeat(auto-fill, minmax(350px, 500px));
@@ -313,19 +314,40 @@ select {
     background-color: #fdfdfd;
 }
 
-/* --- Card Element Styling --- */
+/* --- Card Element Styling (Refactored 2025-09-22) --- */
+/* 狀態標籤統一改為膠囊樣式，背景填充，白色文字，以提高可讀性 */
 .status-badge {
-    font-weight: bold;
-    padding: 3px 8px;
-    border-radius: 4px;
-    background-color: #e9ecef;
+    color: #fff; /* 文字預設為白色 */
+    padding: 5px 12px;
+    border-radius: 15px; /* 圓角膠囊形狀 */
+    font-weight: 500;
+    font-size: 0.9em;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    text-align: center;
+    white-space: nowrap;
 }
 
-.file-card.status-completed .status-badge { color: var(--success-color); }
-.file-card.status-failed .status-badge { color: var(--error-color); }
-.file-card.status-processing .status-badge,
-.file-card.status-gemini_processing .status-badge { color: var(--processing-color); }
-.file-card.status-pending .status-badge { color: var(--text-color); }
+/* 針對不同狀態設定背景色 */
+.status-badge { background-color: #6c757d; } /* 預設灰色 */
+.status-analyzed .status-badge,
+.status-completed .status-badge,
+.status-processed .status-badge { background-color: var(--success-color); } /* 綠色 */
+
+.status-error .status-badge,
+.status-failed .status-badge,
+.status-processing_failed .status-badge,
+.status-validation_failed .status-badge { background-color: var(--error-color); } /* 紅色 */
+
+.status-analyzing .status-badge,
+.status-gemini_processing .status-badge,
+.status-processing .status-badge { background-color: var(--processing-color); } /* 紫色 */
+
+.status-pending .status-badge {
+    background-color: var(--pending-color); /* 黃色 */
+    color: #212529; /* 黃色背景搭配深色文字 */
+}
 
 
 .model-name, .token-usage {
