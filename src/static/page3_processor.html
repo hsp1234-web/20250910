@@ -132,14 +132,24 @@
                         const card = document.createElement('div');
                         card.className = 'file-card status-pending';
                         card.dataset.id = file.id;
+
+                        // V4: 根據使用者回饋，統一卡片資訊佈局
+                        const author = file.author || 'N/A';
+                        const messageDate = file.message_date ? new Date(file.message_date).toLocaleString('zh-TW', { hour12: false, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : 'N/A';
+                        const urlLink = file.url ? `<a href="${escapeHtml(file.url)}" target="_blank" title="${escapeHtml(file.url)}">${escapeHtml(file.url)}</a>` : '無';
+
                         card.innerHTML = `
                             <div class="card-header">
                                 <input type="checkbox" class="pending-checkbox" value="${file.id}">
-                                <h3 class="filename" title="${escapeHtml(file.filename)}">${escapeHtml(file.filename)}</h3>
+                                <h3 class="filename">ID: ${file.id}</h3>
                             </div>
                             <div class="card-body">
                                 <div class="info-grid">
                                     <div class="info-item"><strong>狀態:</strong> ${getStatusHTML('completed')}</div>
+                                    <div class="info-item"><strong>標題:</strong> <span class="filename-text" title="${escapeHtml(file.title || file.filename)}">${escapeHtml(file.title || file.filename)}</span></div>
+                                    <div class="info-item"><strong>作者:</strong> ${escapeHtml(author)}</div>
+                                    <div class="info-item"><strong>時間:</strong> ${escapeHtml(messageDate)}</div>
+                                    <div class="info-item"><strong>連結:</strong> ${urlLink}</div>
                                 </div>
                             </div>
                         `;
@@ -170,7 +180,7 @@
 
                         let detailsButton = '';
                         if (file.status === 'processed') {
-                            detailsButton = `<a href="/report_viewer.html?file_id=${file.id}" target="_blank" class="action-btn">檢視報告</a>`;
+                            detailsButton = `<a href="/report/${file.id}" target="_blank" class="action-btn">檢視報告</a>`;
                         }
 
                         // V3: 根據使用者最新回饋調整卡片佈局
@@ -186,7 +196,7 @@
                              <div class="card-body">
                                 <div class="info-grid">
                                     <div class="info-item"><strong>狀態:</strong> ${getStatusHTML(file.status)}</div>
-                                    <div class="info-item"><strong>檔名:</strong> <span class="filename-text" title="${escapeHtml(file.filename)}">${escapeHtml(file.filename)}</span></div>
+                                     <div class="info-item"><strong>標題:</strong> <span class="filename-text" title="${escapeHtml(file.title || file.filename)}">${escapeHtml(file.title || file.filename)}</span></div>
                                     <div class="info-item"><strong>作者:</strong> ${escapeHtml(author)}</div>
                                     <div class="info-item"><strong>時間:</strong> ${escapeHtml(messageDate)}</div>
                                     <div class="info-item"><strong>連結:</strong> ${urlLink}</div>

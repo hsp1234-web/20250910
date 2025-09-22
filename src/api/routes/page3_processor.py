@@ -104,7 +104,17 @@ async def get_completed_files(db: DBClient = Depends(get_db)):
     log.info("API: 收到獲取已下載檔案列表的請求。")
     try:
         rows = db.get_urls_by_statuses(statuses=['completed'])
-        results = [{"id": row['id'], "url": row['url'], "filename": Path(row['local_path']).name} for row in rows if row['local_path']]
+        results = [
+            {
+                "id": row['id'],
+                "url": row['url'],
+                "filename": Path(row['local_path']).name,
+                "title": row.get('title'),
+                "author": row.get('author'),
+                "message_date": row.get('message_date')
+            }
+            for row in rows if row['local_path']
+        ]
         return JSONResponse(content=results)
     except Exception as e:
         log.error(f"API: 獲取已下載檔案時發生錯誤: {e}", exc_info=True)
