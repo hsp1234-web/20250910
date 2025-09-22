@@ -265,7 +265,7 @@
 
             // --- WebSocket ---
             function connectWebSocket() {
-                const ws = new WebSocket(`ws://${window.location.host}/ws`);
+                const ws = new WebSocket(`ws://${window.location.host}/api/ws`);
 
                 ws.onopen = () => {
                     console.log('WebSocket connection established.');
