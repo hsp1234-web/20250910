@@ -7,6 +7,7 @@
     <link rel="stylesheet" href="/static/css/nav.css">
     <link rel="stylesheet" href="/static/css/common.css">
     <link rel="stylesheet" href="/static/css/page4.css">
+    <link rel="stylesheet" href="/static/css/page4_summary.css">
 </head>
 <body>
     <nav class="top-nav">
@@ -99,22 +100,25 @@
 
                 tasks.forEach(task => {
                     const card = document.createElement('div');
-                    card.className = 'card';
+                    card.className = 'file-card'; // JULES: Changed to file-card for style consistency
                     card.dataset.taskId = task.id;
 
                     const isActionable = task.summary_status === 'pending' || !task.summary_status;
 
+                    // JULES: Card layout updated based on user feedback
                     card.innerHTML = `
                         <div class="card-header">
                             <input type="checkbox" class="task-checkbox" value="${task.id}" ${!isActionable ? 'disabled' : ''}>
-                            <span class="card-title">${escapeHtml(task.title || task.filename)}</span>
+                            <span class="card-title">任務 #${escapeHtml(task.id)}</span>
                         </div>
                         <div class="card-body">
                             <div class="info-grid">
+                                <div><strong>標題:</strong></div><div>${escapeHtml(task.title || task.filename)}</div>
                                 <div><strong>作者:</strong></div><div>${escapeHtml(task.author || 'N/A')}</div>
                                 <div><strong>日期:</strong></div><div>${escapeHtml(task.message_date || 'N/A')}</div>
                                 <div><strong>摘要狀態:</strong></div><div>${getStatusHTML(task.summary_status)}</div>
-                                <div><strong>Token 消耗:</strong></div><div>${task.summary_token_usage || 'N/A'}</div>
+                                <div><strong>模型:</strong></div><div class="model-name">${escapeHtml(task.summary_model || 'N/A')}</div>
+                                <div><strong>Token 消耗:</strong></div><div class="token-usage">${task.summary_token_usage || 'N/A'}</div>
                             </div>
                             ${task.summary_status === 'completed' || task.summary_status === 'failed' ? `
                             <div class="summary-container">
