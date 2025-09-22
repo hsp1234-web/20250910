@@ -24,90 +24,66 @@
     </nav>
 
     <div class="content">
-        <!-- Panel 1: 待處理檔案 -->
-        <div class="panel">
-            <h1>頁面三：檔案處理</h1>
-            <p>此頁面會列出所有已下載完成、可以進行處理的檔案。列表會透過 WebSocket 自動更新。</p>
+        <h1>頁面三：檔案處理</h1>
+        <p>此頁面會列出所有已下載完成、可以進行處理的檔案。列表會透過 WebSocket 自動更新。</p>
 
+        <div class="panel">
+            <h2>待處理的檔案</h2>
             <div class="action-bar">
                 <div class="action-group">
-                    <button id="select-all-button">全選</button>
-                    <button id="deselect-all-button">取消全選</button>
+                    <button id="select-all-pending-button">全選</button>
+                    <button id="deselect-all-pending-button">取消全選</button>
                 </div>
                 <div class="action-group">
-                    <button id="process-button" class="primary-action">開始處理選中項目</button>
+                    <button id="process-button" class="primary-action">⚙️ 開始處理選中項目</button>
                 </div>
             </div>
-
-            <div id="file-list-container">
+            <div id="pending-cards-container" class="card-grid">
                 <p>正在載入待處理的檔案...</p>
             </div>
         </div>
 
-        <!-- Panel 2: 已處理/失敗檔案 -->
         <div class="panel">
             <h2>已處理 / 失敗的檔案</h2>
-            <p>此處會顯示所有已處理完畢或處理失敗的檔案。</p>
-            <div style="margin-bottom: 10px;">
-                <button id="retry-selected-btn">將選中項目移回待處理</button>
+             <div class="action-bar">
+                <div class="action-group">
+                    <button id="select-all-terminal-button">全選</button>
+                    <button id="deselect-all-terminal-button">取消全選</button>
+                </div>
+                <div class="action-group">
+                    <button id="retry-selected-btn">🔄 將選中項目移回待處理</button>
+                </div>
             </div>
-            <div id="completed-file-list-container">
+            <div id="terminal-cards-container" class="card-grid">
                 <p>正在載入已處理/失敗的檔案...</p>
             </div>
         </div>
 
-        <!-- Panel 3: 狀態日誌 -->
         <div class="panel">
             <div class="panel-header">
                 <h2>狀態日誌</h2>
                 <button id="copy-log-button" class="copy-button" title="複製日誌">📄</button>
             </div>
-            <div id="status-area">
-                <!-- 處理狀態將會顯示在這裡 -->
-            </div>
+            <div id="status-area"></div>
         </div>
     </div>
 
     <script>
         document.addEventListener('DOMContentLoaded', () => {
-            // --- DOM Element Cache ---
-            const fileListContainer = document.getElementById('file-list-container');
-            const completedFileListContainer = document.getElementById('completed-file-list-container');
-            const selectAllButton = document.getElementById('select-all-button');
-            const deselectAllButton = document.getElementById('deselect-all-button');
+            const pendingCardsContainer = document.getElementById('pending-cards-container');
+            const terminalCardsContainer = document.getElementById('terminal-cards-container');
+            const selectAllPendingBtn = document.getElementById('select-all-pending-button');
+            const deselectAllPendingBtn = document.getElementById('deselect-all-pending-button');
             const processButton = document.getElementById('process-button');
+            const selectAllTerminalBtn = document.getElementById('select-all-terminal-button');
+            const deselectAllTerminalBtn = document.getElementById('deselect-all-terminal-button');
             const retrySelectedBtn = document.getElementById('retry-selected-btn');
             const statusArea = document.getElementById('status-area');
             const copyLogButton = document.getElementById('copy-log-button');
 
-            // --- Utility Functions ---
-            const formatTaipeiTime = (isoString) => {
-                if (!isoString) return '無效時間';
-                try {
-                    const date = new Date(isoString);
-                    const formatter = new Intl.DateTimeFormat('en-CA', {
-                        timeZone: 'Asia/Taipei', year: 'numeric', month: '2-digit', day: '2-digit',
-                        hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false
-                    });
-                    return formatter.format(date).replace(/-/g, '/').replace(',', '');
-                } catch (e) {
-                    console.error("時間格式化失敗:", e, "輸入值:", isoString);
-                    return '時間格式錯誤';
-                }
-            };
-
             const logStatus = (message, color = 'black') => {
-                const timestamp = formatTaipeiTime(new Date().toISOString());
-                statusArea.insertAdjacentHTML('afterbegin', `<p style="color: ${color};">${timestamp}: ${message}</p>`);
-            };
-
-            const translateStatus = (status) => {
-                const statusMap = {
-                    'processed': '處理成功',
-                    'processing_failed': '處理失敗',
-                    'processed_unsupported': '格式不支援'
-                };
-                return statusMap[status] || status;
+                const timestamp = new Date().toLocaleTimeString('zh-TW', { hour12: false });
+                statusArea.insertAdjacentHTML('afterbegin', `<p style="color: ${color};">[${timestamp}] ${message}</p>`);
             };
 
             const refreshAllLists = () => {
@@ -115,30 +91,56 @@
                 fetchAndRenderTerminalFiles();
             };
 
-            // --- Render Functions ---
+            const escapeHtml = (unsafe) => {
+                if (unsafe === null || typeof unsafe === 'undefined') return '';
+                return unsafe.toString().replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+            }
+
+            const getStatusHTML = (status) => {
+                const statusMap = {
+                    'completed': '✅ 已下載',
+                    'processing': '⚙️ 處理中...',
+                    'processed': '✅ 處理成功',
+                    'processing_failed': '❌ 處理失敗',
+                    'processed_unsupported': '⚠️ 格式不支援'
+                };
+                const statusText = statusMap[status] || status || '未知';
+                return `<span class="status-badge status-${status}">${statusText}</span>`;
+            };
+
             const fetchAndRenderPendingFiles = async () => {
                 try {
                     const response = await fetch('/api/processor/completed_files');
                     if (!response.ok) throw new Error(`伺服器錯誤 (狀態 ${response.status})`);
                     const files = await response.json();
+
+                    pendingCardsContainer.innerHTML = '';
                     if (files.length === 0) {
-                        fileListContainer.innerHTML = '<p>目前沒有待處理的檔案。</p>';
+                        pendingCardsContainer.innerHTML = '<p>目前沒有待處理的檔案。</p>';
                         processButton.disabled = true;
-                        selectAllButton.disabled = true;
-                        deselectAllButton.disabled = true;
                         return;
                     }
-                    let html = '<ul class="file-list">';
-                    files.forEach(item => {
-                        html += `<li><input type="checkbox" class="file-checkbox" value="${item.id}"><label>${item.filename}</label></li>`;
+
+                    files.forEach(file => {
+                        const card = document.createElement('div');
+                        card.className = 'file-card';
+                        card.dataset.id = file.id;
+                        card.innerHTML = `
+                            <div class="card-header">
+                                <input type="checkbox" class="pending-checkbox" value="${file.id}">
+                                <h3 class="filename" title="${escapeHtml(file.filename)}">${escapeHtml(file.filename)}</h3>
+                            </div>
+                            <div class="card-body">
+                                <div class="info-grid">
+                                    <div class="info-item"><strong>狀態:</strong> ${getStatusHTML('completed')}</div>
+                                </div>
+                            </div>
+                        `;
+                        pendingCardsContainer.appendChild(card);
                     });
-                    html += '</ul>';
-                    fileListContainer.innerHTML = html;
                     processButton.disabled = false;
-                    selectAllButton.disabled = false;
-                    deselectAllButton.disabled = false;
                 } catch (error) {
-                    fileListContainer.innerHTML = `<p style="color: red;">載入待處理檔案失敗：${error.message}</p>`;
+                    pendingCardsContainer.innerHTML = `<p style="color: red;">載入待處理檔案失敗：${error.message}</p>`;
                 }
             };
 
@@ -147,76 +149,76 @@
                     const response = await fetch('/api/processor/terminal_files');
                     if (!response.ok) throw new Error(`伺服器錯誤 (狀態 ${response.status})`);
                     const files = await response.json();
+
+                    terminalCardsContainer.innerHTML = '';
                     if (files.length === 0) {
-                        completedFileListContainer.innerHTML = '<p>目前沒有已處理或失敗的檔案。</p>';
+                        terminalCardsContainer.innerHTML = '<p>目前沒有已處理或失敗的檔案。</p>';
                         return;
                     }
-                    let html = `<table class="results-table">
-                        <thead><tr>
-                            <th><input type="checkbox" id="completed-select-all"></th>
-                            <th>檔案名稱</th><th>狀態</th><th>詳細資訊</th><th>操作</th>
-                        </tr></thead><tbody>`;
 
                     files.forEach(file => {
-                        let statusClass = '';
-                        if (file.status === 'processed') statusClass = 'status-completed';
-                        else if (file.status === 'processing_failed') statusClass = 'status-error';
-                        else if (file.status === 'processed_unsupported') statusClass = 'status-unsupported';
+                        const card = document.createElement('div');
+                        card.className = 'file-card';
+                        card.dataset.id = file.id;
 
-                        let actions = '';
+                        let details = '';
                         if (file.status === 'processed') {
-                             actions = `<a href="/report/${file.id}" target="_blank" class="button-link-inline">查看報告</a>`;
+                            details = `<a href="/page8_file_details.html?file_id=${file.id}" target="_blank" class="action-btn">檢視詳細資料</a>`;
                         }
 
-                        html += `<tr>
-                            <td><input type="checkbox" class="completed-file-checkbox" value="${file.id}"></td>
-                            <td title="${file.filename}">${file.filename}</td>
-                            <td class="${statusClass}">${translateStatus(file.status)}</td>
-                            <td title="${file.status_message || ''}">${(file.status_message || 'N/A')}</td>
-                            <td>${actions}</td>
-                        </tr>`;
+                        card.innerHTML = `
+                             <div class="card-header">
+                                <input type="checkbox" class="terminal-checkbox" value="${file.id}">
+                                <h3 class="filename" title="${escapeHtml(file.filename)}">${escapeHtml(file.filename)}</h3>
+                            </div>
+                             <div class="card-body">
+                                <div class="info-grid">
+                                    <div class="info-item"><strong>狀態:</strong> ${getStatusHTML(file.status)}</div>
+                                </div>
+                                <div class="error-log-container" style="${file.status === 'processing_failed' ? '' : 'display: none;'}">
+                                    <strong class="error-title">錯誤日誌:</strong>
+                                    <pre class="error-log">${escapeHtml(file.status_message)}</pre>
+                                </div>
+                            </div>
+                            <div class="card-footer">
+                                ${details}
+                            </div>
+                        `;
+                        terminalCardsContainer.appendChild(card);
                     });
-                    html += '</tbody></table>';
-                    completedFileListContainer.innerHTML = html;
                 } catch (error) {
-                    completedFileListContainer.innerHTML = `<p style="color: red;">載入已處理檔案失敗：${error.message}</p>`;
+                    terminalCardsContainer.innerHTML = `<p style="color: red;">載入已處理檔案失敗：${error.message}</p>`;
                 }
             };
 
-            // --- API Call Functions ---
-            const resetFilesAPI = async (ids) => {
-                 if (ids.length === 0) {
-                    alert('請至少選擇一個要重試的項目。');
-                    return;
-                }
-                logStatus(`正在發送 ${ids.length} 個項目的重試請求...`);
-                try {
-                    const response = await fetch('/api/processor/reset_files', {
-                        method: 'POST',
-                        headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({ ids: ids })
-                    });
-                    const result = await response.json();
-                    if (!response.ok) throw new Error(result.detail || '重設檔案時發生未知錯誤。');
-                    logStatus(result.message, 'green');
-                    refreshAllLists();
-                } catch (error) {
-                    logStatus(`請求失敗：${error.message}`, 'red');
-                }
-            }
-
-            // --- Event Listeners ---
-            selectAllButton.addEventListener('click', () => document.querySelectorAll('.file-checkbox').forEach(cb => cb.checked = true));
-            deselectAllButton.addEventListener('click', () => document.querySelectorAll('.file-checkbox').forEach(cb => cb.checked = false));
-
             processButton.addEventListener('click', async () => {
-                const selectedIds = Array.from(document.querySelectorAll('.file-checkbox:checked')).map(cb => parseInt(cb.value, 10));
+                const selectedIds = Array.from(document.querySelectorAll('.pending-checkbox:checked')).map(cb => parseInt(cb.value));
                 if (selectedIds.length === 0) {
                     alert('請至少選擇一個要處理的項目。');
                     return;
                 }
+
                 logStatus(`正在發送 ${selectedIds.length} 個項目的處理請求...`);
+                processButton.disabled = true;
+                processButton.textContent = '請求發送中...';
+
                 try {
+                    // Optimistic UI update to show "processing" state immediately
+                    selectedIds.forEach(id => {
+                        const card = pendingCardsContainer.querySelector(`.file-card[data-id='${id}']`);
+                        if (card) {
+                            const infoItems = card.querySelectorAll('.info-item');
+                            infoItems.forEach(item => {
+                                const strongTag = item.querySelector('strong');
+                                if (strongTag && strongTag.textContent.includes('狀態')) {
+                                    item.innerHTML = `<strong>狀態:</strong> ${getStatusHTML('processing')}`;
+                                }
+                            });
+                            const checkbox = card.querySelector('.pending-checkbox');
+                            if(checkbox) checkbox.disabled = true;
+                        }
+                    });
+
                     const response = await fetch('/api/processor/start_processing', {
                         method: 'POST',
                         headers: {'Content-Type': 'application/json'},
@@ -225,32 +227,38 @@
                     const result = await response.json();
                     if (!response.ok) throw new Error(result.detail || '啟動處理時發生未知錯誤。');
                     logStatus(result.message, 'green');
+
+                } catch (error) {
+                    logStatus(`請求失敗：${error.message}`, 'red');
+                } finally {
+                    processButton.disabled = false;
+                    processButton.textContent = '⚙️ 開始處理選中項目';
+                }
+            });
+
+            retrySelectedBtn.addEventListener('click', async () => {
+                const selectedIds = Array.from(document.querySelectorAll('.terminal-checkbox:checked')).map(cb => parseInt(cb.value));
+                if (selectedIds.length === 0) {
+                    alert('請至少選擇一個要重試的項目。');
+                    return;
+                }
+                logStatus(`正在發送 ${selectedIds.length} 個項目的重試請求...`);
+                try {
+                    const response = await fetch('/api/processor/reset_files', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({ ids: selectedIds })
+                    });
+                    const result = await response.json();
+                    if (!response.ok) throw new Error(result.detail || '重設檔案時發生未知錯誤。');
+                    logStatus(result.message, 'green');
                     refreshAllLists();
                 } catch (error) {
                     logStatus(`請求失敗：${error.message}`, 'red');
                 }
             });
 
-            retrySelectedBtn.addEventListener('click', () => {
-                const selectedIds = Array.from(document.querySelectorAll('.completed-file-checkbox:checked')).map(cb => parseInt(cb.value, 10));
-                resetFilesAPI(selectedIds);
-            });
-
-            completedFileListContainer.addEventListener('click', (e) => {
-                if (e.target.id === 'completed-select-all') {
-                    document.querySelectorAll('.completed-file-checkbox').forEach(cb => cb.checked = e.target.checked);
-                }
-            });
-
-            copyLogButton.addEventListener('click', () => {
-                navigator.clipboard.writeText(statusArea.innerText).then(() => {
-                    const originalIcon = copyLogButton.innerText;
-                    copyLogButton.innerText = '✅';
-                    setTimeout(() => { copyLogButton.innerText = originalIcon; }, 2000);
-                }).catch(err => logStatus('複製失敗', 'red'));
-            });
-
-            // --- WebSocket Setup (Refactored) ---
+            // --- WebSocket Setup ---
             const setupWebSocket = () => {
                 const ws = new WebSocket(`${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/api/ws`);
                 ws.onopen = () => logStatus('WebSocket 連線成功。', 'blue');
@@ -262,187 +270,23 @@
 
                 ws.onmessage = (event) => {
                     const data = JSON.parse(event.data);
-
-                    if (data.type !== 'task_update') {
-                        // 如果有下載完成的訊息，也觸發待處理列表的更新
-                        if (data.task_type === 'download' && data.status === 'completed') {
-                            logStatus('偵測到新檔案已下載完成，正在更新待處理列表...', 'green');
-                            setTimeout(fetchAndRenderPendingFiles, 500);
-                        }
-                        return;
-                    }
-
-                    if (data.task_type !== 'processing') {
-                        return;
-                    }
-
-                    const task_id = data.task_id;
-                    const status = data.status;
-                    const result = data.result;
-
-                    logStatus(`收到處理任務 #${task_id} 的更新: ${status}`, 'purple');
-
-                    const listItem = document.querySelector(`input.file-checkbox[value="${task_id}"]`)?.closest('li');
-
-                    if (!listItem) {
-                        logStatus(`警告: 在列表中找不到任務 #${task_id}。可能已被處理。`, 'orange');
-                         // 即使找不到，也刷新終端列表以確保狀態一致
-                        if (status === 'processed' || status === 'processing_failed' || status === 'processed_unsupported') {
-                            fetchAndRenderTerminalFiles();
-                        }
-                        return;
-                    }
-
-                    // 移除舊狀態
-                    listItem.classList.remove('status-processing', 'status-error', 'status-completed');
-
-                    // 清理舊的狀態標籤
-                    const oldStatusLabel = listItem.querySelector('.status-label');
-                    if (oldStatusLabel) oldStatusLabel.remove();
-
-                    switch (status) {
-                        case 'processing':
-                            listItem.classList.add('status-processing');
-                            listItem.insertAdjacentHTML('beforeend', ` <span class="status-label" style="color: #2980b9; font-weight: bold;">⚙️ 處理中...</span>`);
-                            break;
-                        case 'processing_failed':
-                            listItem.classList.add('status-error');
-                            listItem.insertAdjacentHTML('beforeend', ` <span class="status-label" style="color: #c0392b; font-weight: bold;">❌ 失敗</span>`);
-                            // 動畫效果後移除並更新終端列表
-                            setTimeout(() => {
-                                listItem.remove();
-                                fetchAndRenderTerminalFiles();
-                            }, 1500);
-                            break;
-                        case 'processed':
-                        case 'processed_unsupported':
-                            listItem.classList.add('status-completed');
-                            listItem.insertAdjacentHTML('beforeend', ` <span class="status-label" style="color: #27ae60; font-weight: bold;">✅ 完成</span>`);
-                             // 動畫效果後移除並更新終端列表
-                            setTimeout(() => {
-                                listItem.remove();
-                                fetchAndRenderTerminalFiles();
-                            }, 1500);
-                            break;
+                    if ((data.type === 'task_update' && data.task_type === 'processing') || (data.type === 'task_update' && data.task_type === 'download')) {
+                        logStatus(`收到任務 #${data.task_id} 的更新通知 (${data.status})。正在刷新列表...`, 'purple');
+                        refreshAllLists();
                     }
                 };
             };
 
-            // --- Initial Load ---
-            (async () => {
-                logStatus('頁面載入完成，正在初始化...');
-                await Promise.all([
-                    fetchAndRenderPendingFiles(),
-                    fetchAndRenderTerminalFiles()
-                ]);
-                setupWebSocket();
-                logStatus('初始化完成。', 'green');
-                const centerActiveNavButton = () => {
-                    const activeNavButton = document.querySelector('.top-nav a.active');
-                    if (activeNavButton) {
-                        activeNavButton.scrollIntoView({
-                            behavior: 'smooth',
-                            inline: 'center',
-                            block: 'nearest'
-                        });
-                    }
-                };
-                setTimeout(centerActiveNavButton, 100);
-            })();
+            // --- Init & Event Listeners ---
+            selectAllPendingBtn.addEventListener('click', () => document.querySelectorAll('.pending-checkbox').forEach(cb => cb.checked = true));
+            deselectAllPendingBtn.addEventListener('click', () => document.querySelectorAll('.pending-checkbox').forEach(cb => cb.checked = false));
+            selectAllTerminalBtn.addEventListener('click', () => document.querySelectorAll('.terminal-checkbox').forEach(cb => cb.checked = true));
+            deselectAllTerminalBtn.addEventListener('click', () => document.querySelectorAll('.terminal-checkbox').forEach(cb => cb.checked = false));
+            copyLogButton.addEventListener('click', () => navigator.clipboard.writeText(statusArea.innerText));
+
+            refreshAllLists();
+            setupWebSocket();
         });
     </script>
-
-    <!-- V5.5 Readiness Overlay Start -->
-    <style>
-        #readiness-overlay {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background-color: rgba(0, 0, 0, 0.7);
-            color: white;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            font-size: 1.5em;
-            z-index: 9999;
-            flex-direction: column;
-            text-align: center;
-        }
-        #readiness-overlay .spinner {
-            border: 4px solid rgba(255, 255, 255, 0.3);
-            border-radius: 50%;
-            border-top: 4px solid #fff;
-            width: 40px;
-            height: 40px;
-            animation: spin 1s linear infinite;
-            margin-bottom: 20px;
-        }
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-    </style>
-    <div id="readiness-overlay">
-        <div class="spinner"></div>
-        <p>系統正在初始化核心服務，請稍候...</p>
-    </div>
-    <script>
-        document.addEventListener('DOMContentLoaded', function() {
-            const overlay = document.getElementById('readiness-overlay');
-            const buttons = document.querySelectorAll('button, a.button, input[type="button"], input[type="submit"]');
-
-            // 輔助函數：啟用UI
-            function enableUI() {
-                overlay.style.display = 'none';
-                buttons.forEach(btn => {
-                    btn.disabled = false;
-                });
-                console.log('系統已就緒，UI 已啟用。');
-            }
-
-            // 檢查 sessionStorage 中是否已有就緒標記
-            if (sessionStorage.getItem('isSystemReady') === 'true') {
-                enableUI();
-                const overlayText = overlay.querySelector('p');
-                if(overlayText) {
-                    overlayText.innerText = '系統已就緒';
-                }
-                return; // 如果已就緒，則不執行後續的輪詢
-            }
-
-            // 1. 預設禁用所有按鈕並顯示遮罩
-            buttons.forEach(btn => {
-                if (!btn.closest('.navbar')) {
-                    btn.disabled = true;
-                }
-            });
-            overlay.style.display = 'flex';
-
-            // 2. 定期輪詢 /api/health/ready 端點
-            const readinessInterval = setInterval(() => {
-                fetch('/api/health/ready')
-                    .then(response => {
-                        if (response.ok) {
-                            // 3. 一旦請求成功，設定標記、啟用按鈕並隱藏遮罩
-                            clearInterval(readinessInterval);
-                            sessionStorage.setItem('isSystemReady', 'true'); // 設定標記
-                            enableUI();
-                        } else {
-                            console.log('等待核心服務就緒...');
-                        }
-                    })
-                    .catch(error => {
-                        console.error('輪詢就緒狀態時發生錯誤:', error);
-                        const overlayText = overlay.querySelector('p');
-                        if(overlayText) {
-                            overlayText.innerText = '無法連接到後端服務，請檢查連線或稍後重試。';
-                        }
-                    });
-            }, 2000); // 每 2 秒輪詢一次
-        });
-    </script>
-    <!-- V5.5 Readiness Overlay End -->
 </body>
 </html>

@@ -71,13 +71,23 @@
             const selectAllBtn = document.getElementById('select-all');
             const deselectAllBtn = document.getElementById('deselect-all');
             const toggleAllBtn = document.getElementById('toggle-all-summaries');
+            // JULES: Add status area reference
+            const statusArea = document.getElementById('status-area');
 
             let tasks = [];
+
+            // JULES: Add logStatus function
+            const logStatus = (message, color = 'black') => {
+                const statusAreaForLog = document.getElementById('status-area'); // Re-fetch in case of DOM re-render
+                if (!statusAreaForLog) return;
+                const timestamp = new Date().toLocaleTimeString('zh-TW', { hour12: false });
+                statusAreaForLog.insertAdjacentHTML('afterbegin', `<p style="color: ${color};">[${timestamp}] ${message}</p>`);
+            };
 
             const getStatusHTML = (status) => {
                 const statusMap = {
                     'pending': '待處理',
-                    'processing': '處理中...',
+                    'processing': '佇列中...',
                     'gemini_processing': '🤖 AI 分析中...',
                     'completed': '✅ 已完成',
                     'failed': '❌ 失敗'
@@ -100,12 +110,11 @@
 
                 tasks.forEach(task => {
                     const card = document.createElement('div');
-                    card.className = 'file-card'; // JULES: Changed to file-card for style consistency
+                    card.className = 'file-card';
                     card.dataset.taskId = task.id;
 
                     const isActionable = task.summary_status === 'pending' || !task.summary_status;
 
-                    // JULES: Card layout updated based on user feedback
                     card.innerHTML = `
                         <div class="card-header">
                             <input type="checkbox" class="task-checkbox" value="${task.id}" ${!isActionable ? 'disabled' : ''}>
@@ -143,7 +152,6 @@
 
             const populateModelSelector = (models) => {
                 modelSelect.innerHTML = '';
-                // JULES: Updated sorting logic to match Stage 1 and set a specific default model.
                 const priorityOrder = [
                     "models/gemini-2.0-flash-lite",
                     "models/gemini-1.5-flash",
@@ -158,7 +166,7 @@
                     if (bPriority === -1) bPriority = priorityOrder.length;
 
                     if (aPriority !== bPriority) return aPriority - bPriority;
-                    return a.localeCompare(b); // Fallback to alphabetical sort
+                    return a.localeCompare(b);
                 });
 
                 sortedModels.forEach(modelName => {
@@ -166,7 +174,6 @@
                     modelSelect.add(option);
                 });
 
-                // Set default value
                 const defaultModel = "models/gemini-2.0-flash-lite";
                 if (sortedModels.includes(defaultModel)) {
                     modelSelect.value = defaultModel;
@@ -215,22 +222,30 @@
                 const modelName = modelSelect.value;
                 if (selectedIds.length === 0 || !modelName) return;
 
+                logStatus(`收到 ${selectedIds.length} 個摘要任務請求，正在發送至後端...`, 'blue');
                 startBtn.disabled = true;
                 startBtn.textContent = '正在啟動...';
 
                 try {
+                    // Optimistic UI update
+                    selectedIds.forEach(id => {
+                        const task = tasks.find(t => t.id === id);
+                        if (task) {
+                            task.summary_status = 'gemini_processing';
+                        }
+                    });
+                    renderCards();
+
                     await fetch('/api/analyzer/start_summary_generation', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ task_ids: selectedIds, model_name: modelName })
                     });
-                    selectedIds.forEach(id => {
-                        const task = tasks.find(t => t.id === id);
-                        if (task) task.summary_status = 'processing';
-                    });
-                    renderCards();
+
                 } catch (error) {
+                    logStatus(`啟動分析失敗: ${error.message}`, 'red');
                     alert('啟動失敗，請查看控制台日誌。');
+                    fetchTasks(); // Re-fetch to revert optimistic update on error
                 } finally {
                     startBtn.textContent = '✨ 開始生成重點摘要';
                     updateButtonStates();
@@ -273,38 +288,34 @@
 
             // --- WebSocket ---
             function connectWebSocket() {
-                const ws = new WebSocket(`ws://${window.location.host}/api/ws`);
+                const ws = new WebSocket(`${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/api/ws`);
 
                 ws.onopen = () => {
-                    console.log('WebSocket connection established.');
+                    console.log('WebSocket 連線已建立。');
+                    logStatus('WebSocket 連線成功。', 'blue');
                 };
 
                 ws.onmessage = (event) => {
-                    console.log('WebSocket message received:', event.data); // 新增的除錯日誌
+                    console.log('收到 WebSocket 訊息:', event.data);
                     try {
                         const data = JSON.parse(event.data);
-                        // 確保 data.result 是一個物件
-                        if (data.type === 'analysis_update' && data.task_id && typeof data.result === 'object' && data.result !== null) {
-                            const taskIndex = tasks.findIndex(t => t.id === data.task_id);
-                            if (taskIndex !== -1) {
-                                // 更新任務物件，而不是完全替換
-                                Object.assign(tasks[taskIndex], data.result);
-                                renderCards();
-                            }
-                        } else {
-                            console.warn('Received WebSocket message is not a valid task update:', data);
+                        if (data.type === 'analysis_update' && data.task_id) {
+                            logStatus(`收到任務 #${data.task_id} 的更新通知，正在刷新列表...`, 'purple');
+                            fetchTasks();
                         }
                     } catch (e) {
-                        console.error('Error parsing WebSocket message:', e);
+                        console.error('處理 WebSocket 訊息時發生錯誤:', e);
                     }
                 };
 
                 ws.onerror = (error) => {
-                    console.error('WebSocket Error:', error);
+                    console.error('WebSocket 發生錯誤:', error);
+                    logStatus('WebSocket 發生錯誤。', 'red');
                 };
 
                 ws.onclose = () => {
-                    console.log('WebSocket connection closed. Reconnecting in 5 seconds...');
+                    console.log('WebSocket 連線已關閉，將在 5 秒後嘗試重新連線...');
+                    logStatus('WebSocket 連線已中斷。5 秒後嘗試重新連線...', 'orange');
                     setTimeout(connectWebSocket, 5000);
                 };
             }
