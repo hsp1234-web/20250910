@@ -37,7 +37,8 @@ body {
 .card-grid {
     display: grid;
     /* 參考 page4，但確保在我們的容器內運作良好 */
-    grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
+    /* V2: 將最小寬度從 400px 調整為 350px，以改善在窄螢幕上的適應性 */
+    grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
     gap: 20px;
     justify-content: center;
 }
