@@ -228,7 +228,8 @@ select {
 #file-cards-container {
     display: grid;
     /* For smaller screens, 1 column. For screens > 768px, 2 columns, etc. */
-    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(350px, 500px));
+    justify-content: center;
     gap: 20px;
     margin-top: 20px;
 }
@@ -324,7 +325,7 @@ select {
 .file-card.status-failed .status-badge { color: var(--error-color); }
 .file-card.status-processing .status-badge,
 .file-card.status-gemini_processing .status-badge { color: var(--processing-color); }
-.file-card.status-pending .status-badge { color: var(--text-light); }
+.file-card.status-pending .status-badge { color: var(--text-color); }
 
 
 .model-name, .token-usage {
