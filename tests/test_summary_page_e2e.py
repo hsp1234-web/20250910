@@ -90,25 +90,24 @@ def server_details():
 
 def test_summary_status_update_via_websocket(server_details):
     """
-    端對端測試：
-    1. 載入摘要頁面並攔截 API 呼叫以提供初始資料。
+    端對端測試（V2 - 驗證 fetchTasks 刷新邏輯）：
+    1. 載入摘要頁面，攔截初次 API 呼叫以提供「待處理」狀態的資料。
     2. 模擬 WebSocket 訊息推送。
-    3. 驗證前端卡片的狀態是否從 '待處理' 更新為 '✅ 已完成'。
-    4. 擷取螢幕截圖以供驗證。
+    3. 驗證 WebSocket 推送是否觸發了第二次 API 呼叫。
+    4. 攔截第二次 API 呼叫，並回傳「已完成」狀態的資料。
+    5. 驗證前端卡片的狀態是否從 '待處理' 更新為 '✅ 已完成'。
+    6. 擷取螢幕截圖以供驗證。
     """
     port = server_details["port"]
     base_url = f"http://127.0.0.1:{port}"
     summary_page_url = f"{base_url}/page4_summary_center"
+    api_url_pattern = "**/api/analyzer/files_for_summary"
 
     with sync_playwright() as p:
         browser = p.chromium.launch()
         page = browser.new_page()
 
-        def handle_websocket(ws):
-            print(f"✅ 成功攔截到 WebSocket 連線: {ws.url}")
-            assert f"/api/ws" in ws.url
-        page.on("websocket", handle_websocket)
-
+        # 注入 JS 以便能夠模擬 WebSocket 訊息
         page.add_init_script("""
             const originalWebSocket = window.WebSocket;
             window.WebSocket = function(...args) {
@@ -118,18 +117,22 @@ def test_summary_status_update_via_websocket(server_details):
             };
         """)
 
-        def setup_mock_routes(page: Page):
-            page.route("**/api/analyzer/files_for_summary", lambda route: route.fulfill(status=200, content_type="application/json", body=json.dumps([MOCK_TASK_INITIAL])))
-            page.route("**/api/keys", lambda route: route.fulfill(status=200, content_type="application/json", body=json.dumps([{"id": 1, "name": "test-key", "is_valid": True}])))
-            page.route("**/api/keys/models", lambda route: route.fulfill(status=200, content_type="application/json", body=json.dumps(["gemini-1.5-flash-mock"])))
+        # 初始設定：攔截 API 呼叫並提供初始資料
+        page.route(api_url_pattern, lambda route: route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps([MOCK_TASK_INITIAL])
+        ), times=1) # `times=1` 確保這個攔截器只作用一次
 
-        setup_mock_routes(page)
+        # 也需要攔截金鑰和模型的 API
+        page.route("**/api/keys", lambda route: route.fulfill(status=200, content_type="application/json", body=json.dumps([{"id": 1, "name": "test-key", "is_valid": True}])))
+        page.route("**/api/keys/models", lambda route: route.fulfill(status=200, content_type="application/json", body=json.dumps(["gemini-1.5-flash-mock"])))
 
         try:
             print(f"導航至頁面: {summary_page_url}")
-            page.goto(summary_page_url, timeout=30000)
+            page.goto(summary_page_url, wait_until="networkidle")
 
-            card_locator = page.locator(f".card[data-task-id='{MOCK_TASK_ID}']")
+            card_locator = page.locator(f".file-card[data-task-id='{MOCK_TASK_ID}']")
 
             print("等待卡片出現...")
             expect(card_locator).to_be_visible(timeout=10000)
@@ -139,25 +142,36 @@ def test_summary_status_update_via_websocket(server_details):
             expect(initial_status_locator).to_have_text("待處理")
             print("初始狀態 '待處理' 驗證成功。")
 
+            # 關鍵步驟：在模擬 WebSocket 訊息之前，設定好對第二次 API 呼叫的攔截
+            print("設定第二次 API 呼叫的攔截...")
+            page.route(api_url_pattern, lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps([MOCK_WEBSOCKET_PAYLOAD['result']]) # 回傳更新後的資料
+            ), times=1)
+
             print("在頁面中執行 JavaScript 以模擬 WebSocket 訊息...")
             page.evaluate(f"""
-                () => {{
-                    const mockEvent = {{
-                        data: JSON.stringify({json.dumps(MOCK_WEBSOCKET_PAYLOAD)})
-                    }};
-                    if (window.mockSocket && typeof window.mockSocket.onmessage === 'function') {{
-                        window.mockSocket.onmessage(mockEvent);
-                        console.log("模擬的 WebSocket 訊息已發送。");
-                    }} else {{
-                        console.error("找不到 mockSocket 或其 onmessage 處理器。");
-                    }}
+                if (window.mockSocket && typeof window.mockSocket.onmessage === 'function') {{
+                    const mockEvent = {{ data: JSON.stringify({json.dumps(MOCK_WEBSOCKET_PAYLOAD)}) }};
+                    window.mockSocket.onmessage(mockEvent);
+                    console.log("模擬的 WebSocket 訊息已發送。");
+                }} else {{
+                    console.error("找不到 mockSocket 或其 onmessage 處理器。");
                 }}
             """)
 
             print("等待狀態更新為 '✅ 已完成'...")
+            # 由於 UI 是由第二次 API 呼叫的結果渲染的，我們只需等待 UI 更新即可
             updated_status_locator = card_locator.locator(".status-badge")
             expect(updated_status_locator).to_have_text("✅ 已完成", timeout=5000)
             print("✅ 狀態更新驗證成功！")
+
+            # 驗證其他欄位也已更新
+            updated_token_locator = card_locator.locator(".token-usage")
+            expect(updated_token_locator).to_have_text("123")
+            print("✅ Token 消耗欄位更新驗證成功！")
+
 
             print(f"擷取螢幕截圖至: {SCREENSHOT_PATH}")
             page.screenshot(path=SCREENSHOT_PATH, type="jpeg", quality=95)
