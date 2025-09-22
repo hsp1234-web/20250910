@@ -428,7 +428,8 @@ def _run_summary_generation_blocking_task(task_id: int, model_name: str, queue: 
         prompt = prompt_template.format(document_text=text_content)
 
         db_client.update_analysis_task(task_id=task_id, updates={"summary_status": "gemini_processing"})
-        notification_msg = {"type": "analysis_update", "task_id": task_id, "result": db_client.get_analysis_task(task_id)}
+        # JULES (2025-09-22): 修正通知訊息，使其與其他分析階段的格式一致，包含 status 和 stage。
+        notification_msg = {"type": "analysis_update", "task_id": task_id, "status": "gemini_processing", "stage": "summary", "result": db_client.get_analysis_task(task_id)}
         asyncio.run_coroutine_threadsafe(queue.put(notification_msg), loop)
 
         summary_content, error, used_key, token_usage = gemini.prompt_for_text(prompt=prompt, model_name=model_name)
@@ -461,6 +462,7 @@ async def run_analysis_task_wrapper(task_id: int, semaphore: asyncio.Semaphore, 
     """
     (V4 優化後) 一個通用的非同步包裝函式，用於控制併發並執行阻塞的分析任務。
     現在接收一個 db_client 實例並將其傳遞下去。
+    JULES (2025-09-22): 新增 asyncio.wait_for 以防止執行緒無限期掛起。
     """
     async with semaphore:
         log.info(f"任務 {task_id} 已取得信號量，準備執行...")
@@ -492,11 +494,22 @@ async def run_analysis_task_wrapper(task_id: int, semaphore: asyncio.Semaphore, 
             func_kwargs.pop('stage', None)
 
             partial_func = functools.partial(blocking_func, task_id=task_id, queue=queue, loop=loop, db_client=db_client, **func_kwargs)
-            await loop.run_in_executor(None, partial_func)
+            # 使用 wait_for 新增超時保護，防止永久掛起
+            # 超時時間設定為 200 秒，比 GeminiManager 內部的 180 秒略長
+            await asyncio.wait_for(
+                loop.run_in_executor(None, partial_func),
+                timeout=200.0
+            )
+        except asyncio.TimeoutError:
+            error_message = "任務執行超時 (超過 200 秒)，可能在與 AI 服務通訊時發生問題。"
+            log.error(f"任務 {task_id}: {error_message}")
+            db_client.update_analysis_task(task_id=task_id, updates={status_field: "failed", "stage1_error_log": error_message, "stage2_error_log": error_message, "summary_error_log": error_message})
         except Exception as e:
             log.error(f"包裝函式捕獲到未預期的錯誤 (任務 {task_id}): {e}", exc_info=True)
+            # 在此處也應更新狀態為失敗，以防萬一
+            db_client.update_analysis_task(task_id=task_id, updates={status_field: "failed", "stage1_error_log": str(e), "stage2_error_log": str(e), "summary_error_log": str(e)})
         finally:
-            log.info(f"任務 {task_id} 執行完畢，釋放信號量。")
+            log.info(f"任務 {task_id} 執行完畢或超時，釋放信號量。")
             final_task_state = db_client.get_analysis_task(task_id)
             final_status = final_task_state.get(status_field, 'unknown')
             final_notification_msg = {"type": "analysis_update", "task_type": f"analysis_stage_{stage}", "task_id": task_id, "status": final_status, "result": final_task_state}
