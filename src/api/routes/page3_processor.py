@@ -57,7 +57,10 @@ async def get_terminal_files(db: DBClient = Depends(get_db)):
                 "url": row['url'],
                 "filename": Path(row['local_path']).name if row['local_path'] else 'N/A',
                 "status": row['status'],
-                "status_message": row['status_message']
+                "status_message": row['status_message'],
+                "title": row.get('title'),
+                "author": row.get('author'),
+                "message_date": row.get('message_date')
             }
             for row in rows
         ]

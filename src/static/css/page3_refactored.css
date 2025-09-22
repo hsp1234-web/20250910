@@ -108,6 +108,16 @@ body {
     justify-self: start;
 }
 
+.info-item .filename-text,
+.info-item a {
+    /* 允許在單字內部換行，防止長字串撐開容器 */
+    overflow-wrap: break-word;
+    word-break: break-all;
+
+    /* 這是個針對 Grid/Flexbox 的技巧，確保在內容過長時元素可以正確收縮 */
+    min-width: 0;
+}
+
 
 .card-footer {
     display: flex;
