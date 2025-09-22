@@ -107,7 +107,7 @@ def _run_stage1_blocking_task(task_id: int, file_id: int, model_name: str, queue
         valid_keys = key_manager.get_all_valid_keys_for_manager()
         if not valid_keys:
             raise ValueError("在金鑰池中找不到任何有效的 API 金鑰。")
-        gemini = GeminiManager(api_keys=valid_keys, timeout=api_timeout)
+        gemini = GeminiManager(api_keys=valid_keys)
 
         # 2. 從資料庫獲取檔案內容
         analysis_task_data = db_client.get_analysis_task(task_id=task_id)
@@ -225,7 +225,7 @@ def _run_date_inference_blocking_task(task_id: int, model_name: str, queue: asyn
         valid_keys = key_manager.get_all_valid_keys_for_manager()
         if not valid_keys:
             raise ValueError("在金鑰池中找不到任何有效的 API 金鑰。")
-        gemini = GeminiManager(api_keys=valid_keys, timeout=api_timeout)
+        gemini = GeminiManager(api_keys=valid_keys)
 
         text_content = task_data['file_content_for_analysis']
 
@@ -356,7 +356,7 @@ def _run_stage2_blocking_task(task_id: int, model_name: str, queue: asyncio.Queu
         valid_keys = key_manager.get_all_valid_keys_for_manager()
         if not valid_keys:
             raise ValueError("在金鑰池中找不到任何有效的 API 金鑰。")
-        gemini = GeminiManager(api_keys=valid_keys, timeout=api_timeout)
+        gemini = GeminiManager(api_keys=valid_keys)
 
         prompt = prompt_template.format(data_package=json.dumps(structured_data, ensure_ascii=False, indent=2))
 
@@ -423,7 +423,7 @@ def _run_summary_generation_blocking_task(task_id: int, model_name: str, queue: 
         valid_keys = key_manager.get_all_valid_keys_for_manager()
         if not valid_keys:
             raise ValueError("在金鑰池中找不到任何有效的 API 金鑰。")
-        gemini = GeminiManager(api_keys=valid_keys, timeout=api_timeout)
+        gemini = GeminiManager(api_keys=valid_keys)
 
         prompt = prompt_template.format(document_text=text_content)
 
@@ -741,7 +741,7 @@ async def start_summary_generation(request: Request, payload: SummaryRequest, ba
             stage="summary"
         )
 
-    return {"message": f"已為 {len(payload.task_ids)} 個任務啟動重點摘要生成。"}
+    return {"message": f"已成功為 {len(payload.task_ids)} 個任務啟動重點摘要生成。"}
 
 
 @router.get("/files_for_stage1")

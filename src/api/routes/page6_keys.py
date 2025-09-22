@@ -161,6 +161,15 @@ async def update_config_value_api(key: str, payload: ConfigUpdateRequest):
             if not (0 <= payload.value <= 300):
                 raise HTTPException(status_code=400, detail="設定值必須介於 0 到 300 之間。")
 
+        if key == "api_max_retries":
+            # 確保重試次數是整數且在合理範圍內
+            if not (isinstance(payload.value, int) or payload.value.is_integer()):
+                 raise HTTPException(status_code=400, detail="重試次數必須是整數。")
+            if not (0 <= int(payload.value) <= 5):
+                raise HTTPException(status_code=400, detail="重試次數必須介於 0 到 5 之間。")
+            # 將浮點數轉為整數儲存
+            payload.value = int(payload.value)
+
         success = config_manager.update_config_value(key, payload.value)
         if success:
             return {"message": f"設定 '{key}' 已成功更新。", "new_value": payload.value}
