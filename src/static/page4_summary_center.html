@@ -7,6 +7,7 @@
     <link rel="stylesheet" href="/static/css/nav.css">
     <link rel="stylesheet" href="/static/css/common.css">
     <link rel="stylesheet" href="/static/css/page4.css">
+    <link rel="stylesheet" href="/static/css/page4_summary.css">
 </head>
 <body>
     <nav class="top-nav">
@@ -99,22 +100,25 @@
 
                 tasks.forEach(task => {
                     const card = document.createElement('div');
-                    card.className = 'card';
+                    card.className = 'file-card'; // JULES: Changed to file-card for style consistency
                     card.dataset.taskId = task.id;
 
                     const isActionable = task.summary_status === 'pending' || !task.summary_status;
 
+                    // JULES: Card layout updated based on user feedback
                     card.innerHTML = `
                         <div class="card-header">
                             <input type="checkbox" class="task-checkbox" value="${task.id}" ${!isActionable ? 'disabled' : ''}>
-                            <span class="card-title">${escapeHtml(task.title || task.filename)}</span>
+                            <span class="card-title">任務 #${escapeHtml(task.id)}</span>
                         </div>
                         <div class="card-body">
                             <div class="info-grid">
-                                <div><strong>作者:</strong></div><div>${escapeHtml(task.author || 'N/A')}</div>
-                                <div><strong>日期:</strong></div><div>${escapeHtml(task.message_date || 'N/A')}</div>
-                                <div><strong>摘要狀態:</strong></div><div>${getStatusHTML(task.summary_status)}</div>
-                                <div><strong>Token 消耗:</strong></div><div>${task.summary_token_usage || 'N/A'}</div>
+                                <div class="info-item"><strong>標題:</strong> <span>${escapeHtml(task.title || task.filename)}</span></div>
+                                <div class="info-item"><strong>作者:</strong> <span>${escapeHtml(task.author || 'N/A')}</span></div>
+                                <div class="info-item"><strong>日期:</strong> <span>${escapeHtml(task.message_date || 'N/A')}</span></div>
+                                <div class="info-item"><strong>摘要狀態:</strong> ${getStatusHTML(task.summary_status)}</div>
+                                <div class="info-item"><strong>模型:</strong> <span class="model-name">${escapeHtml(task.summary_model || 'N/A')}</span></div>
+                                <div class="info-item"><strong>Token 消耗:</strong> <span class="token-usage">${task.summary_token_usage || 'N/A'}</span></div>
                             </div>
                             ${task.summary_status === 'completed' || task.summary_status === 'failed' ? `
                             <div class="summary-container">
@@ -139,30 +143,34 @@
 
             const populateModelSelector = (models) => {
                 modelSelect.innerHTML = '';
-                // 修正模型排序與過濾邏輯
+                // JULES: Updated sorting logic to match Stage 1 and set a specific default model.
+                const priorityOrder = [
+                    "models/gemini-2.0-flash-lite",
+                    "models/gemini-1.5-flash",
+                    "models/gemini-1.5-pro",
+                    "models/gemini-pro"
+                ];
+
                 const sortedModels = [...models].sort((a, b) => {
-                    const aIsFlash = a.includes('flash');
-                    const bIsFlash = b.includes('flash');
-                    const aIsVision = a.includes('vision');
-                    const bIsVision = b.includes('vision');
+                    let aPriority = priorityOrder.indexOf(a);
+                    let bPriority = priorityOrder.indexOf(b);
+                    if (aPriority === -1) aPriority = priorityOrder.length;
+                    if (bPriority === -1) bPriority = priorityOrder.length;
 
-                    // 規則1：優先顯示 'flash' 模型
-                    if (aIsFlash && !bIsFlash) return -1;
-                    if (!aIsFlash && bIsFlash) return 1;
-
-                    // 規則2：其次，非 'vision' 模型優先
-                    if (!aIsVision && bIsVision) return -1;
-                    if (aIsVision && !bIsVision) return 1;
-
-                    // 規則3：最後按字母順序排序
-                    return a.localeCompare(b);
+                    if (aPriority !== bPriority) return aPriority - bPriority;
+                    return a.localeCompare(b); // Fallback to alphabetical sort
                 });
 
-                // 移除僅顯示 vision 模型的錯誤過濾，顯示所有模型
                 sortedModels.forEach(modelName => {
                     const option = new Option(modelName.replace('models/', ''), modelName);
                     modelSelect.add(option);
                 });
+
+                // Set default value
+                const defaultModel = "models/gemini-2.0-flash-lite";
+                if (sortedModels.includes(defaultModel)) {
+                    modelSelect.value = defaultModel;
+                }
             };
 
             const checkKeysAndLoadModels = async () => {

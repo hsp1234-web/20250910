@@ -45,14 +45,41 @@
     transform: scale(1.4);
 }
 
+/* JULES: Added grid layout for card container to match stage 1 */
+#card-container {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+    gap: 20px;
+    margin-top: 20px;
+}
+
 /* Info Grid inside the card body */
 .info-grid {
     display: grid;
-    grid-template-columns: max-content 1fr;
-    align-items: center;
-    gap: 0.5rem 1rem;
+    grid-template-columns: 1fr; /* Changed from two-column to single-column grid */
+    gap: 12px;                  /* Consistent gap with page4.css */
     font-size: 0.9rem;
     margin-bottom: 1rem;
+}
+
+/* Add info-item style to match page4.css for flexbox alignment */
+.info-item {
+    font-size: 0.95em;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.info-item strong {
+    color: var(--text-light);
+    margin-right: 10px;
+    flex-shrink: 0;
+}
+
+/* Ensure value spans don't shrink and can wrap if needed */
+.info-item span {
+    text-align: right;
+    word-break: break-word;
 }
 
 /* Status Badge Styles */
@@ -84,11 +111,11 @@
 }
 
 .summary-content {
-    background-color: #f0f8ff;
+    background-color: #f8f9fa; /* 使用非常淺的灰色，與其他 UI 元素協調 */
     padding: 1rem;
     border-radius: 6px;
     margin-top: 1rem;
-    border-left: 4px solid var(--primary-color);
+    border: 1px solid var(--border-color); /* 添加 тонкий 邊框 */
     display: none; /* Hidden by default */
 }
 
