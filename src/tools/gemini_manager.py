@@ -24,12 +24,15 @@ class ApiKey:
         self.key = key_value
         self.name = name
 
+# JULES (2025-09-22): 導入 config_manager 以讀取全域設定
+from core import config_manager
+
 class GeminiManager:
     """
     管理與 Google Gemini API 的所有互動。
     支援多金鑰輪換、冷卻機制和自動重試機制。
     """
-    def __init__(self, api_keys: List[Dict[str, str]], timeout: int = 180, max_retries: int = 3, cooldown_seconds: int = 60):
+    def __init__(self, api_keys: List[Dict[str, str]], cooldown_seconds: int = 60):
         if not genai:
             raise ImportError("GeminiManager 無法初始化，因為 google.generativeai 模組未安裝。")
         if not api_keys:
@@ -40,10 +43,13 @@ class GeminiManager:
         self.cooldown_keys: Dict[str, float] = {}  # key_value -> cooldown_end_timestamp
         self.cooldown_seconds = cooldown_seconds
 
-        self.timeout = timeout
-        self.max_retries = max_retries
+        # 從設定檔讀取超時和重試次數，並提供合理的預設值
+        self.timeout = int(config_manager.get_config_value("api_timeout_seconds", 35))
+        self.max_retries = int(config_manager.get_config_value("api_max_retries", 3))
+
         self._lock = threading.Lock()
         logging.info(f"Gemini 管理器已初始化，共載入 {len(self.key_pool)} 組 API 金鑰。冷卻時間: {cooldown_seconds} 秒。")
+        logging.info(f"API 設定 -> 超時: {self.timeout} 秒, 最大重試: {self.max_retries} 次。")
 
     def _activate_cooled_down_keys(self):
         """檢查冷卻中的金鑰，並將已到期的移回主金鑰池。"""

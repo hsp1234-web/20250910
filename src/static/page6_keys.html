@@ -64,16 +64,24 @@
             <div id="load-from-env-status"></div>
         </div>
 
-        <!-- JULES (2025-09-15): 新增 API 超時設定區塊 -->
+        <!-- JULES (2025-09-22): 重構為統一的全域 API 行為設定區塊 -->
         <div class="panel">
-            <h2>全域 API 超時設定</h2>
+            <h2>全域 API 行為設定</h2>
             <div class="form-group">
                 <label for="api-timeout-input">API 請求超時秒數 (5-300)</label>
                 <input type="number" id="api-timeout-input" placeholder="建議值 35" min="5" max="300">
-                <button id="save-timeout-btn">儲存設定</button>
+                <button id="save-timeout-btn">儲存超時</button>
+                <p class="help-text">設定所有對外部 API (Google Gemini, Yahoo Finance) 請求的等待上限。過低可能導致正常請求失敗，過高可能在網路問題時造成長時間等待。</p>
             </div>
             <div id="timeout-status" class="status-message"></div>
-            <p class="help-text">設定所有對外部 API (Google Gemini, Yahoo Finance) 請求的等待上限。過低可能導致正常請求失敗，過高可能在網路問題時造成長時間等待。</p>
+            <hr>
+            <div class="form-group">
+                <label for="api-retries-input">API 最大重試次數 (0-5)</label>
+                <input type="number" id="api-retries-input" placeholder="建議值 3" min="0" max="5">
+                <button id="save-retries-btn">儲存重試次數</button>
+                <p class="help-text">當 API 請求遭遇暫時性錯誤時，在放棄前的最大重試次數。</p>
+            </div>
+            <div id="retries-status" class="status-message"></div>
         </div>
 
         <!-- JULES (2025-09-17): 新增 API 請求延遲設定 -->
@@ -142,10 +150,13 @@
         const keyLoadCountInput = document.getElementById('key-load-count');
         const loadFromEnvStatus = document.getElementById('load-from-env-status');
 
-        // JULES (2025-09-15): 超時設定元素
+        // JULES (2025-09-22): 全域 API 行為設定元素
         const timeoutInput = document.getElementById('api-timeout-input');
         const saveTimeoutBtn = document.getElementById('save-timeout-btn');
         const timeoutStatus = document.getElementById('timeout-status');
+        const retriesInput = document.getElementById('api-retries-input');
+        const saveRetriesBtn = document.getElementById('save-retries-btn');
+        const retriesStatus = document.getElementById('retries-status');
 
 
         // --- 通用函式 ---
@@ -434,12 +445,14 @@
         };
 
         saveTimeoutBtn.addEventListener('click', () => saveSetting('api_timeout_seconds', timeoutInput, timeoutStatus, saveTimeoutBtn));
+        saveRetriesBtn.addEventListener('click', () => saveSetting('api_max_retries', retriesInput, retriesStatus, saveRetriesBtn));
         saveSubmissionDelayBtn.addEventListener('click', () => saveSetting('gemini_submission_delay', submissionDelayInput, submissionDelayStatus, saveSubmissionDelayBtn));
         saveRotationDelayBtn.addEventListener('click', () => saveSetting('gemini_rotation_delay', rotationDelayInput, rotationDelayStatus, saveRotationDelayBtn));
 
         // --- 初始載入 ---
         fetchKeys(); // fetchModels() is now correctly called from within fetchKeys()
         fetchSetting('api_timeout_seconds', timeoutInput, timeoutStatus);
+        fetchSetting('api_max_retries', retriesInput, retriesStatus);
         fetchSetting('gemini_submission_delay', submissionDelayInput, submissionDelayStatus);
         fetchSetting('gemini_rotation_delay', rotationDelayInput, rotationDelayStatus);
 
