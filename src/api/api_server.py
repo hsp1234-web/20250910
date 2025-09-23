@@ -21,6 +21,7 @@ from contextlib import asynccontextmanager
 from urllib.parse import unquote, quote
 from pydantic import BaseModel
 import psutil
+import httpx
 
 # --- 修正模組匯入路徑 ---
 # 將專案的 src 目錄新增到 Python 的搜尋路徑中，
@@ -343,6 +344,28 @@ def convert_to_media_url(absolute_path_str: str) -> str:
         return absolute_path_str
 
 
+# --- 微服務輔助函式 ---
+SERVICE_REGISTRY_FILE = Path("/tmp/service_registry.json")
+
+async def get_service_url(service_name: str) -> str:
+    """從服務註冊中心獲取指定微服務的基礎 URL。"""
+    if not SERVICE_REGISTRY_FILE.exists():
+        raise HTTPException(status_code=503, detail="服務註冊中心不可用 (Service Registry not available)。")
+
+    try:
+        with open(SERVICE_REGISTRY_FILE, 'r') as f:
+            registry = json.load(f)
+    except (json.JSONDecodeError, FileNotFoundError):
+        raise HTTPException(status_code=503, detail="無法讀取或解析服務註冊中心。")
+
+    service_info = registry.get(service_name)
+    if not service_info or service_info.get('status') != 'running' or not service_info.get('port'):
+        raise HTTPException(status_code=503, detail=f"服務 '{service_name}' 目前不可用或尚未註冊。")
+
+    port = service_info['port']
+    return f"http://127.0.0.1:{port}"
+
+
 # --- API 端點 ---
 
 @app.get("/", response_class=HTMLResponse)
@@ -377,65 +400,83 @@ def check_model_exists(model_size: str) -> bool:
         log.error(f"檢查模型 '{model_size}' 時發生錯誤: {e}")
         return False
 
-@app.post("/api/transcribe", status_code=202)
+@app.post("/api/transcribe", status_code=200)
 async def create_transcription_task(
     file: UploadFile = File(...),
-    model_size: str = Form("tiny"),
+    model_size: str = Form("tiny"), # Note: model_size is now determined by the service's environment
     language: Optional[str] = Form(None),
     beam_size: int = Form(5)
 ):
     """
-    接收音訊檔案，根據模型是否存在，決定是直接建立轉錄任務，
-    還是先建立一個下載任務和一個依賴於它的轉錄任務。
+    (V6.0 MIGRATED) 接收音訊檔案，直接呼叫 transcription_service 微服務進行處理。
+    此端點現在是同步阻塞的，會一直等到轉錄完成後才回傳結果。
     """
-    # 1. 檢查模型是否存在
-    model_is_present = check_model_exists(model_size)
-
-    # 2. 保存上傳的檔案
-    transcribe_task_id = str(uuid.uuid4())
-    file_extension = Path(file.filename).suffix or ".wav"
-    saved_file_path = UPLOADS_DIR / f"{transcribe_task_id}{file_extension}"
+    # 1. 保存上傳的檔案
+    # 我們仍然需要在主伺服器上接收檔案，並提供一個共享路徑給微服務
+    temp_file_id = str(uuid.uuid4())
+    file_extension = Path(file.filename).suffix or ".tmp"
+    saved_file_path = UPLOADS_DIR / f"{temp_file_id}{file_extension}"
     try:
         with open(saved_file_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
-        log.info(f"檔案已儲存至: {saved_file_path}")
+        log.info(f"檔案已暫存至: {saved_file_path}，準備轉發至轉錄服務。")
     except Exception as e:
-        log.error(f"❌ 儲存檔案時發生錯誤: {e}", exc_info=True)
+        log.error(f"❌ 儲存上傳檔案時發生錯誤: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"無法儲存上傳的檔案: {e}")
     finally:
         await file.close()
 
-    # 3. 根據模型是否存在來建立任務
-    transcription_payload = {
-        "input_file": str(saved_file_path),
-        "original_filename": file.filename, # JULES'S FIX: Store the original filename
-        "output_dir": "transcripts",
-        "model_size": model_size,
-        "language": language,
-        "beam_size": beam_size
-    }
+    # 2. 呼叫微服務
+    try:
+        service_base_url = await get_service_url("transcription_service")
+        service_url = f"{service_base_url}/api/v1/transcribe"
 
-    if model_is_present:
-        # 模型已存在，直接建立轉錄任務
-        log.info(f"✅ 模型 '{model_size}' 已存在，直接建立轉錄任務: {transcribe_task_id}")
-        db_client.add_task(transcribe_task_id, json.dumps(transcription_payload), task_type='transcribe')
-        # JULES: 修正 API 回應，使其與前端的通用處理邏輯一致，補上 type 欄位
-        return {"task_id": transcribe_task_id, "type": "transcribe"}
-    else:
-        # 模型不存在，建立下載任務和依賴的轉錄任務
-        download_task_id = str(uuid.uuid4())
-        log.warning(f"⚠️ 模型 '{model_size}' 不存在。建立下載任務 '{download_task_id}' 和依賴的轉錄任務 '{transcribe_task_id}'")
+        payload = {
+            "audio_path": str(saved_file_path),
+            "language": language,
+            "beam_size": beam_size
+        }
 
-        download_payload = {"model_size": model_size}
-        db_client.add_task(download_task_id, json.dumps(download_payload), task_type='download')
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                service_url,
+                json=payload,
+                timeout=150.0 # 使用我們計畫中定義的 150 秒超時
+            )
+            response.raise_for_status() # 如果微服務回傳 4xx 或 5xx 錯誤，則會拋出異常
 
-        db_client.add_task(transcribe_task_id, json.dumps(transcription_payload), task_type='transcribe', depends_on=download_task_id)
+            # 直接回傳微服務的成功回應
+            # 注意：這裡也可以考慮將結果儲存到資料庫或進行其他處理
+            return JSONResponse(content=response.json(), status_code=response.status_code)
 
-        # 我們回傳轉錄任務的 ID，讓前端可以追蹤最終結果
-        return JSONResponse(content={"tasks": [
-            {"task_id": download_task_id, "type": "download"},
-            {"task_id": transcribe_task_id, "type": "transcribe"}
-        ]})
+    except httpx.HTTPStatusError as e:
+        detail = f"轉錄服務回傳錯誤: {e.response.text}"
+        log.error(detail)
+        raise HTTPException(status_code=e.response.status_code, detail=detail)
+    except httpx.TimeoutException:
+        detail = "請求轉錄服務超時 (超過 150 秒)。"
+        log.error(detail)
+        raise HTTPException(status_code=504, detail=detail)
+    except httpx.RequestError as e:
+        detail = f"無法連線至轉錄服務: {e}"
+        log.error(detail)
+        raise HTTPException(status_code=502, detail=detail)
+    except HTTPException as e:
+        # 重新拋出已知的 HTTP 異常 (例如來自 get_service_url 的 503 錯誤)
+        log.error(f"代理時發生 HTTP 錯誤: {e.detail}")
+        raise e
+    except Exception as e:
+        detail = f"代理轉錄請求時發生未預期的內部錯誤: {e}"
+        log.error(detail, exc_info=True)
+        raise HTTPException(status_code=500, detail=detail)
+    finally:
+        # 清理暫存檔案
+        if saved_file_path.exists():
+            try:
+                os.remove(saved_file_path)
+                log.info(f"已清理暫存檔案: {saved_file_path}")
+            except OSError as e:
+                log.error(f"清理暫存檔案 {saved_file_path} 時失敗: {e}")
 
 
 @app.get("/api/status/{task_id}")
