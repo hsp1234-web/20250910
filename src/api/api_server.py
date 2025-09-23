@@ -268,7 +268,8 @@ app.include_router(page3_processor.router, prefix="/api/processor", tags=["API: 
 app.include_router(page4_analyzer.router, prefix="/api/analyzer", tags=["API: AI 分析"])
 app.include_router(page5_backup.router, prefix="/api/backup", tags=["API: 備份管理"])
 app.include_router(page6_keys.router, prefix="/api/keys", tags=["API: 金鑰管理"])
-app.include_router(page7_prompts.router, prefix="/api", tags=["API: 提示詞管理"])
+# JULES V7: 將 page7 的路由修正到 /api/analyzer 下，以匹配 prompts.html 的呼叫
+app.include_router(page7_prompts.router, prefix="/api/analyzer", tags=["API: 提示詞管理"])
 app.include_router(page8_details.router, prefix="/api", tags=["API: 檔案總覽"])
 app.include_router(page9_dashboard.router, prefix="/api/dashboard", tags=["API: 績效儀表板"])
 app.include_router(page10_test.router, prefix="/api/service_test", tags=["API: 微服務測試"])

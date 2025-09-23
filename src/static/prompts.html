@@ -92,18 +92,23 @@
             display: inline-block;
             margin-bottom: 20px;
             text-decoration: none;
-            color: #007bff;
-            font-weight: 500;
+            padding: 10px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            background-color: #6c757d;
+            color: white;
+            font-weight: 600;
+            transition: all 0.2s;
         }
         .back-link:hover {
-            text-decoration: underline;
+            background-color: #5a6268;
+            transform: translateY(-1px);
         }
     </style>
 </head>
 <body>
     <div class="container">
-        <a href="/page4" class="back-link">&larr; 返回 AI 分析頁面</a>
-        <p style="margin-top: 1em;"><a href="/history">查看歷史報告</a></p>
+        <a href="/static/mp3.html" class="back-link">&larr; 返回音訊轉錄儀</a>
         <h1>提示詞管理</h1>
         <p>在這裡，您可以檢視和修改系統用於與 AI 溝通的各種提示詞 (Prompts)。修改後請務必儲存。</p>
 

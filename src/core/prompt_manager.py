@@ -42,9 +42,9 @@ def get_all_prompts() -> Dict[str, Any]:
 def save_prompts(prompts_data: Dict[str, Any]):
     """
     儲存整個提示詞物件。
-    期待的格式是: {"stage_1_extraction_prompt": "...", "stage_2_generation_prompt": "..."}
+    (JULES V7): 移除對特定鍵的驗證，使其成為一個通用的儲存函式。
     """
-    if not isinstance(prompts_data, dict) or "stage_1_extraction_prompt" not in prompts_data or "stage_2_generation_prompt" not in prompts_data:
-        raise ValueError("提供的資料格式不正確，必須包含兩個階段的提示詞。")
+    if not isinstance(prompts_data, dict):
+        raise ValueError("提供的資料格式不正確，必須是一個字典。")
 
     _save_prompts(prompts_data)
