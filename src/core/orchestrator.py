@@ -233,6 +233,61 @@ def stream_reader(stream, prefix, ready_event=None, ready_signal=None):
         log.error(f"讀取流 '{prefix}' 時發生錯誤: {e}", exc_info=True)
 
 
+def install_core_dependencies():
+    """
+    安裝核心應用程式所需的所有 Python 依賴。
+    會讀取 requirements/ 目錄下的多個 txt 檔案。
+    """
+    log.info("--- 正在安裝核心依賴 ---")
+    requirements_dir = ROOT_DIR / "requirements"
+
+    # 定義需要為核心應用程式安裝的依賴文件列表
+    core_req_files = [
+        "core.txt",
+        "transcriber.txt",
+        "downloader.txt",
+        "gemini.txt",
+        "analysis.txt"
+    ]
+
+    # 效能優化：新增一個簡單的 lock 機制，避免每次啟動都重新安裝
+    lock_file = requirements_dir / ".install_lock"
+    should_install = True
+
+    if lock_file.exists():
+        # 檢查 requirements/ 目錄下是否有任何 .txt 檔案比 lock 檔案新
+        try:
+            latest_req_time = max(f.stat().st_mtime for f in requirements_dir.glob("*.txt") if f.is_file())
+            if lock_file.stat().st_mtime >= latest_req_time:
+                log.info("核心依賴未變更，跳過安裝。")
+                should_install = False
+        except ValueError:
+            # 如果 requirements/ 目錄下沒有任何 .txt 檔案，也無需安裝
+            should_install = False
+
+    if should_install:
+        for req_file_name in core_req_files:
+            req_file_path = requirements_dir / req_file_name
+            if req_file_path.exists():
+                log.info(f"正在從 {req_file_name} 安裝依賴...")
+                try:
+                    # 使用 uv 來快速安裝
+                    run_command([
+                        "uv", "pip", "install", "-r", str(req_file_path)
+                    ], log_prefix="CoreDeps")
+                except Exception as e:
+                    log.error(f"從 {req_file_name} 安裝依賴時失敗: {e}")
+                    raise RuntimeError(f"核心依賴安裝失敗: {req_file_name}")
+            else:
+                log.warning(f"找不到依賴文件 {req_file_path}，跳過。")
+
+        # 成功安裝後，建立或更新 lock 檔案
+        lock_file.touch()
+        log.info("✅ 核心依賴安裝完成。")
+    else:
+        log.info("✅ 核心依賴已是最新狀態。")
+
+
 def main():
     parser = argparse.ArgumentParser(description="系統協調器。")
     parser.add_argument("--mock", action="store_true", help="如果設置，則 worker 將以模擬模式運行。")
@@ -248,6 +303,9 @@ def main():
             if f.exists():
                 f.unlink()
                 log.info(f"已清理舊的檔案: {f}")
+
+        # V6.1 新增：安裝核心依賴
+        install_core_dependencies()
 
         # 步驟 1: 啟動核心後端服務 (DB Manager, API Server)
         api_port = args.port if args.port else find_free_port()
