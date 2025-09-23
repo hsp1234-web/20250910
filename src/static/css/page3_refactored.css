@@ -168,3 +168,89 @@ body {
 .status-badge.status-processed_unsupported {
     background-color: var(--p3-unsupported-bg);
 }
+
+/* --- 操作按鈕列 (Action Bar) - Refactored by Jules --- */
+.action-bar {
+    display: flex;
+    flex-wrap: wrap; /* 在空間不足時允許換行，為響應式做準備 */
+    gap: 15px; /* 設定群組之間的間距 */
+    align-items: stretch; /* 讓群組在交叉軸上拉伸，確保高度一致 */
+    margin-bottom: 20px; /* 與下方內容的間距 */
+}
+
+.action-group {
+    display: flex;
+    gap: 10px; /* 設定按鈕之間的間距 */
+    flex-grow: 1; /* 讓群組能彈性成長 */
+    flex-basis: 0; /* 確保 flex-grow 能正常運作 */
+}
+
+/* 給予包含主要操作按鈕的群組更多成長空間 */
+.action-group:has(button.primary-action) {
+    flex-grow: 2;
+}
+
+.action-bar button {
+    padding: 10px 15px;
+    font-size: 0.9em;
+    border: 1px solid #ced4da;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background-color 0.2s, border-color 0.2s, box-shadow 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    white-space: normal; /* 允許文字換行 */
+    line-height: 1.4;
+    font-weight: 500;
+    min-height: 50px; /* 設定最小高度以容納兩行文字 */
+
+    flex-grow: 1; /* 按鈕在群組內彈性成長 */
+    flex-basis: 0;
+
+    background-color: #f8f9fa;
+    color: #343a40;
+}
+
+.action-bar button:hover:not(:disabled) {
+    border-color: var(--p3-primary-blue);
+    box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.25);
+}
+
+.action-bar button:disabled {
+    background-color: #e9ecef;
+    color: #6c757d;
+    cursor: not-allowed;
+    opacity: 0.8;
+}
+
+/* 主要操作按鈕的特殊樣式 */
+.action-bar button.primary-action {
+    background-color: var(--p3-primary-blue);
+    color: var(--p3-text-white);
+    font-weight: bold;
+    border-color: transparent;
+}
+
+.action-bar button.primary-action:hover:not(:disabled) {
+    background-color: #0056b3;
+    border-color: #0056b3;
+}
+
+/* --- 響應式設計：針對行動裝置 (寬度小於 600px) --- */
+@media (max-width: 600px) {
+    .action-bar {
+        flex-direction: column; /* 垂直排列 */
+    }
+
+    .action-group {
+        width: 100%;
+    }
+
+    /* 讓第一個群組內的兩個按鈕平分寬度 */
+    .action-group:first-child {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+    }
+}
