@@ -1,15 +1,17 @@
 import logging
 from pathlib import Path
-import fitz  # PyMuPDF
-import docx
-from pptx import Presentation
+# JULES V6 啟動優化：延遲載入
+# import fitz  # PyMuPDF
+# import docx
+# from pptx import Presentation
 import io
-from PIL import Image
+# from PIL import Image
 
 log = logging.getLogger(__name__)
 
 def extract_from_pdf(file_path: Path, output_dir: Path) -> dict:
     """從 PDF 檔案中提取所有文字和圖片。"""
+    import fitz  # PyMuPDF
     text_content = ""
     image_paths = []
     try:
@@ -36,6 +38,8 @@ def extract_from_pdf(file_path: Path, output_dir: Path) -> dict:
 
 def extract_from_docx(file_path: Path, output_dir: Path) -> dict:
     """從 DOCX 檔案中提取所有文字和圖片。"""
+    import docx
+    from PIL import Image
     text_content = ""
     image_paths = []
     try:
@@ -62,6 +66,7 @@ def extract_from_docx(file_path: Path, output_dir: Path) -> dict:
 
 def extract_from_pptx(file_path: Path, output_dir: Path) -> dict:
     """從 PPTX 檔案中提取所有文字和圖片。"""
+    from pptx import Presentation
     text_content = ""
     image_paths = []
     try:

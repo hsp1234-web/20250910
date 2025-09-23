@@ -1,13 +1,16 @@
-import yfinance as yf
-import pandas as pd
-import numpy as np
 import logging
 from datetime import datetime
-import matplotlib
-matplotlib.use('Agg')  # 使用非互動式後端，防止在無頭伺服器上出錯
-import matplotlib.pyplot as plt
 import io
 import base64
+
+# JULES V6 啟動優化：延遲載入重量級依賴
+# import yfinance as yf
+# import pandas as pd
+# import numpy as np
+# import matplotlib
+# matplotlib.use('Agg')
+# import matplotlib.pyplot as plt
+
 
 log = logging.getLogger(__name__)
 
@@ -27,6 +30,7 @@ def _check_symbol_validity(symbol: str) -> bool:
     """
     一個精簡的輔助函式，僅用於檢查單一 yfinance 代號是否能獲取資料。
     """
+    import yfinance as yf
     if not symbol:
         return False
     try:
@@ -83,6 +87,9 @@ def to_float(value: any) -> float | None:
     Handles None, numpy numbers, single-item pandas Series, NaN, and infinity.
     If a Series is passed, it takes the first element.
     """
+    import pandas as pd
+    import numpy as np
+
     if value is None:
         return None
     if isinstance(value, (pd.Series, pd.DataFrame)):
@@ -101,6 +108,11 @@ def _generate_performance_chart_matplotlib(stock_df: pd.DataFrame, benchmark_df:
     使用 Matplotlib 產生權益曲線圖，並以 Base64 編碼的 PNG 格式回傳。
     【修改】: 增加 symbol 和 benchmark_symbol 參數以動態產生圖表標籤。
     """
+    import matplotlib
+    matplotlib.use('Agg')  # 使用非互動式後端，防止在無頭伺服器上出錯
+    import matplotlib.pyplot as plt
+    import pandas as pd # This function uses pd.DataFrame in its signature
+
     log.info(f"正在為 {symbol} vs {benchmark_symbol} 生成績效圖表...")
 
     # 為避免潛在的環境問題，重設為預設值
@@ -145,6 +157,10 @@ def calculate_performance_stats(symbol: str, start_date: str, end_date: str = No
     計算給定股票代號在指定期間內的績效指標，並生成圖表。
     【新增】支援網路請求超時設定。
     """
+    import yfinance as yf
+    import pandas as pd
+    import numpy as np
+
     if not end_date:
         end_date = datetime.now().strftime('%Y-%m-%d')
 
