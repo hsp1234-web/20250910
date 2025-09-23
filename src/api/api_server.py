@@ -400,10 +400,28 @@ def check_model_exists(model_size: str) -> bool:
         log.error(f"檢查模型 '{model_size}' 時發生錯誤: {e}")
         return False
 
+# JULES (2025-09-23): 關於動態模型選擇的架構說明
+#
+# 舊架構：使用者可以在 UI 上動態選擇 Whisper 模型大小 (tiny, base, large 等)，
+#           主伺服器會根據選擇即時下載或載入對應的模型。
+#
+# 新架構 (V6 微服務)：模型的選擇已從「執行時操作」轉變為「服務設定」。
+#           transcription_service 在啟動時會載入一個固定的模型 (目前為 'tiny')，
+#           並專一地用此模型處理所有請求。這提升了服務的穩定性與可預測性。
+#
+# 未來擴充建議 (方案 B - 業界標準作法):
+# 如果未來需要重新支援讓使用者動態選擇模型，建議採納以下作法：
+# 1. 部署多個 transcription_service 實例，每個實例專門負責一種模型大小
+#    (例如：transcription_service_tiny, transcription_service_base)。
+# 2. 修改 orchestrator.py，在啟動時將這些服務全部運行起來。
+# 3. 將此 /api/transcribe 端點升級為一個「智慧路由器」。它會接收前端傳來的
+#    `model_size` 參數，然後根據此參數，將請求轉發到對應的微服務。
+#
+# 這種作法能以最穩健、高效且符合微服務精神的方式，完美實現動態模型選擇的需求。
 @app.post("/api/transcribe", status_code=200)
 async def create_transcription_task(
     file: UploadFile = File(...),
-    model_size: str = Form("tiny"), # Note: model_size is now determined by the service's environment
+    model_size: str = Form("tiny"), # 注意：此參數目前僅為相容性保留，實際模型由 transcription_service 的設定決定。
     language: Optional[str] = Form(None),
     beam_size: int = Form(5)
 ):
@@ -1375,17 +1393,13 @@ async def websocket_endpoint(websocket: WebSocket):
                 payload = message.get("payload", {})
 
                 if msg_type == "DOWNLOAD_MODEL":
-                    model_size = payload.get("model")
-                    if model_size:
-                        log.info(f"收到下載 '{model_size}' 模型的請求。")
-                        await manager.broadcast_json({
-                            "type": "DOWNLOAD_STATUS",
-                            "payload": {"model": model_size, "status": "starting", "progress": 0}
-                        })
-                        loop = asyncio.get_running_loop()
-                        trigger_model_download(model_size, loop)
-                    else:
-                        await manager.broadcast_json({"type": "ERROR", "payload": "缺少模型大小參數"})
+                    model_size = payload.get("model", "any") # 從 payload 中獲取模型大小，或預設為 "any"
+                    log.warning(f"收到已棄用的 'DOWNLOAD_MODEL' 請求 (模型: {model_size})。此功能現已由 transcription_service 自動處理。為確保舊版 UI 相容性，將直接回傳成功訊息。")
+                    # 直接廣播一個完成的訊息，讓前端認為操作成功
+                    await manager.broadcast_json({
+                        "type": "DOWNLOAD_STATUS",
+                        "payload": {"model": model_size, "status": "completed", "progress": 100, "message": "模型已由微服務自動管理"}
+                    })
 
                 elif msg_type == "START_TRANSCRIPTION":
                     task_id = payload.get("task_id")

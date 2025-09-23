@@ -27,7 +27,7 @@ class Transcriber:
     """
     封裝 faster-whisper 模型的核心轉錄功能的類別。
     """
-    def __init__(self, model_size="large-v3"):
+    def __init__(self, model_size="tiny"):
         self.model_size = model_size
         self.model = self._load_model()
 
@@ -99,8 +99,9 @@ def startup_event():
     """應用程式啟動時執行的異步函數，用於載入 AI 模型。"""
     global transcriber_instance
     log.info("伺服器啟動程序開始：準備載入轉錄模型...")
-    # 從環境變數讀取模型大小，若未設定則使用預設值
-    model_size = os.environ.get("TRANSCRIPTION_MODEL_SIZE", "large-v3")
+    # 根據使用者需求，將預設模型固定為 'tiny'，以確保穩定性。
+    # 未來的優化可以重新引入環境變數，以支援不同的模型。
+    model_size = os.environ.get("TRANSCRIPTION_MODEL_SIZE", "tiny")
     transcriber_instance = Transcriber(model_size=model_size)
     log.info("✅ 伺服器啟動完成，模型已載入並準備就緒。")
 
