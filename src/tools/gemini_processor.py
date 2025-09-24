@@ -127,11 +127,13 @@ def validate_key():
         print(f"金鑰驗證時發生未預期的網路或其他錯誤：{e}", file=sys.stderr, flush=True)
         sys.exit(1)
 
-def generate_content_with_timeout(model, prompt_parts: list, log_message: str, internal_timeout: int = 100):
-    log.info(f"正要呼叫 model.generate_content ({log_message})...")
-    external_timeout = internal_timeout + 10
+def generate_content_with_timeout(model, prompt_parts: list, log_message: str, internal_timeout: int):
+    log.info(f"正要呼叫 model.generate_content ({log_message})，內部超時設定為 {internal_timeout} 秒...")
+    # 外部超時應比內部超時多一點緩衝時間
+    external_timeout = internal_timeout + 20
     def generation_task():
         try:
+            # 使用 request_options 來傳遞超時設定給 Google API
             return model.generate_content(prompt_parts, request_options={'timeout': internal_timeout})
         except Exception as e:
             log.error(f"generate_content 執行緒內部發生錯誤 ({log_message}): {e}", exc_info=True)
@@ -139,6 +141,7 @@ def generate_content_with_timeout(model, prompt_parts: list, log_message: str, i
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
         try:
             future = executor.submit(generation_task)
+            # 使用外部超時來等待執行緒完成
             response = future.result(timeout=external_timeout)
             log.info(f"model.generate_content ({log_message}) 呼叫成功返回。")
             return response
@@ -180,11 +183,11 @@ def upload_to_gemini(genai_module, audio_path: Path, display_filename: str):
             log.critical(f"🔴 Failed to upload file to Gemini: {e}", exc_info=True)
             raise
 
-def get_summary_and_transcript(gemini_file_resource, model, video_title: str, original_filename: str):
+def get_summary_and_transcript(gemini_file_resource, model, video_title: str, original_filename: str, timeout: int):
     log.info(f"🤖 Requesting summary and transcript from model '{model.model_name}'...")
     print_progress("generating_transcript", "AI 正在生成摘要與逐字稿...")
     prompt = ALL_PROMPTS['get_summary_and_transcript'].format(original_filename=original_filename, video_title=video_title)
-    response = generate_content_with_timeout(model, [prompt, gemini_file_resource], "摘要與逐字稿")
+    response = generate_content_with_timeout(model, [prompt, gemini_file_resource], "摘要與逐字稿", internal_timeout=timeout)
     full_response_text = response.text
     summary_match = re.search(r"\[重點摘要開始\](.*?)\[重點摘要結束\]", full_response_text, re.DOTALL)
     summary_text = summary_match.group(1).strip() if summary_match else "未擷取到重點摘要。"
@@ -197,11 +200,11 @@ def get_summary_and_transcript(gemini_file_resource, model, video_title: str, or
     print_progress("transcript_generated", "摘要與逐字稿生成完畢。")
     return summary_text, transcript_text, response
 
-def generate_html_report(summary_text: str, transcript_text: str, model, video_title: str):
+def generate_html_report(summary_text: str, transcript_text: str, model, video_title: str, timeout: int):
     log.info(f"🎨 Requesting HTML report from model '{model.model_name}'...")
     print_progress("generating_html", "AI 正在美化格式並生成 HTML 報告...")
     prompt = ALL_PROMPTS['format_as_html'].format(video_title_for_html=video_title, summary_text_for_html=summary_text, transcript_text_for_html=transcript_text)
-    response = generate_content_with_timeout(model, [prompt], "HTML報告")
+    response = generate_content_with_timeout(model, [prompt], "HTML報告", internal_timeout=timeout)
     generated_html = response.text
     if generated_html.strip().startswith("```html"):
         generated_html = generated_html.strip()[7:]
@@ -214,7 +217,7 @@ def generate_html_report(summary_text: str, transcript_text: str, model, video_t
     print_progress("html_generated", "HTML 報告生成完畢。")
     return generated_html.strip(), response
 
-def process_audio_file(audio_path: Path, model_name: str, video_title: str, output_dir: Path, tasks: str, output_format: str):
+def process_audio_file(audio_path: Path, model_name: str, video_title: str, output_dir: Path, tasks: str, output_format: str, timeout: int):
     start_time = time.time()
     total_tokens_used = 0
     api_key = os.getenv("GOOGLE_API_KEY")
@@ -231,7 +234,7 @@ def process_audio_file(audio_path: Path, model_name: str, video_title: str, outp
             try: return response.usage_metadata.total_token_count
             except: return 0
         if "summary" in task_list and "transcript" in task_list:
-            summary, transcript, response = get_summary_and_transcript(gemini_file_resource, model_instance, video_title, audio_path.name)
+            summary, transcript, response = get_summary_and_transcript(gemini_file_resource, model_instance, video_title, audio_path.name, timeout=timeout)
             error_msg = get_error_message_from_response(response)
             if error_msg: raise ValueError(error_msg)
             total_tokens_used += get_token_count(response)
@@ -240,14 +243,14 @@ def process_audio_file(audio_path: Path, model_name: str, video_title: str, outp
         else:
             if "summary" in task_list:
                 prompt = ALL_PROMPTS['get_summary_only'].format(original_filename=audio_path.name, video_title=video_title)
-                response = generate_content_with_timeout(model_instance, [prompt, gemini_file_resource], "僅摘要")
+                response = generate_content_with_timeout(model_instance, [prompt, gemini_file_resource], "僅摘要", internal_timeout=timeout)
                 error_msg = get_error_message_from_response(response)
                 if error_msg: raise ValueError(error_msg)
                 total_tokens_used += get_token_count(response)
                 results['summary'] = response.text.strip()
             if "transcript" in task_list:
                 prompt = ALL_PROMPTS['get_transcript_only'].format(original_filename=audio_path.name, video_title=video_title)
-                response = generate_content_with_timeout(model_instance, [prompt, gemini_file_resource], "僅逐字稿")
+                response = generate_content_with_timeout(model_instance, [prompt, gemini_file_resource], "僅逐字稿", internal_timeout=timeout)
                 error_msg = get_error_message_from_response(response)
                 if error_msg: raise ValueError(error_msg)
                 total_tokens_used += get_token_count(response)
@@ -259,7 +262,7 @@ def process_audio_file(audio_path: Path, model_name: str, video_title: str, outp
         txt_report_path = None
 
         if output_format == 'html':
-            html_content, response = generate_html_report(results.get('summary', ''), results.get('transcript', ''), model_instance, video_title)
+            html_content, response = generate_html_report(results.get('summary', ''), results.get('transcript', ''), model_instance, video_title, timeout=timeout)
             error_msg = get_error_message_from_response(response)
             if error_msg: raise ValueError(error_msg)
             total_tokens_used += get_token_count(response)
@@ -276,7 +279,7 @@ def process_audio_file(audio_path: Path, model_name: str, video_title: str, outp
 
         final_result = {
             "type": "result",
-            "status": "已完成",
+            "status": "completed",
             "output_path": str(output_path),
             "video_title": video_title,
             "total_tokens_used": total_tokens_used,
@@ -321,6 +324,7 @@ def main():
         process_parser.add_argument("--output-dir", type=str, required=True, help="儲存生成報告的目錄。")
         process_parser.add_argument("--tasks", type=str, default="summary,transcript", help="要執行的任務列表。")
         process_parser.add_argument("--output-format", type=str, default="html", choices=["html", "txt"], help="最終輸出的檔案格式。")
+        process_parser.add_argument("--timeout", type=int, default=180, help="API 請求的超時時間（秒）。")
         process_args = process_parser.parse_args(remaining_argv)
         audio_path = Path(process_args.audio_file)
         if not audio_path.exists():
@@ -328,7 +332,7 @@ def main():
             print(json.dumps({"type": "result", "status": "failed", "error": f"Input file not found: {audio_path}"}), flush=True)
             sys.exit(1)
         try:
-            process_audio_file(audio_path=audio_path, model_name=process_args.model, video_title=process_args.video_title, output_dir=Path(process_args.output_dir), tasks=process_args.tasks, output_format=process_args.output_format)
+            process_audio_file(audio_path=audio_path, model_name=process_args.model, video_title=process_args.video_title, output_dir=Path(process_args.output_dir), tasks=process_args.tasks, output_format=process_args.output_format, timeout=process_args.timeout)
         except Exception as e:
             log.critical(f"An error occurred in the main processing flow: {e}", exc_info=True)
             print(json.dumps({"type": "result", "status": "failed", "error": str(e)}), flush=True)

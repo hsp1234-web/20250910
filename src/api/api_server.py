@@ -864,6 +864,7 @@ async def process_youtube_urls(request: Request):
     download_only = payload.get("download_only", False)
     download_type = payload.get("download_type", "audio") # JULES'S NEW FEATURE
     api_key = payload.get("api_key") # 實現無狀態，從請求中直接獲取金鑰
+    timeout = payload.get("timeout", 180) # 從前端獲取超時設定，預設 180 秒
 
     if not requests_list:
         # 在加入相容性邏輯後，更新錯誤訊息
@@ -901,7 +902,8 @@ async def process_youtube_urls(request: Request):
                 "output_dir": "transcripts",
                 "tasks": tasks_to_run,
                 "output_format": output_format,
-                "api_key": api_key # 將金鑰存入任務酬載
+                "api_key": api_key, # 將金鑰存入任務酬載
+                "timeout": timeout # 將超時設定存入任務酬載
             }
 
             db_client.add_task(download_task_id, json.dumps(download_payload), task_type='youtube_download')
@@ -1193,8 +1195,9 @@ def trigger_youtube_processing(task_id: str, loop: asyncio.AbstractEventLoop):
             tasks_to_run = process_payload.get('tasks', 'summary,transcript')
             output_format = process_payload.get('output_format', 'html')
             api_key = process_payload.get('api_key') # 從任務酬載中讀取金鑰
+            timeout = process_payload.get('timeout', 180) # 從任務酬載中讀取超時設定
 
-            log.info(f"執行 Gemini 分析，任務: '{tasks_to_run}', 格式: '{output_format}'")
+            log.info(f"執行 Gemini 分析，任務: '{tasks_to_run}', 格式: '{output_format}', 超時: {timeout}s")
             asyncio.run_coroutine_threadsafe(manager.broadcast_json({
                 "type": "YOUTUBE_STATUS",
                 "payload": {"task_id": dependent_task_id, "status": "processing", "message": f"使用 {model} 進行 AI 分析...", "task_type": "gemini_process"}
@@ -1213,7 +1216,8 @@ def trigger_youtube_processing(task_id: str, loop: asyncio.AbstractEventLoop):
                 "--output-dir", str(report_output_dir),
                 "--video-title", video_title,
                 "--tasks", tasks_to_run,
-                "--output-format", output_format
+                "--output-format", output_format,
+                "--timeout", str(timeout) # 將超時參數傳遞給子程序
             ]
 
             proc_env = os.environ.copy()
@@ -1248,7 +1252,7 @@ def trigger_youtube_processing(task_id: str, loop: asyncio.AbstractEventLoop):
                  if key in process_result and process_result[key]:
                     process_result[key] = convert_to_media_url(process_result[key])
 
-            db_client.update_task_status(dependent_task_id, '已完成', json.dumps(process_result))
+            db_client.update_task_status(dependent_task_id, 'completed', json.dumps(process_result))
             log.info(f"✅ [執行緒] Gemini AI 處理完成。")
 
             # JULES'S FIX (2025-08-31): 補上遺失的 WebSocket 廣播
