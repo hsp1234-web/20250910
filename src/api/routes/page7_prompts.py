@@ -18,7 +18,7 @@ router = APIRouter()
 
 # --- API 端點 ---
 
-@router.get("/prompts", summary="獲取所有兩階段提示詞")
+@router.get("/", summary="獲取所有兩階段提示詞")
 async def get_all_prompts_endpoint():
     """
     獲取 `default_prompts.json` 中的所有提示詞。
@@ -30,7 +30,7 @@ async def get_all_prompts_endpoint():
         log.error(f"獲取提示詞時發生錯誤: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="讀取提示詞檔案時發生伺服器內部錯誤。")
 
-@router.post("/prompts", summary="儲存所有兩階段提示詞")
+@router.post("/", summary="儲存所有兩階段提示詞")
 async def save_all_prompts_endpoint(request: Request):
     """
     接收一個包含 'stage_1_extraction_prompt' 和 'stage_2_generation_prompt' 的物件，
