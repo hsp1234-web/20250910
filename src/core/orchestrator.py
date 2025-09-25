@@ -273,7 +273,7 @@ def install_core_dependencies():
                 try:
                     # 使用 uv 來快速安裝
                     run_command([
-                        "uv", "pip", "install", "-r", str(req_file_path)
+                        "uv", "pip", "install", "--system", "-r", str(req_file_path)
                     ], log_prefix="CoreDeps")
                 except Exception as e:
                     log.error(f"從 {req_file_name} 安裝依賴時失敗: {e}")
