@@ -235,12 +235,16 @@ class ServerManager:
 
             keys_to_inject = []
             for key_name in target_key_names:
-                key_value = userdata.get(key_name)
-                if key_value and key_value.strip():
-                    keys_to_inject.append(key_value)
-                    self._log_manager.log("INFO", f"[背景] ✅ 已成功獲取金鑰 '{key_name}'。")
-                else:
+                try:
+                    key_value = userdata.get(key_name)
+                    if key_value and key_value.strip():
+                        keys_to_inject.append(key_value)
+                        self._log_manager.log("INFO", f"[背景] ✅ 已成功獲取金鑰 '{key_name}'。")
+                except userdata.SecretNotFoundError:
                     self._log_manager.log("INFO", f"[背景] 🟡 未在 Colab Secrets 中找到金鑰 '{key_name}'，跳過。")
+                except Exception as e:
+                    # 捕捉其他可能的錯誤，例如權限問題
+                    self._log_manager.log("WARN", f"[背景] 讀取金鑰 '{key_name}' 時發生錯誤: {e}，跳過。")
 
             if not keys_to_inject:
                  self._log_manager.log("WARN", "[背景] 未從 Colab Secrets 中獲取到任何金鑰，跳過注入。")
