@@ -199,6 +199,12 @@ def prepare_core_services(api_port: int, api_ready_event: threading.Event):
         full_readiness_event.set()
         READINESS_SIGNAL_FILE.touch()
 
+        # JULES (2025-09-25): 在此處啟動非必要依賴的背景安裝
+        log.info("[核心準備] 準備在背景安裝重量級依賴...")
+        non_essential_install_thread = threading.Thread(target=install_non_essential_dependencies_background, daemon=True)
+        non_essential_install_thread.start()
+        threads.append(non_essential_install_thread)
+
         # 步驟 3: 背景觸發金鑰驗證 (舊流程)
         def _run_validation_in_background():
             log.info("[金鑰驗證-背景] 等待2秒後開始...")
@@ -213,6 +219,7 @@ def prepare_core_services(api_port: int, api_ready_event: threading.Event):
         log.info("[核心準備] 準備在背景啟動金鑰驗證...")
         validation_thread = threading.Thread(target=_run_validation_in_background, daemon=True)
         validation_thread.start()
+        threads.append(validation_thread)
 
     except Exception as e:
         log.critical(f"❌ [核心準備] 背景任務發生致命錯誤: {e}", exc_info=True)
@@ -241,13 +248,13 @@ def install_core_dependencies():
     log.info("--- 正在安裝核心依賴 ---")
     requirements_dir = ROOT_DIR / "requirements"
 
-    # 定義需要為核心應用程式安裝的依賴文件列表
+    # JULES (2025-09-25): 優化。此處只安裝啟動時必需的同步依賴。
+    # 重量級依賴 (如 analysis.txt) 將在後台線程中安裝。
     core_req_files = [
         "core.txt",
         "transcriber.txt",
         "downloader.txt",
         "gemini.txt",
-        "analysis.txt"
     ]
 
     # 效能優化：新增一個簡單的 lock 機制，避免每次啟動都重新安裝
@@ -273,7 +280,7 @@ def install_core_dependencies():
                 try:
                     # 使用 uv 來快速安裝
                     run_command([
-                        "uv", "pip", "install", "-r", str(req_file_path)
+                        "uv", "pip", "install", "--system", "-r", str(req_file_path)
                     ], log_prefix="CoreDeps")
                 except Exception as e:
                     log.error(f"從 {req_file_name} 安裝依賴時失敗: {e}")
@@ -286,6 +293,39 @@ def install_core_dependencies():
         log.info("✅ 核心依賴安裝完成。")
     else:
         log.info("✅ 核心依賴已是最新狀態。")
+
+
+def install_non_essential_dependencies_background():
+    """
+    [背景執行] 安裝非必要的重量級依賴，例如分析和報告工具。
+    此函式應在一個獨立的執行緒中運行，以免阻塞主啟動流程。
+    """
+    log.info("--- [背景安裝] 開始安裝重量級依賴 ---")
+    requirements_dir = ROOT_DIR / "requirements"
+    non_essential_reqs = [
+        "analysis.txt",
+        "document_processing.txt"
+    ]
+
+    # 為避免與同步安裝或網路I/O衝突，稍作延遲
+    time.sleep(5)
+
+    for req_file_name in non_essential_reqs:
+        req_file_path = requirements_dir / req_file_name
+        if req_file_path.exists():
+            log.info(f"[背景安裝] 正在從 {req_file_name} 安裝依賴...")
+            try:
+                # 使用 uv 來快速安裝
+                run_command([
+                    "uv", "pip", "install", "--system", "-r", str(req_file_path)
+                ], log_prefix="NonEssentialDeps")
+            except Exception as e:
+                # 在背景執行緒中，我們只記錄錯誤，不讓它崩潰主程式
+                log.error(f"[背景安裝] 從 {req_file_name} 安裝依賴時失敗: {e}")
+        else:
+            log.warning(f"[背景安裝] 找不到依賴文件 {req_file_path}，跳過。")
+
+    log.info("--- [背景安裝] 重量級依賴安裝流程結束 ---")
 
 
 def main():
