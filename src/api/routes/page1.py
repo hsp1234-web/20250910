@@ -42,25 +42,26 @@ async def get_export_page(request: Request):
     return templates.TemplateResponse("page1_sub_export.html", {"request": request})
 
 # --- API 端點 ---
-@router.post("/api/page1/extract_urls", status_code=200)
-async def extract_urls_endpoint(payload: UrlExtractionRequest, db: DBClient = Depends(get_db)):
-    """(V4 優化後) 提取 URL 並使用 DBClient 儲存。"""
-    source_text = payload.text
-    if not source_text.strip():
-        raise HTTPException(status_code=400, detail="提供的文字不可為空。")
-
-    try:
-        parsed_data = parse_chat_log(source_text)
-        if parsed_data:
-            # 使用新的 DBClient 方法
-            db.add_new_urls(parsed_data, source_text)
-        # 即使沒有新增資料，也回傳解析出的內容讓前端確認
-        return JSONResponse(content=parsed_data)
-    except Exception as e:
-        log.error(f"處理網址提取請求時發生錯誤: {e}", exc_info=True)
-        if isinstance(e, (ConnectionError, RuntimeError)):
-             raise HTTPException(status_code=503, detail=f"資料庫服務通訊失敗: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+# [2025-09-25] Jules: 此路由已被遷移到 core_service，在此將其註解以避免衝突。
+# @router.post("/api/page1/extract_urls", status_code=200)
+# async def extract_urls_endpoint(payload: UrlExtractionRequest, db: DBClient = Depends(get_db)):
+#     """(V4 優化後) 提取 URL 並使用 DBClient 儲存。"""
+#     source_text = payload.text
+#     if not source_text.strip():
+#         raise HTTPException(status_code=400, detail="提供的文字不可為空。")
+#
+#     try:
+#         parsed_data = parse_chat_log(source_text)
+#         if parsed_data:
+#             # 使用新的 DBClient 方法
+#             db.add_new_urls(parsed_data, source_text)
+#         # 即使沒有新增資料，也回傳解析出的內容讓前端確認
+#         return JSONResponse(content=parsed_data)
+#     except Exception as e:
+#         log.error(f"處理網址提取請求時發生錯誤: {e}", exc_info=True)
+#         if isinstance(e, (ConnectionError, RuntimeError)):
+#              raise HTTPException(status_code=503, detail=f"資料庫服務通訊失敗: {e}")
+#         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/api/page1/overview_data")
 async def get_overview_data(

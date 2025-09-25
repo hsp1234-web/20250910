@@ -147,26 +147,57 @@ def launch_microservice(service_path: Path):
 def start_all_microservices():
     """
     掃描 `services` 目錄並啟動所有找到的微服務。
+    [V7.0 優化] 實現兩階段啟動，優先啟動 `core_service` 以加速前端可用性。
     """
     services_dir = ROOT_DIR / "services"
     if not services_dir.is_dir():
         log.info("`services` 目錄不存在，跳過微服務啟動。")
         return
 
-    service_paths = [d for d in services_dir.iterdir() if d.is_dir() and (d / "main.py").exists()]
-    if not service_paths:
+    all_service_paths = [d for d in services_dir.iterdir() if d.is_dir() and (d / "main.py").exists()]
+    if not all_service_paths:
         log.info("在 `services` 目錄中未找到任何有效的微服務。")
         return
 
-    log.info(f"偵測到 {len(service_paths)} 個微服務，準備啟動...")
+    log.info(f"偵測到 {len(all_service_paths)} 個微服務，準備進行分層啟動...")
+
+    # 將服務分為核心服務和其他服務
+    core_service_path = None
+    other_service_paths = []
+    for path in all_service_paths:
+        if path.name == 'core_service':
+            core_service_path = path
+        else:
+            other_service_paths.append(path)
 
     service_registry = {}
-    # 順序啟動，也可以改為並行
-    for service_path in service_paths:
+
+    # --- 第一階段：同步啟動核心服務 ---
+    if core_service_path:
+        log.info("--- [第一階段] 正在優先啟動核心服務 (core_service) ---")
+        try:
+            service_name, port, process = launch_microservice(core_service_path)
+            service_registry[service_name] = {"port": port, "status": "running"}
+            processes.append(process)
+            log.info("✅ 核心服務已成功啟動！UI 介面和基礎功能應已可用。")
+        except Exception as e:
+            log.error(f"啟動核心服務 {core_service_path.name} 失敗: {e}", exc_info=True)
+            service_registry[core_service_path.name] = {"port": None, "status": "failed"}
+    else:
+        log.warning("未找到 `core_service`，將以標準模式啟動所有服務。")
+        # 如果沒有核心服務，則將所有服務都視為「其他服務」
+        other_service_paths = all_service_paths
+
+
+    # --- 第二階段：背景啟動其他服務 ---
+    log.info("--- [第二階段] 正在背景啟動其餘的重量級服務 ---")
+
+    # 這裡我們仍然使用循序啟動，但在真實場景可以輕易改為並行
+    for service_path in other_service_paths:
         try:
             service_name, port, process = launch_microservice(service_path)
             service_registry[service_name] = {"port": port, "status": "running"}
-            processes.append(process) # 將進程加入全域列表以便監控和清理
+            processes.append(process)
         except Exception as e:
             log.error(f"啟動服務 {service_path.name} 失敗: {e}", exc_info=True)
             service_registry[service_path.name] = {"port": None, "status": "failed"}
@@ -174,7 +205,7 @@ def start_all_microservices():
     # 將服務註冊資訊寫入檔案
     with open(SERVICE_REGISTRY_FILE, 'w', encoding='utf-8') as f:
         json.dump(service_registry, f, indent=2)
-    log.info(f"✅ 服務註冊資訊已寫入: {SERVICE_REGISTRY_FILE}")
+    log.info(f"✅ 所有服務的啟動流程已觸發，註冊資訊已更新: {SERVICE_REGISTRY_FILE}")
 
 
 # --- V5.5 舊有邏輯 (待移除) ---
