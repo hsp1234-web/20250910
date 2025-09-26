@@ -105,3 +105,9 @@ async def serve_page4_summary_center(request: Request):
 async def serve_page_bond(request: Request):
     """ 提供債券分析頁面 """
     return templates.TemplateResponse("page_bond.html", {"request": request})
+
+
+@router.get("/primary_dealer_analysis", response_class=HTMLResponse)
+async def serve_primary_dealer_analysis(request: Request):
+    """ 提供一級交易商分析儀表板頁面 """
+    return templates.TemplateResponse("primary_dealer_analysis.html", {"request": request})

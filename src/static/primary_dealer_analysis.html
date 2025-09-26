@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>一級交易商分析</title>
+    <link rel="stylesheet" href="/static/css/main.css">
+    <style>
+        /* --- 此頁面專用樣式 --- */
+        .dashboard-grid {
+            display: grid;
+            /* 響應式網格，最小寬度 500px，最大 1fr (均分剩餘空間) */
+            grid-template-columns: repeat(auto-fit, minmax(500px, 1fr));
+            gap: 20px; /* 網格間距 */
+        }
+        .chart-container {
+            width: 100%;
+            background-color: #f9f9f9; /* 給圖表一個淡淡的背景色 */
+            min-height: 300px; /* 避免圖片載入前容器塌陷 */
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .chart-container img {
+            width: 100%;
+            height: auto;
+            border: 1px solid #ddd;
+        }
+        .chart-container .placeholder {
+            color: #888;
+            font-size: 1rem;
+        }
+        .navbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 1rem 2rem;
+            background-color: #fff;
+            border-bottom: 1px solid #ddd;
+        }
+        .navbar-brand {
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: #333;
+            text-decoration: none;
+        }
+        .navbar-links {
+            list-style: none;
+            margin: 0;
+            padding: 0;
+            display: flex;
+        }
+        .navbar-links li {
+            margin-left: 20px;
+        }
+        .navbar-links a {
+            text-decoration: none;
+            color: #555;
+            font-size: 1rem;
+        }
+        .navbar-links a.active {
+            font-weight: bold;
+            color: #007bff;
+        }
+    </style>
+</head>
+<body>
+    <!-- 導覽列 -->
+    <nav class="navbar">
+        <a href="/" class="navbar-brand">返回主頁</a>
+    </nav>
+
+    <div class="content">
+        <h1>一級交易商壓力指數儀表板</h1>
+
+        <div class="dashboard-grid">
+            <!-- 12 張圖表卡片 -->
+            <div class="panel" data-indicator-id="sofr">
+                <h2>SOFR (擔保隔夜融資利率)</h2>
+                <div class="chart-container">
+                    <img id="chart-img-sofr" src="" alt="圖表載入中..." />
+                </div>
+            </div>
+            <div class="panel" data-indicator-id="ofr_fci">
+                <h2>OFR FCI (金融壓力指數)</h2>
+                <div class="chart-container">
+                    <img id="chart-img-ofr_fci" src="" alt="圖表載入中..." />
+                </div>
+            </div>
+            <div class="panel" data-indicator-id="vix">
+                <h2>VIX (恐慌指數)</h2>
+                <div class="chart-container">
+                    <img id="chart-img-vix" src="" alt="圖表載入中..." />
+                </div>
+            </div>
+            <div class="panel" data-indicator-id="us_bond_2y_10y_spread">
+                <h2>美債2年與10年利差</h2>
+                <div class="chart-container">
+                    <img id="chart-img-us_bond_2y_10y_spread" src="" alt="圖表載入中..." />
+                </div>
+            </div>
+            <div class="panel" data-indicator-id="us_high_yield_spread">
+                <h2>高收益債利差</h2>
+                <div class="chart-container">
+                    <img id="chart-img-us_high_yield_spread" src="" alt="圖表載入中..." />
+                </div>
+            </div>
+            <div class="panel" data-indicator-id="stress_index">
+                <h2>綜合壓力指數</h2>
+                <div class="chart-container">
+                    <img id="chart-img-stress_index" src="" alt="圖表載入中..." />
+                </div>
+            </div>
+            <div class="panel" data-indicator-id="dealer_net_positions">
+                <h2>淨部位</h2>
+                <div class="chart-container">
+                    <img id="chart-img-dealer_net_positions" src="" alt="圖表載入中..." />
+                </div>
+            </div>
+            <div class="panel" data-indicator-id="dealer_long_term_positions">
+                <h2>長天期淨部位</h2>
+                <div class="chart-container">
+                    <img id="chart-img-dealer_long_term_positions" src="" alt="圖表載入中..." />
+                </div>
+            </div>
+            <div class="panel" data-indicator-id="dealer_short_term_positions">
+                <h2>短天期淨部位</h2>
+                <div class="chart-container">
+                    <img id="chart-img-dealer_short_term_positions" src="" alt="圖表載入中..." />
+                </div>
+            </div>
+            <div class="panel" data-indicator-id="dealer_net_position_ranking">
+                <h2>淨部位排名</h2>
+                <div class="chart-container">
+                    <img id="chart-img-dealer_net_position_ranking" src="" alt="圖表載入中..." />
+                </div>
+            </div>
+            <div class="panel" data-indicator-id="dealer_position_change_ranking">
+                <h2>淨部位變動排名</h2>
+                <div class="chart-container">
+                    <img id="chart-img-dealer_position_change_ranking" src="" alt="圖表載-入中..." />
+                </div>
+            </div>
+            <div class="panel" data-indicator-id="stress_index_macd">
+                <h2>壓力指數MACD</h2>
+                <div class="chart-container">
+                    <img id="chart-img-stress_index_macd" src="" alt="圖表載入中..." />
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 引用對應的 JavaScript 檔案 -->
+    <script src="/static/js/primary_dealer_analysis.js"></script>
+</body>
+</html>
