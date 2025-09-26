@@ -89,8 +89,26 @@ import re
 import json
 import html
 import requests
-from IPython.display import clear_output, display, HTML
-from google.colab import output as colab_output
+
+# --- 環境適應性導入 ---
+# 嘗試導入 Colab/IPython 專用模組，如果失敗則定義假的替代品
+try:
+    from IPython.display import clear_output, display, HTML
+    from google.colab import output as colab_output
+    IS_COLAB_ENVIRONMENT = True
+except (ImportError, ModuleNotFoundError):
+    IS_COLAB_ENVIRONMENT = False
+    # 定義假的替代函式和類別，以確保程式在非 Colab 環境中也能執行
+    def clear_output(wait=False): pass
+    def display(*args, **kwargs): pass
+    class HTML:
+        def __init__(self, data):
+            self.data = data
+    class colab_output:
+        @staticmethod
+        def eval_js(*args, **kwargs):
+            return ""
+    print("警告：未在 Colab 環境中執行，部分顯示功能將被停用。")
 
 # ==============================================================================
 # SECTION 1: 管理器類別定義 (Managers)

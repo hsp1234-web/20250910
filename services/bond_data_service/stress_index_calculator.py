@@ -25,9 +25,15 @@ def get_required_data(data_manager: DataManager) -> pd.DataFrame:
     """
     使用 DataManager 獲取計算壓力指數所需的所有基礎數據，並整合成一個 DataFrame。
     """
+    # 擴充後的指標清單，包含了新圖表所需的數據
     indicator_list = [
+        # 原有指標
         'sofr', 'dgs10', 'dgs2', 'move_index', 'vix',
-        'dealer_positions', 'wresbal' # WRESBAL is 'Reserves'
+        'dealer_positions', 'wresbal',
+        # 新增指標
+        'us_high_yield_spread',     # 美國高收益債利差 (BAMLH0A0HYM2)
+        'dealer_positions_short',   # 交易商短期公債部位 (DPCSTOT)
+        'dealer_positions_long'     # 交易商長期公債部位 (DPCLTOT)
     ]
 
     all_series = {}
@@ -131,7 +137,9 @@ def calculate_full_metrics(data_manager: DataManager) -> pd.DataFrame:
 
     if total_weight <= 0:
         logger.error("無可用指標或權重為零，無法計算壓力指數。")
-        return pd.Series(dtype='float64', name='dealer_stress_index')
+        # 返回一個空的 Series 而不是整個 DataFrame，以保持類型一致性
+        df['dealer_stress_index'] = np.nan
+        return df
 
     weights_normalized = {k: v / total_weight for k, v in active_weights.items()}
 
