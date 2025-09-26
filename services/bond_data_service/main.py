@@ -5,48 +5,44 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import Response
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
-import database
-from data_manager import DataManager
-import plotly.graph_objects as go
-import io
+from . import database
+from .data_manager import DataManager
+from . import stress_index_calculator
+from . import charting
+import logging
 
 # --- Global instances ---
 data_manager = None
+# 新增一個快取，用於儲存計算好的完整指標，避免重複計算
+metrics_cache = {"data": None, "timestamp": None}
 
-# --- Constants ---
-INDICATOR_LABELS = {
-    "gdp": "US Real GDP (Billions of Dollars)",
-    "cpi": "US CPI (Annual Rate)",
-    "fedfunds": "Federal Funds Rate (%)",
-    "ism": "US ISM Manufacturing PMI"
-}
+# 設定日誌
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global data_manager
-    # 在應用啟動時執行的程式碼
-    print("Bond Data Service is starting up...")
+    logger.info("Bond Data Service is starting up...")
     database.initialize_database()
 
-    # 從環境變數讀取 API 金鑰，若無則使用後備金鑰
-    api_key = os.getenv("FRED_API_KEY", "77b0a570c6a17007e4f5af229c2aecc9")
+    api_key = os.getenv("FRED_API_KEY")
     if not api_key:
-        raise ValueError("FRED_API_KEY is not set in environment variables.")
-    data_manager = DataManager(api_key=api_key)
+        logger.critical("啟動失敗：請設定 FRED_API_KEY 環境變數。")
+        raise ValueError("啟動失敗：請設定 FRED_API_KEY 環境變數。")
 
+    data_manager = DataManager(api_key=api_key)
     yield
-    # 在應用關閉時執行的程式碼
-    print("Bond Data Service is shutting down...")
+    logger.info("Bond Data Service is shutting down...")
 
 app = FastAPI(
     lifespan=lifespan,
-    title="Bond Data Service",
-    description="一個專門用來獲取和提供債券相關宏觀經濟數據的微服務。",
-    version="0.1.0",
+    title="債券與一級交易商分析服務",
+    description="一個提供債券相關宏觀經濟數據，並計算與呈現一級交易商壓力指數相關圖表的微服務。",
+    version="1.0.0",
 )
 
-# --- CORS (跨來源資源共用) 設定 ---
-# 允許所有來源，在生產環境中應更嚴格
+# --- CORS 設定 ---
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -55,6 +51,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# --- API 端點 ---
+
 @app.get("/ping")
 async def ping():
     """健康檢查端點"""
@@ -62,73 +60,72 @@ async def ping():
 
 @app.post("/fetch/{indicator}")
 async def fetch_data_endpoint(indicator: str):
-    """觸發特定指標的資料抓取與儲存"""
+    """手動觸發特定基礎指標的資料抓取與儲存"""
     try:
-        print(f"收到 '{indicator}' 的資料抓取請求...")
+        logger.info(f"收到 '{indicator}' 的手動資料抓取請求...")
         count = data_manager.fetch_and_store_data(indicator)
         return {"indicator": indicator, "message": f"成功抓取並儲存了 {count} 筆數據。"}
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
+        logger.error(f"處理抓取請求時發生內部錯誤: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"處理時發生內部錯誤: {e}")
 
-@app.get("/data/{indicator}")
-async def get_data_endpoint(indicator: str):
-    """獲取指定指標的已儲存數據"""
-    try:
-        data = data_manager.get_data(indicator)
-        if not data:
-            # 即使沒有數據，也返回一個空的列表，讓前端更容易處理
-            return []
-        return data
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"讀取數據時發生內部錯誤: {e}")
-
-@app.get("/chart/{indicator_id}")
-async def get_chart_endpoint(indicator_id: str):
+@app.get("/chart/{chart_id}")
+async def get_unified_chart_endpoint(chart_id: str):
     """
-    獲取指定指標的數據，生成圖表並以圖片格式返回。
+    統一的圖表生成端點。
+    根據 chart_id 生成對應的圖表並以圖片格式返回。
     """
+    global metrics_cache
+
+    # 圖表ID與繪圖函式的分派字典
+    chart_dispatcher = {
+        "sofr": charting.plot_sofr,
+        "spread_10y2y": charting.plot_spread_10y2y,
+        "move_index": charting.plot_move_index,
+        "vix": charting.plot_vix,
+        "dealer_positions": charting.plot_dealer_positions,
+        "reserves": charting.plot_reserves,
+        "etf_tlt": charting.plot_etf_tlt,
+        "pos_res_ratio": charting.plot_pos_res_ratio,
+        "stress_index": charting.plot_stress_index,
+        "macd": charting.plot_macd,
+        "gauge": charting.plot_gauge,
+        "trend": charting.plot_trend,
+    }
+
+    plot_function = chart_dispatcher.get(chart_id)
+    if not plot_function:
+        raise HTTPException(status_code=404, detail=f"找不到ID為 '{chart_id}' 的圖表。")
+
     try:
-        # 1. 獲取數據
-        data = data_manager.get_data(indicator_id)
+        # 步驟 1: 獲取完整的指標數據 (使用快取)
+        # 這裡可以加入快取邏輯，例如5分鐘內不再重新計算
+        # 為了POC，我們先簡單實現
+        logger.info("開始為圖表請求計算完整指標...")
+        full_metrics_df = stress_index_calculator.calculate_full_metrics(data_manager)
 
-        # 2. 如果沒有數據，觸發抓取
-        if not data:
-            print(f"'{indicator_id}' 在資料庫中沒有數據，正在觸發自動抓取...")
-            data_manager.fetch_and_store_data(indicator_id)
-            data = data_manager.get_data(indicator_id)
+        if full_metrics_df.empty:
+            logger.error("指標計算結果為空，無法生成圖表。")
+            raise HTTPException(status_code=404, detail="計算指標失敗，可能基礎數據不足。")
 
-            if not data:
-                # 如果還是沒有數據，可以返回一個"無資料"的圖片或錯誤
-                # 這裡我們選擇拋出錯誤，讓前端知道
-                raise HTTPException(status_code=404, detail=f"指標 '{indicator_id}' 在嘗試更新後依然沒有數據。")
+        # 步驟 2: 呼叫對應的繪圖函式
+        logger.info(f"正在為 '{chart_id}' 調用繪圖函式...")
+        fig = plot_function(full_metrics_df)
 
-        # 3. 準備繪圖數據
-        dates = [item['date'] for item in data]
-        values = [item['value'] for item in data]
-        title = INDICATOR_LABELS.get(indicator_id, indicator_id.upper())
+        if fig is None:
+            logger.warning(f"圖表 '{chart_id}' 因數據不足而無法生成。")
+            raise HTTPException(status_code=404, detail=f"圖表 '{chart_id}' 因數據不足而無法生成。")
 
-        # 4. 使用 Plotly 繪圖
-        fig = go.Figure()
-        fig.add_trace(go.Scatter(x=dates, y=values, mode='lines', name=title))
-        fig.update_layout(
-            title=title,
-            xaxis_title="Date",
-            yaxis_title="Value",
-            template="plotly_white"
-        )
-
-        # 5. 將圖表轉換為圖片並存入記憶體
-        img_bytes = fig.to_image(format="jpeg", width=800, height=500, scale=2)
-
-        # 6. 回傳圖片
+        # 步驟 3: 將圖表轉換為圖片並回傳
+        img_bytes = charting.generate_chart_response(fig)
+        logger.info(f"圖表 '{chart_id}' 已成功生成並準備回傳。")
         return Response(content=img_bytes, media_type="image/jpeg")
 
-    except ValueError as e:
-        # 這是 data_manager.fetch_and_store_data 可能拋出的錯誤
-        raise HTTPException(status_code=404, detail=str(e))
+    except HTTPException as http_exc:
+        # 重新拋出已知的 HTTP 錯誤
+        raise http_exc
     except Exception as e:
-        print(f"為 '{indicator_id}' 生成圖表時發生錯誤: {e}")
-        # 為了安全，不在 production 環境中暴露詳細錯誤
-        raise HTTPException(status_code=500, detail=f"生成圖表時發生內部錯誤。")
+        logger.error(f"為 '{chart_id}' 生成圖表時發生未預期錯誤: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"生成圖表 '{chart_id}' 時發生內部錯誤。")
