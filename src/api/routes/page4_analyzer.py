@@ -931,7 +931,6 @@ async def update_dates_batch(payload: UpdateDatesBatchRequest, db: DBClient = De
 
 # JULES (2025-09-17): 新增用於生成 Word 報告的 API 端點
 from fastapi.responses import FileResponse
-from tools.report_generator_docx import create_docx_report
 import os
 
 class GenerateReportRequest(BaseModel):
@@ -951,6 +950,7 @@ async def generate_report_endpoint(
         raise HTTPException(status_code=400, detail="任務 ID 列表不可為空。")
 
     try:
+        from tools.report_generator_docx import create_docx_report
         # 步驟 1: 呼叫服務層函式來生成報告
         task_ids_str = ", ".join(map(str, payload.task_ids))
         log.info(f"API 層：正在為任務 {task_ids_str} 調用報告生成服務...")
