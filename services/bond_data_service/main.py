@@ -5,10 +5,10 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import Response
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
-from . import database
-from .data_manager import DataManager
-from . import stress_index_calculator
-from . import charting
+import database
+from data_manager import DataManager
+import stress_index_calculator
+import charting
 import logging
 
 # --- Global instances ---
