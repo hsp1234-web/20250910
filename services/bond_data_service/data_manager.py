@@ -1,9 +1,9 @@
 # services/bond_data_service/data_manager.py
 
 import pandas as pd
-from . import database
+import database
 # 匯入所有資料抓取器
-from .data_fetchers import (
+from data_fetchers import (
     fred_gdp_fetcher,
     fred_cpi_fetcher,
     fred_fedfunds_fetcher,

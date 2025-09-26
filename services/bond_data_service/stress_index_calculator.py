@@ -3,7 +3,7 @@
 import pandas as pd
 import numpy as np
 import logging
-from .data_manager import DataManager
+from data_manager import DataManager
 
 logger = logging.getLogger(__name__)
 
