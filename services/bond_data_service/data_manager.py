@@ -85,10 +85,20 @@ class DataManager:
         """根據指標名稱，觸發對應的抓取器並儲存數據。"""
         fetcher = self.fetcher_map.get(indicator_name.lower())
         if not fetcher:
-            raise ValueError(f"找不到指標 '{indicator_name}' 的抓取器。")
+            # raise ValueError(f"找不到指標 '{indicator_name}' 的抓取器。")
+            # --- 修改：找不到抓取器時，不再拋出錯誤，而是記錄警告並返回 ---
+            print(f"警告：在 data_manager 中找不到指標 '{indicator_name}' 的抓取器。將跳過此指標的抓取。")
+            logger.warning(f"在 data_manager 中找不到指標 '{indicator_name}' 的抓取器。")
+            return 0
 
         print(f"正在為指標 '{indicator_name}' 執行抓取...")
-        series_data = fetcher(self.api_key)
+        # 確保 fetcher 函式被正確呼叫
+        try:
+            series_data = fetcher(self.api_key)
+        except Exception as e:
+            print(f"錯誤：執行指標 '{indicator_name}' 的抓取器時發生錯誤: {e}")
+            logger.error(f"執行指標 '{indicator_name}' 的抓取器時出錯: {e}", exc_info=True)
+            return 0
 
         if series_data is not None:
             return self.save_series_to_db(series_data, indicator_name)
