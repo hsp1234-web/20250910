@@ -26,10 +26,13 @@ async def lifespan(app: FastAPI):
     logger.info("Bond Data Service is starting up...")
     database.initialize_database()
 
-    api_key = os.getenv("FRED_API_KEY")
-    if not api_key:
-        logger.critical("啟動失敗：請設定 FRED_API_KEY 環境變數。")
-        raise ValueError("啟動失敗：請設定 FRED_API_KEY 環境變數。")
+    default_api_key = "YOUR_DEFAULT_API_KEY"
+    api_key = os.getenv("FRED_API_KEY", default_api_key)
+
+    if api_key == default_api_key:
+        logger.warning("未偵測到 FRED_API_KEY 環境變數，將使用預設的假金鑰。資料抓取功能將無法運作。")
+    else:
+        logger.info("成功讀取 FRED_API_KEY。")
 
     data_manager = DataManager(api_key=api_key)
     yield
