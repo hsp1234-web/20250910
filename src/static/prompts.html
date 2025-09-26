@@ -131,7 +131,7 @@
 
             const fetchPrompts = async () => {
                 try {
-                    const response = await fetch('/api/analyzer/prompts');
+                    const response = await fetch('/api/prompts');
                     if (!response.ok) {
                         throw new Error(`伺服器錯誤: ${response.statusText}`);
                     }
@@ -188,7 +188,7 @@
                 });
 
                 try {
-                    const response = await fetch('/api/analyzer/prompts', {
+                    const response = await fetch('/api/prompts', {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json',

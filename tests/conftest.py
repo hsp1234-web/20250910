@@ -8,12 +8,8 @@ import socket
 import requests
 from pathlib import Path
 
-# --- 測試環境路徑設定 ---
-SRC_DIR = Path(__file__).resolve().parent.parent / "src"
-if str(SRC_DIR) not in sys.path:
-    sys.path.insert(0, str(SRC_DIR))
-
 # --- 準備匯入被測試的模組 ---
+# pytest 現在會透過 pyproject.toml 自動處理 sys.path
 from db.database import get_db_connection, initialize_database
 
 @pytest.fixture(scope="function")

@@ -13,6 +13,7 @@ fredapi==0.5.2
 psutil
 playwright
 requests
+pytest
 
 # Report & File Handling Dependencies
 WeasyPrint
