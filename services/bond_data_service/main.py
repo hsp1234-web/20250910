@@ -2,7 +2,7 @@
 
 import os
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import Response
+from fastapi.responses import Response, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import database
@@ -10,6 +10,8 @@ from data_manager import DataManager
 import stress_index_calculator
 import charting
 import logging
+import pandas as pd
+import numpy as np
 
 # --- Global instances ---
 data_manager = None
@@ -42,7 +44,7 @@ app = FastAPI(
     lifespan=lifespan,
     title="債券與一級交易商分析服務",
     description="一個提供債券相關宏觀經濟數據，並計算與呈現一級交易商壓力指數相關圖表的微服務。",
-    version="1.0.0",
+    version="1.1.0",
 )
 
 # --- CORS 設定 ---
@@ -74,6 +76,29 @@ async def fetch_data_endpoint(indicator: str):
         logger.error(f"處理抓取請求時發生內部錯誤: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"處理時發生內部錯誤: {e}")
 
+@app.get("/debug/all_metrics")
+async def get_all_metrics_debug():
+    """
+    [除錯用] 獲取所有計算指標的原始 DataFrame 數據。
+    注意：這會回傳大量數據，僅供開發和驗證使用。
+    """
+    try:
+        logger.info("[除錯] 正在請求所有指標數據...")
+        full_metrics_df = stress_index_calculator.calculate_full_metrics(data_manager)
+
+        # 將 NaN 轉換為 None (JSON 可序列化) 並重置索引，使日期成為一欄
+        df_serializable = full_metrics_df.reset_index().replace({pd.NaT: None, np.nan: None})
+
+        # 轉換為 JSON 字串，處理日期格式
+        json_str = df_serializable.to_json(orient='records', date_format='iso')
+
+        logger.info(f"[除錯] 成功生成指標數據，共 {len(df_serializable)} 筆。")
+        return Response(content=json_str, media_type="application/json")
+
+    except Exception as e:
+        logger.error(f"[除錯] 生成所有指標數據時發生錯誤: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"生成除錯數據時發生內部錯誤: {e}")
+
 @app.get("/chart/{chart_id}")
 async def get_unified_chart_endpoint(chart_id: str):
     """
@@ -82,53 +107,79 @@ async def get_unified_chart_endpoint(chart_id: str):
     """
     global metrics_cache
 
-    # 圖表ID與繪圖函式的分派字典
+    # 擴充後的圖表ID與繪圖函式的分派字典
     chart_dispatcher = {
+        # 現有圖表
         "sofr": charting.plot_sofr,
-        "spread_10y2y": charting.plot_spread_10y2y,
-        "move_index": charting.plot_move_index,
         "vix": charting.plot_vix,
+        "stress_index": charting.plot_stress_index,
+        "gauge": charting.plot_gauge,
+        "trend": charting.plot_trend,
+
+        # ID 不匹配修正 (別名)
+        "us_bond_2y_10y_spread": charting.plot_spread_10y2y,
+        "spread_10y2y": charting.plot_spread_10y2y,
+        "dealer_net_positions": charting.plot_dealer_positions,
         "dealer_positions": charting.plot_dealer_positions,
+        "stress_index_macd": charting.plot_macd,
+        "macd": charting.plot_macd,
+
+        # 功能對應 (OFR FCI 對應到我們的壓力指數)
+        "ofr_fci": charting.plot_stress_index,
+
+        # 新增的圖表 (將在後續步驟中實現)
+        "us_high_yield_spread": charting.plot_us_high_yield_spread,
+        "dealer_short_term_positions": lambda df: charting.plot_dealer_positions_by_maturity(df, 'short'),
+        "dealer_long_term_positions": lambda df: charting.plot_dealer_positions_by_maturity(df, 'long'),
+
+        # 暫未提供的圖表，回傳統一的提示圖
+        "dealer_net_position_ranking": lambda df: charting.plot_not_available("交易商淨部位排名"),
+        "dealer_position_change_ranking": lambda df: charting.plot_not_available("交易商部位變動排名"),
+
+        # 舊的或不推薦的 ID，為了相容性保留
         "reserves": charting.plot_reserves,
         "etf_tlt": charting.plot_etf_tlt,
         "pos_res_ratio": charting.plot_pos_res_ratio,
-        "stress_index": charting.plot_stress_index,
-        "macd": charting.plot_macd,
-        "gauge": charting.plot_gauge,
-        "trend": charting.plot_trend,
     }
 
     plot_function = chart_dispatcher.get(chart_id)
-    if not plot_function:
-        raise HTTPException(status_code=404, detail=f"找不到ID為 '{chart_id}' 的圖表。")
 
+    # 統一處理指標計算的邏輯
     try:
-        # 步驟 1: 獲取完整的指標數據 (使用快取)
-        # 這裡可以加入快取邏輯，例如5分鐘內不再重新計算
-        # 為了POC，我們先簡單實現
-        logger.info("開始為圖表請求計算完整指標...")
+        logger.info(f"開始為圖表 '{chart_id}' 計算完整指標...")
         full_metrics_df = stress_index_calculator.calculate_full_metrics(data_manager)
 
         if full_metrics_df.empty:
             logger.error("指標計算結果為空，無法生成圖表。")
-            raise HTTPException(status_code=404, detail="計算指標失敗，可能基礎數據不足。")
+            fig = charting.plot_not_available(f"圖表 '{chart_id}' (指標計算失敗)")
+            img_bytes = charting.generate_chart_response(fig)
+            return Response(content=img_bytes, media_type="image/jpeg")
 
-        # 步驟 2: 呼叫對應的繪圖函式
+        if not plot_function:
+            # 如果完全找不到對應的 ID，回傳一個通用的「未提供」圖表
+            logger.warning(f"找不到 chart_id '{chart_id}' 的對應函式。")
+            fig = charting.plot_not_available(f"圖表 '{chart_id}'")
+            img_bytes = charting.generate_chart_response(fig)
+            return Response(content=img_bytes, media_type="image/jpeg")
+
+        # 呼叫對應的繪圖函式
         logger.info(f"正在為 '{chart_id}' 調用繪圖函式...")
         fig = plot_function(full_metrics_df)
 
         if fig is None:
             logger.warning(f"圖表 '{chart_id}' 因數據不足而無法生成。")
-            raise HTTPException(status_code=404, detail=f"圖表 '{chart_id}' 因數據不足而無法生成。")
+            fig = charting.plot_not_available(f"圖表 '{chart_id}' (數據不足)")
+            img_bytes = charting.generate_chart_response(fig)
+            return Response(content=img_bytes, media_type="image/jpeg")
 
-        # 步驟 3: 將圖表轉換為圖片並回傳
+        # 將圖表轉換為圖片並回傳
         img_bytes = charting.generate_chart_response(fig)
         logger.info(f"圖表 '{chart_id}' 已成功生成並準備回傳。")
         return Response(content=img_bytes, media_type="image/jpeg")
 
-    except HTTPException as http_exc:
-        # 重新拋出已知的 HTTP 錯誤
-        raise http_exc
     except Exception as e:
         logger.error(f"為 '{chart_id}' 生成圖表時發生未預期錯誤: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"生成圖表 '{chart_id}' 時發生內部錯誤。")
+        # 發生未知錯誤時，也回傳一個提示圖
+        fig = charting.plot_not_available(f"圖表 '{chart_id}' (內部錯誤)")
+        img_bytes = charting.generate_chart_response(fig)
+        return Response(content=img_bytes, media_type="image/jpeg", status_code=500)

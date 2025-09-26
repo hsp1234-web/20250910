@@ -2,28 +2,39 @@
 
 import pandas as pd
 import plotly.graph_objects as go
-from typing import Optional
+from typing import Optional, Literal
 import numpy as np
 
 # --- 圖表設定 ---
 # 共享的圖表標籤，確保所有圖表風格統一
 CHART_LABELS = {
-    "dealer_stress_index": "一級交易商壓力指數",
+    # 原有標籤
+    "dealer_stress_index": "一級交易商壓力指數 (綜合)",
     "sofr": "擔保隔夜融資利率 (SOFR)",
     "spread_10y2y": "10-2年期公債利差",
     "move_index": "美林選擇權波動率預估 (MOVE)",
     "vix": "CBOE 波動率指數 (VIX)",
-    "dealer_positions": "一級交易商公債持有量",
+    "dealer_positions": "一級交易商公債總持有量",
     "wresbal": "聯邦儲備銀行準備金餘額",
     "pos_res_ratio": "持有量/準備金比率",
     "etf_tlt": "iShares 20+年期公債 ETF (TLT)",
     "macd": "壓力指數 MACD 動能",
     "gauge": "壓力儀表板",
-    "trend": "近期壓力趨勢"
+    "trend": "近期壓力趨勢",
+    # 新增標籤
+    "ofr_fci": "OFR 金融壓力指數 (對應)",
+    "us_high_yield_spread": "美國高收益債利差 (BofA)",
+    "dealer_positions_short": "一級交易商短期公債部位",
+    "dealer_positions_long": "一級交易商長天期公債部位",
 }
 
 def get_chart_title(indicator_id: str) -> str:
     """獲取圖表的標準化標題"""
+    # 對於帶有 maturity 的特殊 ID 進行處理
+    if 'short' in indicator_id:
+        return CHART_LABELS.get('dealer_positions_short', '短期部位')
+    if 'long' in indicator_id:
+        return CHART_LABELS.get('dealer_positions_long', '長期部位')
     return CHART_LABELS.get(indicator_id, indicator_id.upper())
 
 def generate_chart_response(fig: go.Figure):
@@ -32,7 +43,26 @@ def generate_chart_response(fig: go.Figure):
         return None
     return fig.to_image(format="jpeg", width=800, height=500, scale=2)
 
-# --- 圖表工廠函式 ---
+def plot_not_available(chart_name: str) -> go.Figure:
+    """
+    生成一個表示「圖表暫未提供」或「數據不足」的佔位圖。
+    """
+    fig = go.Figure()
+    fig.add_annotation(
+        text=f"圖表載入失敗<br>「{chart_name}」<br>暫未提供或數據不足，請檢查後端服務。",
+        xref="paper", yref="paper",
+        x=0.5, y=0.5, showarrow=False,
+        font=dict(size=20, color="grey")
+    )
+    fig.update_layout(
+        xaxis_visible=False,
+        yaxis_visible=False,
+        plot_bgcolor='rgba(240,240,240,0.95)', # 淡灰色背景
+        margin=dict(t=20, b=20, l=20, r=20)
+    )
+    return fig
+
+# --- 圖表工廠函式 (原有及新增) ---
 
 def plot_sofr(df: pd.DataFrame) -> Optional[go.Figure]:
     """繪製 SOFR 圖表"""
@@ -51,7 +81,6 @@ def plot_spread_10y2y(df: pd.DataFrame) -> Optional[go.Figure]:
     if col not in df or df[col].dropna().empty:
         return None
     fig = go.Figure()
-    # 轉換為基點 (BPS)
     bps_values = df[col] * 100
     fig.add_trace(go.Scatter(x=df.index, y=bps_values, name="利差", mode='lines', line=dict(color='orange')))
     fig.add_hline(y=0, line_width=1, line_dash="dash", line_color="grey")
@@ -79,14 +108,46 @@ def plot_vix(df: pd.DataFrame) -> Optional[go.Figure]:
     return fig
 
 def plot_dealer_positions(df: pd.DataFrame) -> Optional[go.Figure]:
-    """繪製一級交易商持有量圖表"""
+    """繪製一級交易商總持有量圖表"""
     col = 'dealer_positions'
     if col not in df or df[col].dropna().empty:
         return None
     fig = go.Figure()
+    bil_values = df[col] / 1000
+    fig.add_trace(go.Scatter(x=df.index, y=bil_values, name="總持有量", mode='lines', line=dict(color='green')))
+    fig.update_layout(title=get_chart_title(col), xaxis_title="日期", yaxis_title="十億美元 (Billion USD)", template="plotly_white")
+    return fig
+
+def plot_us_high_yield_spread(df: pd.DataFrame) -> Optional[go.Figure]:
+    """繪製美國高收益債利差圖表"""
+    col = 'us_high_yield_spread'
+    if col not in df or df[col].dropna().empty:
+        return None
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=df.index, y=df[col], name="高收益債利差", mode='lines', line=dict(color='#FF6347'))) # 番茄色
+    fig.update_layout(title=get_chart_title(col), xaxis_title="日期", yaxis_title="百分比 (%)", template="plotly_white")
+    return fig
+
+def plot_dealer_positions_by_maturity(df: pd.DataFrame, maturity: Literal['short', 'long']) -> Optional[go.Figure]:
+    """
+    根據期限繪製一級交易商的公債部位 (短期或長期)。
+    """
+    if maturity == 'short':
+        col = 'dealer_positions_short'
+        color = '#4682B4' # 鋼藍色
+    elif maturity == 'long':
+        col = 'dealer_positions_long'
+        color = '#32CD32' # 酸橙綠
+    else:
+        return None
+
+    if col not in df or df[col].dropna().empty:
+        return None
+
+    fig = go.Figure()
     # 從百萬美元轉換為億美元
     bil_values = df[col] / 1000
-    fig.add_trace(go.Scatter(x=df.index, y=bil_values, name="持有量", mode='lines', line=dict(color='green')))
+    fig.add_trace(go.Scatter(x=df.index, y=bil_values, name=get_chart_title(col), mode='lines', line=dict(color=color)))
     fig.update_layout(title=get_chart_title(col), xaxis_title="日期", yaxis_title="十億美元 (Billion USD)", template="plotly_white")
     return fig
 
@@ -96,7 +157,6 @@ def plot_reserves(df: pd.DataFrame) -> Optional[go.Figure]:
     if col not in df or df[col].dropna().empty:
         return None
     fig = go.Figure()
-    # 從百萬美元轉換為兆美元
     tril_values = df[col] / 1000000
     fig.add_trace(go.Scatter(x=df.index, y=tril_values, name="準備金", mode='lines', line=dict(color='goldenrod')))
     fig.update_layout(title=get_chart_title(col), xaxis_title="日期", yaxis_title="兆美元 (Trillion USD)", template="plotly_white")
@@ -104,10 +164,8 @@ def plot_reserves(df: pd.DataFrame) -> Optional[go.Figure]:
 
 def plot_etf_tlt(df: pd.DataFrame) -> Optional[go.Figure]:
     """繪製 TLT ETF 價格圖表"""
-    # 假設 ETF Ticker 為 TLT
-    col = 'etf_tlt_price' # 假設欄位名稱，未來可改為動態
+    col = 'etf_tlt_price'
     if col not in df or df[col].dropna().empty:
-        # 如果找不到，也可能是因為計算模組中未加入
         return None
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=df.index, y=df[col], name="TLT 價格", mode='lines', line=dict(color='#0077CC')))
@@ -129,12 +187,16 @@ def plot_stress_index(df: pd.DataFrame) -> Optional[go.Figure]:
     """繪製壓力指數圖表"""
     col = 'dealer_stress_index'
     if col not in df or df[col].dropna().empty:
-        return None
+        # 如果是 OFR FCI 的請求，顯示對應的標題
+        title = get_chart_title('ofr_fci') if 'ofr_fci' in CHART_LABELS else get_chart_title(col)
+    else:
+        title = get_chart_title(col)
+
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=df.index, y=df[col], mode='lines', name=get_chart_title(col)))
+    fig.add_trace(go.Scatter(x=df.index, y=df[col], mode='lines', name=title))
     fig.add_hrect(y0=60, y1=80, line_width=0, fillcolor="yellow", opacity=0.2, annotation_text="高壓力區", annotation_position="bottom right")
     fig.add_hrect(y0=80, y1=100, line_width=0, fillcolor="red", opacity=0.2, annotation_text="極端壓力區", annotation_position="top right")
-    fig.update_layout(title=get_chart_title(col), xaxis_title="日期", yaxis_title="指數 (0-100)", template="plotly_white", yaxis_range=[0, 100])
+    fig.update_layout(title=title, xaxis_title="日期", yaxis_title="指數 (0-100)", template="plotly_white", yaxis_range=[0, 100])
     return fig
 
 def plot_macd(df: pd.DataFrame) -> Optional[go.Figure]:
@@ -143,10 +205,9 @@ def plot_macd(df: pd.DataFrame) -> Optional[go.Figure]:
     if hist_col not in df or df[hist_col].dropna().empty:
         return None
 
-    # 根據趨勢為柱狀圖上色
     hist_diff = df[hist_col].diff()
-    colors = np.where(hist_diff > 0, '#6495ED', '#B22222') # 上升為藍，下降為紅
-    colors[df[hist_col] < 0] = np.where(hist_diff[df[hist_col] < 0] > 0, '#3CB371', '#B22222') # 負值部分，上升為綠
+    colors = np.where(hist_diff > 0, '#6495ED', '#B22222')
+    colors[df[hist_col] < 0] = np.where(hist_diff[df[hist_col] < 0] > 0, '#3CB371', '#B22222')
 
     fig = go.Figure()
     fig.add_trace(go.Bar(x=df.index, y=df[hist_col], name='Histogram', marker_color=colors))
@@ -187,10 +248,8 @@ def plot_trend(df: pd.DataFrame, days: int = 60) -> Optional[go.Figure]:
         return None
 
     fig = go.Figure()
-    # 繪製基礎線
     fig.add_trace(go.Scatter(x=trend_df.index, y=trend_df[col], mode='lines', name="趨勢", line=dict(color='grey')))
 
-    # 根據閾值分段著色
     for y_start, y_end, color in [(0, 60, 'green'), (60, 80, 'orange'), (80, 100, 'red')]:
         fig.add_trace(go.Scatter(
             x=trend_df.index,
