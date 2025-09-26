@@ -5,8 +5,9 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import Response
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
-import database
-from data_manager import DataManager
+from . import database
+from .data_manager import DataManager
+from . import stress_index_calculator
 import plotly.graph_objects as go
 import io
 
@@ -18,7 +19,8 @@ INDICATOR_LABELS = {
     "gdp": "US Real GDP (Billions of Dollars)",
     "cpi": "US CPI (Annual Rate)",
     "fedfunds": "Federal Funds Rate (%)",
-    "ism": "US ISM Manufacturing PMI"
+    "ism": "US ISM Manufacturing PMI",
+    "dealer_stress_index": "一級交易商壓力指數 (Primary Dealer Stress Index)"
 }
 
 @asynccontextmanager
@@ -28,10 +30,11 @@ async def lifespan(app: FastAPI):
     print("Bond Data Service is starting up...")
     database.initialize_database()
 
-    # 從環境變數讀取 API 金鑰，若無則使用後備金鑰
-    api_key = os.getenv("FRED_API_KEY", "77b0a570c6a17007e4f5af229c2aecc9")
+    # 強制從環境變數讀取 API 金鑰
+    api_key = os.getenv("FRED_API_KEY")
     if not api_key:
-        raise ValueError("FRED_API_KEY is not set in environment variables.")
+        # 如果未設定環境變數，則服務啟動失敗
+        raise ValueError("啟動失敗：請設定 FRED_API_KEY 環境變數。")
     data_manager = DataManager(api_key=api_key)
 
     yield
@@ -83,6 +86,52 @@ async def get_data_endpoint(indicator: str):
         return data
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"讀取數據時發生內部錯誤: {e}")
+
+@app.get("/chart/dealer_stress_index")
+async def get_stress_index_chart_endpoint():
+    """
+    計算一級交易商壓力指數，生成圖表並以圖片格式返回。
+    """
+    try:
+        # 1. 計算壓力指數
+        # data_manager 是在 lifespan 中初始化的全局變數
+        if not data_manager:
+            raise HTTPException(status_code=503, detail="DataManager is not initialized.")
+
+        print("收到壓力指數圖表請求，開始計算...")
+        stress_index_series = stress_index_calculator.calculate_stress_index(data_manager)
+
+        # 2. 如果沒有數據，返回錯誤
+        if stress_index_series is None or stress_index_series.empty:
+            raise HTTPException(status_code=404, detail="無法計算壓力指數，可能基礎數據不足。")
+
+        # 3. 準備繪圖數據
+        dates = stress_index_series.index
+        values = stress_index_series.values
+        title = INDICATOR_LABELS.get("dealer_stress_index")
+
+        # 4. 使用 Plotly 繪圖
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=dates, y=values, mode='lines', name=title))
+        fig.update_layout(
+            title=title,
+            xaxis_title="Date",
+            yaxis_title="Index (0-100)",
+            template="plotly_white",
+            yaxis_range=[0,100] # 壓力指數範圍是 0-100
+        )
+
+        # 5. 將圖表轉換為圖片並存入記憶體
+        img_bytes = fig.to_image(format="jpeg", width=800, height=500, scale=2)
+
+        # 6. 回傳圖片
+        print("壓力指數圖表生成成功，正在回傳圖片。")
+        return Response(content=img_bytes, media_type="image/jpeg")
+
+    except Exception as e:
+        print(f"為 'dealer_stress_index' 生成圖表時發生錯誤: {e}")
+        # 為了安全，不在 production 環境中暴露詳細錯誤
+        raise HTTPException(status_code=500, detail=f"生成壓力指數圖表時發生內部錯誤。")
 
 @app.get("/chart/{indicator_id}")
 async def get_chart_endpoint(indicator_id: str):
