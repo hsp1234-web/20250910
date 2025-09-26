@@ -430,13 +430,14 @@ class ServerManager:
             force_install_packages(downloader_req_file, "下載器")
 
             # --- 階段 2: 同步安裝核心依賴 (使用 Pip) ---
-            self._log_manager.log("INFO", "步驟 2/4: 正在快速安裝核心伺服器依賴 (使用 Pip)...")
+            self._log_manager.log("INFO", "步驟 2/4: 正在快速安裝啟動器核心依賴...")
+            # JULES (2025-09-25): 優化啟動流程。
+            # 啟動器現在只安裝啟動 orchestrator.py 所需的最小依賴 (requests)。
+            # 其他依賴項將由 orchestrator.py 在後台自行安裝。
             core_requirements = [
-                project_path / "requirements" / "core.txt",
-                project_path / "requirements" / "features_core.txt",
-                project_path / "requirements" / "analysis.txt"
+                project_path / "requirements" / "features_core.txt"
             ]
-            install_requirements(core_requirements, "核心伺服器", force_pip=True)
+            install_requirements(core_requirements, "啟動器核心", force_pip=True)
 
             # --- 階段 3: 啟動後端服務 ---
             self._log_manager.log("INFO", "步驟 3/4: 正在啟動後端協調器...")
