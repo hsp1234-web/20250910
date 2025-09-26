@@ -5,36 +5,36 @@ import plotly.graph_objects as go
 from typing import Optional, Literal
 import numpy as np
 
-# --- 圖表設定 ---
+# --- 圖表設定 (英文化) ---
 # 共享的圖表標籤，確保所有圖表風格統一
 CHART_LABELS = {
     # 原有標籤
-    "dealer_stress_index": "一級交易商壓力指數 (綜合)",
-    "sofr": "擔保隔夜融資利率 (SOFR)",
-    "spread_10y2y": "10-2年期公債利差",
-    "move_index": "美林選擇權波動率預估 (MOVE)",
-    "vix": "CBOE 波動率指數 (VIX)",
-    "dealer_positions": "一級交易商公債總持有量",
-    "wresbal": "聯邦儲備銀行準備金餘額",
-    "pos_res_ratio": "持有量/準備金比率",
-    "etf_tlt": "iShares 20+年期公債 ETF (TLT)",
-    "macd": "壓力指數 MACD 動能",
-    "gauge": "壓力儀表板",
-    "trend": "近期壓力趨勢",
+    "dealer_stress_index": "Primary Dealer Stress Index (Composite)",
+    "sofr": "Secured Overnight Financing Rate (SOFR)",
+    "spread_10y2y": "10-2 Year Treasury Spread",
+    "move_index": "MOVE Index (Bond Market Volatility)",
+    "vix": "CBOE Volatility Index (VIX)",
+    "dealer_positions": "Primary Dealer Net Treasury Positions",
+    "wresbal": "Total Reserve Balances",
+    "pos_res_ratio": "Positions to Reserves Ratio",
+    "etf_tlt": "iShares 20+ Year Treasury Bond ETF (TLT)",
+    "macd": "Stress Index MACD Momentum",
+    "gauge": "Stress Gauge",
+    "trend": "Recent Stress Trend",
     # 新增標籤
-    "ofr_fci": "OFR 金融壓力指數 (對應)",
-    "us_high_yield_spread": "美國高收益債利差 (BofA)",
-    "dealer_positions_short": "一級交易商短期公債部位",
-    "dealer_positions_long": "一級交易商長天期公債部位",
+    "ofr_fci": "OFR Financial Stress Index",
+    "us_high_yield_spread": "US High-Yield Spread (BofA)",
+    "dealer_positions_short": "Primary Dealer Short-Term Positions",
+    "dealer_positions_long": "Primary Dealer Long-Term Positions",
 }
 
 def get_chart_title(indicator_id: str) -> str:
     """獲取圖表的標準化標題"""
     # 對於帶有 maturity 的特殊 ID 進行處理
     if 'short' in indicator_id:
-        return CHART_LABELS.get('dealer_positions_short', '短期部位')
+        return CHART_LABELS.get('dealer_positions_short', 'Short-Term Positions')
     if 'long' in indicator_id:
-        return CHART_LABELS.get('dealer_positions_long', '長期部位')
+        return CHART_LABELS.get('dealer_positions_long', 'Long-Term Positions')
     return CHART_LABELS.get(indicator_id, indicator_id.upper())
 
 def generate_chart_response(fig: go.Figure):
@@ -49,7 +49,7 @@ def plot_not_available(chart_name: str) -> go.Figure:
     """
     fig = go.Figure()
     fig.add_annotation(
-        text=f"圖表載入失敗<br>「{chart_name}」<br>暫未提供或數據不足，請檢查後端服務。",
+        text=f"Chart Failed to Load<br><b>'{chart_name}'</b><br>Data not available or service error.",
         xref="paper", yref="paper",
         x=0.5, y=0.5, showarrow=False,
         font=dict(size=20, color="grey")
@@ -71,8 +71,8 @@ def plot_sofr(df: pd.DataFrame) -> Optional[go.Figure]:
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=df.index, y=df['sofr'], name="SOFR", mode='lines', line=dict(color='purple')))
     if 'sofr_ma60' in df and df['sofr_ma60'].notna().any():
-        fig.add_trace(go.Scatter(x=df.index, y=df['sofr_ma60'], name="60日移動平均", mode='lines', line=dict(color='lightblue', dash='dash')))
-    fig.update_layout(title=get_chart_title('sofr'), xaxis_title="日期", yaxis_title="利率 (%)", template="plotly_white")
+        fig.add_trace(go.Scatter(x=df.index, y=df['sofr_ma60'], name="60-Day MA", mode='lines', line=dict(color='lightblue', dash='dash')))
+    fig.update_layout(title=get_chart_title('sofr'), xaxis_title="Date", yaxis_title="Rate (%)", template="plotly_white")
     return fig
 
 def plot_spread_10y2y(df: pd.DataFrame) -> Optional[go.Figure]:
@@ -82,9 +82,9 @@ def plot_spread_10y2y(df: pd.DataFrame) -> Optional[go.Figure]:
         return None
     fig = go.Figure()
     bps_values = df[col] * 100
-    fig.add_trace(go.Scatter(x=df.index, y=bps_values, name="利差", mode='lines', line=dict(color='orange')))
+    fig.add_trace(go.Scatter(x=df.index, y=bps_values, name="Spread", mode='lines', line=dict(color='orange')))
     fig.add_hline(y=0, line_width=1, line_dash="dash", line_color="grey")
-    fig.update_layout(title=get_chart_title(col), xaxis_title="日期", yaxis_title="基點 (BPS)", template="plotly_white")
+    fig.update_layout(title=get_chart_title(col), xaxis_title="Date", yaxis_title="Basis Points (BPS)", template="plotly_white")
     return fig
 
 def plot_move_index(df: pd.DataFrame) -> Optional[go.Figure]:
@@ -94,7 +94,7 @@ def plot_move_index(df: pd.DataFrame) -> Optional[go.Figure]:
         return None
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=df.index, y=df[col], name="MOVE", mode='lines', line=dict(color='#00AEAE')))
-    fig.update_layout(title=get_chart_title(col), xaxis_title="日期", yaxis_title="指數值", template="plotly_white")
+    fig.update_layout(title=get_chart_title(col), xaxis_title="Date", yaxis_title="Index Value", template="plotly_white")
     return fig
 
 def plot_vix(df: pd.DataFrame) -> Optional[go.Figure]:
@@ -104,7 +104,7 @@ def plot_vix(df: pd.DataFrame) -> Optional[go.Figure]:
         return None
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=df.index, y=df[col], name="VIX", mode='lines', line=dict(color='magenta')))
-    fig.update_layout(title=get_chart_title(col), xaxis_title="日期", yaxis_title="指數值", template="plotly_white")
+    fig.update_layout(title=get_chart_title(col), xaxis_title="Date", yaxis_title="Index Value", template="plotly_white")
     return fig
 
 def plot_dealer_positions(df: pd.DataFrame) -> Optional[go.Figure]:
@@ -114,8 +114,8 @@ def plot_dealer_positions(df: pd.DataFrame) -> Optional[go.Figure]:
         return None
     fig = go.Figure()
     bil_values = df[col] / 1000
-    fig.add_trace(go.Scatter(x=df.index, y=bil_values, name="總持有量", mode='lines', line=dict(color='green')))
-    fig.update_layout(title=get_chart_title(col), xaxis_title="日期", yaxis_title="十億美元 (Billion USD)", template="plotly_white")
+    fig.add_trace(go.Scatter(x=df.index, y=bil_values, name="Total Positions", mode='lines', line=dict(color='green')))
+    fig.update_layout(title=get_chart_title(col), xaxis_title="Date", yaxis_title="Billion USD", template="plotly_white")
     return fig
 
 def plot_us_high_yield_spread(df: pd.DataFrame) -> Optional[go.Figure]:
@@ -124,8 +124,8 @@ def plot_us_high_yield_spread(df: pd.DataFrame) -> Optional[go.Figure]:
     if col not in df or df[col].dropna().empty:
         return None
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=df.index, y=df[col], name="高收益債利差", mode='lines', line=dict(color='#FF6347'))) # 番茄色
-    fig.update_layout(title=get_chart_title(col), xaxis_title="日期", yaxis_title="百分比 (%)", template="plotly_white")
+    fig.add_trace(go.Scatter(x=df.index, y=df[col], name="High-Yield Spread", mode='lines', line=dict(color='#FF6347'))) # Tomato color
+    fig.update_layout(title=get_chart_title(col), xaxis_title="Date", yaxis_title="Percent (%)", template="plotly_white")
     return fig
 
 def plot_dealer_positions_by_maturity(df: pd.DataFrame, maturity: Literal['short', 'long']) -> Optional[go.Figure]:
@@ -134,10 +134,10 @@ def plot_dealer_positions_by_maturity(df: pd.DataFrame, maturity: Literal['short
     """
     if maturity == 'short':
         col = 'dealer_positions_short'
-        color = '#4682B4' # 鋼藍色
+        color = '#4682B4' # SteelBlue
     elif maturity == 'long':
         col = 'dealer_positions_long'
-        color = '#32CD32' # 酸橙綠
+        color = '#32CD32' # LimeGreen
     else:
         return None
 
@@ -148,7 +148,7 @@ def plot_dealer_positions_by_maturity(df: pd.DataFrame, maturity: Literal['short
     # 從百萬美元轉換為億美元
     bil_values = df[col] / 1000
     fig.add_trace(go.Scatter(x=df.index, y=bil_values, name=get_chart_title(col), mode='lines', line=dict(color=color)))
-    fig.update_layout(title=get_chart_title(col), xaxis_title="日期", yaxis_title="十億美元 (Billion USD)", template="plotly_white")
+    fig.update_layout(title=get_chart_title(col), xaxis_title="Date", yaxis_title="Billion USD", template="plotly_white")
     return fig
 
 def plot_reserves(df: pd.DataFrame) -> Optional[go.Figure]:
@@ -158,8 +158,8 @@ def plot_reserves(df: pd.DataFrame) -> Optional[go.Figure]:
         return None
     fig = go.Figure()
     tril_values = df[col] / 1000000
-    fig.add_trace(go.Scatter(x=df.index, y=tril_values, name="準備金", mode='lines', line=dict(color='goldenrod')))
-    fig.update_layout(title=get_chart_title(col), xaxis_title="日期", yaxis_title="兆美元 (Trillion USD)", template="plotly_white")
+    fig.add_trace(go.Scatter(x=df.index, y=tril_values, name="Reserves", mode='lines', line=dict(color='goldenrod')))
+    fig.update_layout(title=get_chart_title(col), xaxis_title="Date", yaxis_title="Trillion USD", template="plotly_white")
     return fig
 
 def plot_etf_tlt(df: pd.DataFrame) -> Optional[go.Figure]:
@@ -168,8 +168,8 @@ def plot_etf_tlt(df: pd.DataFrame) -> Optional[go.Figure]:
     if col not in df or df[col].dropna().empty:
         return None
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=df.index, y=df[col], name="TLT 價格", mode='lines', line=dict(color='#0077CC')))
-    fig.update_layout(title=get_chart_title('etf_tlt'), xaxis_title="日期", yaxis_title="價格 (USD)", template="plotly_white")
+    fig.add_trace(go.Scatter(x=df.index, y=df[col], name="TLT Price", mode='lines', line=dict(color='#0077CC')))
+    fig.update_layout(title=get_chart_title('etf_tlt'), xaxis_title="Date", yaxis_title="Price (USD)", template="plotly_white")
     return fig
 
 def plot_pos_res_ratio(df: pd.DataFrame) -> Optional[go.Figure]:
@@ -178,9 +178,9 @@ def plot_pos_res_ratio(df: pd.DataFrame) -> Optional[go.Figure]:
     if col not in df or df[col].dropna().empty:
         return None
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=df.index, y=df[col], name="比率", mode='lines', line=dict(color='#FFBB66')))
-    fig.add_hline(y=90, line_width=1, line_dash="dash", line_color="red", annotation_text="90 閾值")
-    fig.update_layout(title=get_chart_title(col), xaxis_title="日期", yaxis_title="比率值", template="plotly_white")
+    fig.add_trace(go.Scatter(x=df.index, y=df[col], name="Ratio", mode='lines', line=dict(color='#FFBB66')))
+    fig.add_hline(y=90, line_width=1, line_dash="dash", line_color="red", annotation_text="90 Threshold")
+    fig.update_layout(title=get_chart_title(col), xaxis_title="Date", yaxis_title="Ratio Value", template="plotly_white")
     return fig
 
 def plot_stress_index(df: pd.DataFrame) -> Optional[go.Figure]:
@@ -194,9 +194,9 @@ def plot_stress_index(df: pd.DataFrame) -> Optional[go.Figure]:
 
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=df.index, y=df[col], mode='lines', name=title))
-    fig.add_hrect(y0=60, y1=80, line_width=0, fillcolor="yellow", opacity=0.2, annotation_text="高壓力區", annotation_position="bottom right")
-    fig.add_hrect(y0=80, y1=100, line_width=0, fillcolor="red", opacity=0.2, annotation_text="極端壓力區", annotation_position="top right")
-    fig.update_layout(title=title, xaxis_title="日期", yaxis_title="指數 (0-100)", template="plotly_white", yaxis_range=[0, 100])
+    fig.add_hrect(y0=60, y1=80, line_width=0, fillcolor="yellow", opacity=0.2, annotation_text="High Stress", annotation_position="bottom right")
+    fig.add_hrect(y0=80, y1=100, line_width=0, fillcolor="red", opacity=0.2, annotation_text="Extreme Stress", annotation_position="top right")
+    fig.update_layout(title=title, xaxis_title="Date", yaxis_title="Index (0-100)", template="plotly_white", yaxis_range=[0, 100])
     return fig
 
 def plot_macd(df: pd.DataFrame) -> Optional[go.Figure]:
@@ -213,7 +213,7 @@ def plot_macd(df: pd.DataFrame) -> Optional[go.Figure]:
     fig.add_trace(go.Bar(x=df.index, y=df[hist_col], name='Histogram', marker_color=colors))
     fig.add_trace(go.Scatter(x=df.index, y=df[line_col], name='MACD Line', mode='lines', line=dict(color='black', width=1)))
     fig.add_trace(go.Scatter(x=df.index, y=df[signal_col], name='Signal Line', mode='lines', line=dict(color='orange', width=1)))
-    fig.update_layout(title=get_chart_title('macd'), xaxis_title="日期", yaxis_title="動能", template="plotly_white")
+    fig.update_layout(title=get_chart_title('macd'), xaxis_title="Date", yaxis_title="Momentum", template="plotly_white")
     return fig
 
 def plot_gauge(df: pd.DataFrame) -> Optional[go.Figure]:
@@ -248,7 +248,7 @@ def plot_trend(df: pd.DataFrame, days: int = 60) -> Optional[go.Figure]:
         return None
 
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=trend_df.index, y=trend_df[col], mode='lines', name="趨勢", line=dict(color='grey')))
+    fig.add_trace(go.Scatter(x=trend_df.index, y=trend_df[col], mode='lines', name="Trend", line=dict(color='grey')))
 
     for y_start, y_end, color in [(0, 60, 'green'), (60, 80, 'orange'), (80, 100, 'red')]:
         fig.add_trace(go.Scatter(
@@ -259,5 +259,5 @@ def plot_trend(df: pd.DataFrame, days: int = 60) -> Optional[go.Figure]:
             showlegend=False
         ))
 
-    fig.update_layout(title=f"{get_chart_title('trend')} (最近 {days} 天)", xaxis_title="日期", yaxis_title="指數 (0-100)", template="plotly_white", yaxis_range=[0, 100])
+    fig.update_layout(title=f"{get_chart_title('trend')} (Last {days} Days)", xaxis_title="Date", yaxis_title="Index (0-100)", template="plotly_white", yaxis_range=[0, 100])
     return fig

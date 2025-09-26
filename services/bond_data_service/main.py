@@ -1,7 +1,7 @@
 # services/bond_data_service/main.py
 
 import os
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import Response, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
@@ -12,6 +12,8 @@ import charting
 import logging
 import pandas as pd
 import numpy as np
+from datetime import datetime
+from typing import Optional
 
 # --- Global instances ---
 data_manager = None
@@ -100,43 +102,37 @@ async def get_all_metrics_debug():
         raise HTTPException(status_code=500, detail=f"生成除錯數據時發生內部錯誤: {e}")
 
 @app.get("/chart/{chart_id}")
-async def get_unified_chart_endpoint(chart_id: str):
+async def get_unified_chart_endpoint(
+    chart_id: str,
+    start_date: Optional[str] = Query(None, description="圖表數據的開始日期 (YYYY-MM-DD)"),
+    end_date: Optional[str] = Query(None, description="圖表數據的結束日期 (YYYY-MM-DD)")
+):
     """
     統一的圖表生成端點。
     根據 chart_id 生成對應的圖表並以圖片格式返回。
+    支援可選的日期範圍篩選。
     """
     global metrics_cache
 
     # 擴充後的圖表ID與繪圖函式的分派字典
     chart_dispatcher = {
-        # 現有圖表
         "sofr": charting.plot_sofr,
         "vix": charting.plot_vix,
         "stress_index": charting.plot_stress_index,
         "gauge": charting.plot_gauge,
         "trend": charting.plot_trend,
-
-        # ID 不匹配修正 (別名)
         "us_bond_2y_10y_spread": charting.plot_spread_10y2y,
         "spread_10y2y": charting.plot_spread_10y2y,
         "dealer_net_positions": charting.plot_dealer_positions,
         "dealer_positions": charting.plot_dealer_positions,
         "stress_index_macd": charting.plot_macd,
         "macd": charting.plot_macd,
-
-        # 功能對應 (OFR FCI 對應到我們的壓力指數)
         "ofr_fci": charting.plot_stress_index,
-
-        # 新增的圖表 (將在後續步驟中實現)
         "us_high_yield_spread": charting.plot_us_high_yield_spread,
         "dealer_short_term_positions": lambda df: charting.plot_dealer_positions_by_maturity(df, 'short'),
         "dealer_long_term_positions": lambda df: charting.plot_dealer_positions_by_maturity(df, 'long'),
-
-        # 暫未提供的圖表，回傳統一的提示圖
         "dealer_net_position_ranking": lambda df: charting.plot_not_available("交易商淨部位排名"),
         "dealer_position_change_ranking": lambda df: charting.plot_not_available("交易商部位變動排名"),
-
-        # 舊的或不推薦的 ID，為了相容性保留
         "reserves": charting.plot_reserves,
         "etf_tlt": charting.plot_etf_tlt,
         "pos_res_ratio": charting.plot_pos_res_ratio,
@@ -144,7 +140,6 @@ async def get_unified_chart_endpoint(chart_id: str):
 
     plot_function = chart_dispatcher.get(chart_id)
 
-    # 統一處理指標計算的邏輯
     try:
         logger.info(f"開始為圖表 '{chart_id}' 計算完整指標...")
         full_metrics_df = stress_index_calculator.calculate_full_metrics(data_manager)
@@ -152,34 +147,49 @@ async def get_unified_chart_endpoint(chart_id: str):
         if full_metrics_df.empty:
             logger.error("指標計算結果為空，無法生成圖表。")
             fig = charting.plot_not_available(f"圖表 '{chart_id}' (指標計算失敗)")
-            img_bytes = charting.generate_chart_response(fig)
-            return Response(content=img_bytes, media_type="image/jpeg")
+            return Response(content=charting.generate_chart_response(fig), media_type="image/jpeg")
+
+        # --- 日期篩選邏輯 ---
+        filtered_df = full_metrics_df
+        if start_date or end_date:
+            try:
+                start_dt = pd.to_datetime(start_date) if start_date else None
+                end_dt = pd.to_datetime(end_date) if end_date else None
+
+                if start_dt:
+                    filtered_df = filtered_df[filtered_df.index >= start_dt]
+                if end_dt:
+                    filtered_df = filtered_df[filtered_df.index <= end_dt]
+
+                logger.info(f"數據已篩選，範圍: {start_date} 至 {end_date}。剩餘 {len(filtered_df)} 行。")
+
+                if filtered_df.empty:
+                    logger.warning(f"在指定日期範圍內沒有圖表 '{chart_id}' 的數據。")
+                    fig = charting.plot_not_available(f"圖表 '{chart_id}' (範圍內無數據)")
+                    return Response(content=charting.generate_chart_response(fig), media_type="image/jpeg")
+            except Exception as e:
+                logger.error(f"無效的日期格式或篩選錯誤: {e}")
+                fig = charting.plot_not_available(f"圖表 '{chart_id}' (日期格式無效)")
+                return Response(content=charting.generate_chart_response(fig), media_type="image/jpeg", status_code=400)
 
         if not plot_function:
-            # 如果完全找不到對應的 ID，回傳一個通用的「未提供」圖表
             logger.warning(f"找不到 chart_id '{chart_id}' 的對應函式。")
             fig = charting.plot_not_available(f"圖表 '{chart_id}'")
-            img_bytes = charting.generate_chart_response(fig)
-            return Response(content=img_bytes, media_type="image/jpeg")
+            return Response(content=charting.generate_chart_response(fig), media_type="image/jpeg")
 
-        # 呼叫對應的繪圖函式
         logger.info(f"正在為 '{chart_id}' 調用繪圖函式...")
-        fig = plot_function(full_metrics_df)
+        fig = plot_function(filtered_df)
 
         if fig is None:
             logger.warning(f"圖表 '{chart_id}' 因數據不足而無法生成。")
             fig = charting.plot_not_available(f"圖表 '{chart_id}' (數據不足)")
-            img_bytes = charting.generate_chart_response(fig)
-            return Response(content=img_bytes, media_type="image/jpeg")
+            return Response(content=charting.generate_chart_response(fig), media_type="image/jpeg")
 
-        # 將圖表轉換為圖片並回傳
         img_bytes = charting.generate_chart_response(fig)
         logger.info(f"圖表 '{chart_id}' 已成功生成並準備回傳。")
         return Response(content=img_bytes, media_type="image/jpeg")
 
     except Exception as e:
         logger.error(f"為 '{chart_id}' 生成圖表時發生未預期錯誤: {e}", exc_info=True)
-        # 發生未知錯誤時，也回傳一個提示圖
         fig = charting.plot_not_available(f"圖表 '{chart_id}' (內部錯誤)")
-        img_bytes = charting.generate_chart_response(fig)
-        return Response(content=img_bytes, media_type="image/jpeg", status_code=500)
+        return Response(content=charting.generate_chart_response(fig), media_type="image/jpeg", status_code=500)

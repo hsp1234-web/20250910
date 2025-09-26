@@ -3,19 +3,19 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>一級交易商分析</title>
+    <title>一級交易商分析儀表板</title>
     <link rel="stylesheet" href="/static/css/main.css">
     <style>
         /* --- 此頁面專用樣式 --- */
         .dashboard-grid {
             display: grid;
-            /* 響應式網格，最小寬度 500px，最大 1fr (均分剩餘空間) */
+            /* 預設（大螢幕）：自動適應欄位，最小寬度 500px */
             grid-template-columns: repeat(auto-fit, minmax(500px, 1fr));
-            gap: 20px; /* 網格間距 */
+            gap: 20px; /* 網格項目間距 */
         }
         .chart-container {
             width: 100%;
-            background-color: #f9f9f9; /* 給圖表一個淡淡的背景色 */
+            background-color: #f9f9f9; /* 圖表區域的淺色背景 */
             min-height: 300px; /* 避免圖片載入前容器塌陷 */
             display: flex;
             align-items: center;
@@ -62,6 +62,13 @@
             font-weight: bold;
             color: #007bff;
         }
+        /* --- 手機版響應式媒體查詢 --- */
+        @media (max-width: 600px) {
+            .dashboard-grid {
+                /* 在較小螢幕上切換為單欄佈局 */
+                grid-template-columns: 1fr;
+            }
+        }
     </style>
 </head>
 <body>
@@ -72,6 +79,14 @@
 
     <div class="content">
         <h1>一級交易商壓力指數儀表板</h1>
+
+        <div class="panel date-filter-panel">
+            <label for="start-date">開始日期:</label>
+            <input type="date" id="start-date">
+            <label for="end-date">結束日期:</label>
+            <input type="date" id="end-date">
+            <button id="update-charts-btn">更新圖表</button>
+        </div>
 
         <div class="dashboard-grid">
             <!-- 12 張圖表卡片 -->
@@ -138,7 +153,7 @@
             <div class="panel" data-indicator-id="dealer_position_change_ranking">
                 <h2>淨部位變動排名</h2>
                 <div class="chart-container">
-                    <img id="chart-img-dealer_position_change_ranking" src="" alt="圖表載-入中..." />
+                    <img id="chart-img-dealer_position_change_ranking" src="" alt="圖表載入中..." />
                 </div>
             </div>
             <div class="panel" data-indicator-id="stress_index_macd">

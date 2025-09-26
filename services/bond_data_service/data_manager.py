@@ -7,14 +7,15 @@ from data_fetchers import (
     fred_gdp_fetcher,
     fred_cpi_fetcher,
     fred_fedfunds_fetcher,
-    nyfed_positions_fetcher,
+    nyfed_positions_fetcher, # 仍然匯入模組本身
     yahoo_finance_fetcher,
     fred_sofr_fetcher,
     fred_dgs10_fetcher,
     fred_dgs2_fetcher,
     fred_rrp_fetcher,
     fred_vix_fetcher,
-    fred_wresbal_fetcher
+    fred_wresbal_fetcher,
+    fred_hys_fetcher
 )
 
 class DataManager:
@@ -25,7 +26,9 @@ class DataManager:
             "gdp": fred_gdp_fetcher.fetch_gdp_data,
             "cpi": fred_cpi_fetcher.fetch_cpi_data,
             "fedfunds": fred_fedfunds_fetcher.fetch_fedfunds_data,
-            "dealer_positions": nyfed_positions_fetcher.fetch_nyfed_positions_data,
+            "dealer_positions": nyfed_positions_fetcher.fetch_nyfed_total_positions_data,
+            "dealer_positions_short": nyfed_positions_fetcher.fetch_nyfed_short_term_positions_data,
+            "dealer_positions_long": nyfed_positions_fetcher.fetch_nyfed_long_term_positions_data,
             "move_index": yahoo_finance_fetcher.fetch_move_index_data,
             "sofr": fred_sofr_fetcher.fetch_sofr_data,
             "dgs10": fred_dgs10_fetcher.fetch_dgs10_data,
@@ -33,6 +36,7 @@ class DataManager:
             "rrp": fred_rrp_fetcher.fetch_rrp_data,
             "vix": fred_vix_fetcher.fetch_vix_data,
             "wresbal": fred_wresbal_fetcher.fetch_wresbal_data,
+            "us_high_yield_spread": fred_hys_fetcher.fetch_hys_data,
         }
 
     def save_series_to_db(self, series: pd.Series, indicator_name: str):
@@ -85,10 +89,20 @@ class DataManager:
         """根據指標名稱，觸發對應的抓取器並儲存數據。"""
         fetcher = self.fetcher_map.get(indicator_name.lower())
         if not fetcher:
-            raise ValueError(f"找不到指標 '{indicator_name}' 的抓取器。")
+            # raise ValueError(f"找不到指標 '{indicator_name}' 的抓取器。")
+            # --- 修改：找不到抓取器時，不再拋出錯誤，而是記錄警告並返回 ---
+            print(f"警告：在 data_manager 中找不到指標 '{indicator_name}' 的抓取器。將跳過此指標的抓取。")
+            logger.warning(f"在 data_manager 中找不到指標 '{indicator_name}' 的抓取器。")
+            return 0
 
         print(f"正在為指標 '{indicator_name}' 執行抓取...")
-        series_data = fetcher(self.api_key)
+        # 確保 fetcher 函式被正確呼叫
+        try:
+            series_data = fetcher(self.api_key)
+        except Exception as e:
+            print(f"錯誤：執行指標 '{indicator_name}' 的抓取器時發生錯誤: {e}")
+            logger.error(f"執行指標 '{indicator_name}' 的抓取器時出錯: {e}", exc_info=True)
+            return 0
 
         if series_data is not None:
             return self.save_series_to_db(series_data, indicator_name)
