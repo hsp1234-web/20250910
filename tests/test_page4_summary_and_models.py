@@ -109,7 +109,7 @@ def test_start_summary_generation_success(mock_run_wrapper, client_and_db):
         )
 
     assert response.status_code == 200
-    assert "已為 2 個任務啟動重點摘要生成" in response.json()['message']
+    assert "已成功為 2 個任務啟動重點摘要生成" in response.json()['message']
 
     assert mock_db.update_analysis_task.call_count == 2
     mock_db.update_analysis_task.assert_any_call(task_id=1, updates={
