@@ -24,6 +24,29 @@ async def get_bond_service_url() -> str:
     port = service_info['port']
     return f"http://127.0.0.1:{port}"
 
+@router.get("/health")
+async def proxy_health_check(request: Request):
+    """
+    代理對 bond_data_service 的健康檢查請求。
+    """
+    try:
+        base_url = await get_bond_service_url()
+        health_url = f"{base_url}/health"
+
+        async with httpx.AsyncClient() as client:
+            response = await client.get(health_url, timeout=5.0) # 使用較短的超時
+            response.raise_for_status()
+            return Response(
+                content=response.content,
+                status_code=response.status_code,
+                media_type='application/json'
+            )
+    except httpx.RequestError:
+        # 如果請求失敗（例如服務尚未啟動），回傳一個清晰的「服務不可用」狀態
+        raise HTTPException(status_code=503, detail="債券資料服務目前無法連線。")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"代理健康檢查時發生內部錯誤: {e}")
+
 
 @router.get("/charts/{chart_id}")
 async def proxy_chart_data_request(chart_id: str, request: Request):

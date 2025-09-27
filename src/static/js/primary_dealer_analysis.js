@@ -1,15 +1,56 @@
 // src/static/js/primary_dealer_analysis.js
 
 document.addEventListener('DOMContentLoaded', () => {
-    console.log("儀表板動態載入腳本 V2.1 已啟動 (全中文化)。");
+    console.log("儀表板動態載入腳本 V3.0 已啟動 (新增健康檢查)。");
 
     const startDateInput = document.getElementById('start-date');
     const endDateInput = document.getElementById('end-date');
     const updateBtn = document.getElementById('update-charts-btn');
+    const grid = document.querySelector('.dashboard-grid');
 
     // 從 HTML 中自動獲取所有指標 ID
     const chartPanels = document.querySelectorAll('.panel[data-indicator-id]');
     const indicators = Array.from(chartPanels).map(panel => panel.dataset.indicatorId);
+
+    /**
+     * 檢查後端服務是否就緒
+     * @returns {Promise<boolean>}
+     */
+    async function checkServiceHealth() {
+        try {
+            const response = await fetch('/api/bond_service/health');
+            return response.ok;
+        } catch (error) {
+            console.warn("健康檢查請求失敗，服務可能尚未就緒。");
+            return false;
+        }
+    }
+
+    /**
+     * 輪詢健康檢查端點，直到服務就緒為止
+     */
+    function waitForServiceReady() {
+        // 先將所有圖表容器設置為「等待服務」狀態
+        indicators.forEach(id => {
+            const container = document.getElementById(`chart-container-${id}`);
+            if (container) {
+                container.innerHTML = '<div class="placeholder">正在等待後端服務啟動...</div>';
+            }
+        });
+
+        const intervalId = setInterval(async () => {
+            console.log("正在探測後端服務狀態...");
+            const isReady = await checkServiceHealth();
+            if (isReady) {
+                console.log("✅ 後端服務已就緒！");
+                clearInterval(intervalId); // 停止輪詢
+                loadAllCharts(); // 開始載入所有圖表
+            } else {
+                console.log("...後端服務尚未就緒，將在 2 秒後重試。");
+            }
+        }, 2000); // 每 2 秒檢查一次
+    }
+
 
     /**
      * 載入所有圖表的核心函式
@@ -55,7 +96,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 throw new Error(data.error || '無可用數據');
             }
 
-            // 根據指標 ID 選擇對應的繪圖邏輯
             const plotFunction = getPlotFunction(indicatorId);
             plotFunction(container, data, indicatorId);
 
@@ -67,8 +107,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     /**
      * 根據指標 ID 返回對應的繪圖函式
-     * @param {string} indicatorId
-     * @returns {Function}
      */
     function getPlotFunction(indicatorId) {
         const plotMapping = {
@@ -105,37 +143,22 @@ document.addEventListener('DOMContentLoaded', () => {
         let yValues = data.map(d => d[dataKey]);
 
         if (indicatorId.includes('positions')) {
-             yValues = yValues.map(v => v / 1000);
+             yValues = yValues.map(v => v ? v / 1000 : null);
         }
 
-        const traces = [{
-            x: data.map(d => d.date),
-            y: yValues,
-            type: 'scatter',
-            mode: 'lines',
-            name: chartTitle
-        }];
-
+        const traces = [{ x: data.map(d => d.date), y: yValues, type: 'scatter', mode: 'lines', name: chartTitle }];
         const layout = {
             title: chartTitle,
             xaxis: { title: '日期' },
             yaxis: { title: yAxisTitleMapping[indicatorId] || '數值' },
-            margin: { l: 60, r: 20, t: 40, b: 40 },
-            template: 'plotly_white',
-            showlegend: false
+            margin: { l: 60, r: 20, t: 40, b: 40 }, template: 'plotly_white', showlegend: false
         };
         Plotly.newPlot(container, traces, layout, { responsive: true });
     }
 
     function plotStressIndexChart(container, data, indicatorId) {
         const chartTitle = container.parentElement.querySelector('h2').textContent;
-        const traces = [{
-            x: data.map(d => d.date),
-            y: data.map(d => d.dealer_stress_index),
-            type: 'scatter',
-            mode: 'lines',
-            name: chartTitle
-        }];
+        const traces = [{ x: data.map(d => d.date), y: data.map(d => d.dealer_stress_index), type: 'scatter', mode: 'lines', name: chartTitle }];
         const layout = {
             title: chartTitle,
             xaxis: { title: '日期' },
@@ -148,30 +171,20 @@ document.addEventListener('DOMContentLoaded', () => {
                 { xref: 'paper', yref: 'y', x: 0.98, y: 70, text: '高壓力區', showarrow: false, font: { color: 'orange' } },
                 { xref: 'paper', yref: 'y', x: 0.98, y: 90, text: '極端壓力區', showarrow: false, font: { color: 'red' } }
             ],
-            margin: { l: 60, r: 20, t: 40, b: 40 },
-            template: 'plotly_white',
-            showlegend: false
+            margin: { l: 60, r: 20, t: 40, b: 40 }, template: 'plotly_white', showlegend: false
         };
         Plotly.newPlot(container, traces, layout, { responsive: true });
     }
 
     function plotSpreadChart(container, data, indicatorId) {
         const chartTitle = container.parentElement.querySelector('h2').textContent;
-        const traces = [{
-            x: data.map(d => d.date),
-            y: data.map(d => d.spread_10y2y * 100), // 轉換為基點
-            type: 'scatter',
-            mode: 'lines',
-            name: '利差'
-        }];
+        const traces = [{ x: data.map(d => d.date), y: data.map(d => d.spread_10y2y * 100), type: 'scatter', mode: 'lines', name: '利差' }];
         const layout = {
             title: chartTitle,
             xaxis: { title: '日期' },
             yaxis: { title: '基點 (BPS)' },
             shapes: [{ type: 'line', xref: 'paper', yref: 'y', x0: 0, y0: 0, x1: 1, y1: 0, line: { color: 'grey', dash: 'dash' }}],
-            margin: { l: 60, r: 20, t: 40, b: 40 },
-            template: 'plotly_white',
-            showlegend: false
+            margin: { l: 60, r: 20, t: 40, b: 40 }, template: 'plotly_white', showlegend: false
         };
         Plotly.newPlot(container, traces, layout, { responsive: true });
     }
@@ -191,9 +204,7 @@ document.addEventListener('DOMContentLoaded', () => {
             xaxis: { title: '日期' },
             yaxis: { title: '壓力指數', side: 'left' },
             yaxis2: { title: 'MACD', overlaying: 'y', side: 'right', showgrid: false },
-            legend: { x: 0, y: 1.15, orientation: 'h' },
-            margin: { l: 50, r: 50, t: 40, b: 50 },
-            template: 'plotly_white'
+            legend: { x: 0, y: 1.15, orientation: 'h' }, margin: { l: 50, r: 50, t: 40, b: 50 }, template: 'plotly_white'
         };
         Plotly.newPlot(container, plotData, layout, { responsive: true });
     }
@@ -208,19 +219,15 @@ document.addEventListener('DOMContentLoaded', () => {
         };
         const sortedPositions = Object.entries(positions).sort(([,a],[,b]) => a-b);
         const plotData = [{
-            x: sortedPositions.map(([,v]) => v / 1000),
+            x: sortedPositions.map(([,v]) => v ? v / 1000 : 0),
             y: sortedPositions.map(([k,]) => k),
-            type: 'bar',
-            orientation: 'h',
-            text: sortedPositions.map(([,v]) => (v/1000).toFixed(2)),
-            textposition: 'inside'
+            type: 'bar', orientation: 'h', text: sortedPositions.map(([,v]) => v ? (v/1000).toFixed(2) : "N/A"), textposition: 'inside'
         }];
         const layout = {
             title: chartTitle,
             xaxis: { title: '金額 (十億美元)' },
             yaxis: { title: '部位類型' },
-            margin: { l: 80, r: 20, t: 40, b: 40 },
-            template: 'plotly_white'
+            margin: { l: 80, r: 20, t: 40, b: 40 }, template: 'plotly_white'
         };
         Plotly.newPlot(container, plotData, layout, { responsive: true });
     }
@@ -239,29 +246,21 @@ document.addEventListener('DOMContentLoaded', () => {
             "短天期": (latest.dealer_short_term_positions - previous.dealer_short_term_positions)
         };
         const sortedPositions = Object.entries(positions).sort(([,a],[,b]) => a-b);
-        const values = sortedPositions.map(([,v]) => v / 1000);
+        const values = sortedPositions.map(([,v]) => v ? v / 1000 : 0);
         const plotData = [{
-            x: values,
-            y: sortedPositions.map(([k,]) => k),
-            type: 'bar',
-            orientation: 'h',
-            text: values.map(v => v.toFixed(2)),
-            textposition: 'inside',
+            x: values, y: sortedPositions.map(([k,]) => k),
+            type: 'bar', orientation: 'h', text: values.map(v => v.toFixed(2)), textposition: 'inside',
             marker: { color: values.map(v => v >= 0 ? '#2ca02c' : '#d62728') }
         }];
         const layout = {
             title: chartTitle,
             xaxis: { title: '變動金額 (十億美元)' },
             yaxis: { title: '部位類型' },
-            margin: { l: 80, r: 20, t: 40, b: 40 },
-            template: 'plotly_white'
+            margin: { l: 80, r: 20, t: 40, b: 40 }, template: 'plotly_white'
         };
         Plotly.newPlot(container, plotData, layout, { responsive: true });
     }
 
-    /**
-     * 設定預設日期範圍
-     */
     function setDefaultDates() {
         const today = new Date();
         const endDate = today.toISOString().split('T')[0];
@@ -279,5 +278,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     setDefaultDates();
-    loadAllCharts();
+    // 啟動應用程式的主流程：等待服務就緒，然後載入圖表
+    waitForServiceReady();
 });

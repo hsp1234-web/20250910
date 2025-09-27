@@ -133,6 +133,14 @@ app.add_middleware(
 
 # --- API 端點 ---
 
+@app.get("/health", summary="服務健康狀態檢查")
+async def health_check():
+    """
+    一個簡單的健康檢查端點，如果服務已啟動並準備好接收請求，
+    則返回成功的狀態。前端將使用此端點來輪詢，以確定何時可以開始請求圖表數據。
+    """
+    return JSONResponse(content={"status": "ok", "message": "債券資料服務已就緒。"})
+
 @app.get("/ping", summary="服務健康檢查")
 async def ping():
     """
