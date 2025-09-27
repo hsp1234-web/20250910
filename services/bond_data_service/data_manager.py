@@ -2,117 +2,111 @@
 
 import pandas as pd
 import logging
-import database
-# 匯入所有資料抓取器
-from data_fetchers import (
-    fred_gdp_fetcher,
-    fred_cpi_fetcher,
-    fred_fedfunds_fetcher,
-    nyfed_positions_fetcher,
-    yahoo_finance_fetcher,
+from typing import Dict, Callable, Optional
+
+# 匯入我們新的資料庫工具和所有改造後的資料抓取器
+from .db_utils import load_series_from_db
+from .data_fetchers import (
     fred_sofr_fetcher,
     fred_dgs10_fetcher,
     fred_dgs2_fetcher,
+    fred_dgs5_fetcher,
+    fred_dgs30_fetcher,
+    fred_dgs3mo_fetcher,
     fred_rrp_fetcher,
     fred_vix_fetcher,
     fred_wresbal_fetcher,
-    fred_hys_fetcher
+    fred_hys_fetcher,
+    nyfed_positions_fetcher
 )
 
 logger = logging.getLogger(__name__)
 
 class DataManager:
-    """負責管理所有宏觀經濟數據的抓取、儲存與讀取。"""
+    """
+    負責管理所有金融數據的抓取與讀取，並實現了資料庫快取優先的邏輯。
+    """
     def __init__(self, api_key: str):
+        """
+        初始化 DataManager。
+
+        Args:
+            api_key (str): FRED API 金鑰，用於需要它的資料抓取器。
+        """
         self.api_key = api_key
-        # 將所有指標的抓取函式映射到其名稱
-        self.fetcher_map = {
-            "gdp": fred_gdp_fetcher.fetch_gdp_data,
-            "cpi": fred_cpi_fetcher.fetch_cpi_data,
-            "fedfunds": fred_fedfunds_fetcher.fetch_fedfunds_data,
-            "dealer_positions": nyfed_positions_fetcher.fetch_nyfed_total_positions_data,
-            "dealer_positions_short": nyfed_positions_fetcher.fetch_nyfed_short_term_positions_data,
-            "dealer_positions_long": nyfed_positions_fetcher.fetch_nyfed_long_term_positions_data,
-            "move_index": yahoo_finance_fetcher.fetch_move_index_data,
+
+        # 映射前端指標 ID 到後端抓取函式
+        self._fetcher_map: Dict[str, Callable[..., pd.Series]] = {
             "sofr": fred_sofr_fetcher.fetch_sofr_data,
-            "dgs10": fred_dgs10_fetcher.fetch_dgs10_data,
-            "dgs2": fred_dgs2_fetcher.fetch_dgs2_data,
-            "rrp": fred_rrp_fetcher.fetch_rrp_data,
             "vix": fred_vix_fetcher.fetch_vix_data,
-            "wresbal": fred_wresbal_fetcher.fetch_wresbal_data,
+            "dgs30": fred_dgs30_fetcher.fetch_dgs30_data,
+            "dgs10": fred_dgs10_fetcher.fetch_dgs10_data,
+            "dgs5": fred_dgs5_fetcher.fetch_dgs5_data,
+            "dgs2": fred_dgs2_fetcher.fetch_dgs2_data,
+            "dgs3mo": fred_dgs3mo_fetcher.fetch_dgs3mo_data,
             "us_high_yield_spread": fred_hys_fetcher.fetch_hys_data,
+            "dealer_net_positions": nyfed_positions_fetcher.fetch_nyfed_total_positions_data,
+            "dealer_long_term_positions": nyfed_positions_fetcher.fetch_nyfed_long_term_positions_data,
+            "dealer_short_term_positions": nyfed_positions_fetcher.fetch_nyfed_short_term_positions_data,
+            "rrp": fred_rrp_fetcher.fetch_rrp_data,
+            "wresbal": fred_wresbal_fetcher.fetch_wresbal_data,
         }
 
-    def save_series_to_db(self, series: pd.Series, indicator_name: str) -> int:
-        """將 pandas Series 儲存到資料庫，並進行資料清理。"""
-        if series is None or series.empty:
-            logger.info(f"指標 '{indicator_name}' 沒有需要儲存的新數據。")
-            return 0
+        # 映射前端指標 ID 到資料庫中儲存的 Ticker 名稱
+        self._ticker_map: Dict[str, str] = {
+            "sofr": "SOFR",
+            "vix": "VIXCLS",
+            "dgs30": "DGS30",
+            "dgs10": "DGS10",
+            "dgs5": "DGS5",
+            "dgs2": "DGS2",
+            "dgs3mo": "DGS3MO",
+            "us_high_yield_spread": "HYG",
+            "dealer_net_positions": "NYFED_TOTAL_POS",
+            "dealer_long_term_positions": "NYFED_LONG_POS",
+            "dealer_short_term_positions": "NYFED_SHORT_POS",
+            "rrp": "RRPONTSYD",
+            "wresbal": "WRESBAL",
+        }
 
-        # 強制將索引轉換為 datetime 物件，並移除無效日期，增加穩健性
-        series.index = pd.to_datetime(series.index, errors='coerce')
-        series = series.dropna()
-        series = series[series.index.notna()]
+    def get_series(self, indicator_name: str, start_date: str, end_date: str) -> Optional[pd.Series]:
+        """
+        獲取指定指標的時間序列數據，採用「快取優先」策略。
+        """
+        db_ticker = self._ticker_map.get(indicator_name)
+        if not db_ticker:
+            logger.error(f"找不到指標 '{indicator_name}' 對應的資料庫 Ticker。")
+            return None
 
-        if series.empty:
-            logger.warning(f"指標 '{indicator_name}' 在清理後沒有剩下任何有效數據。")
-            return 0
+        # 1. 嘗試從資料庫快取讀取
+        cached_data = load_series_from_db(db_ticker, start_date, end_date)
+        if cached_data is not None and not cached_data.empty:
+            logger.info(f"指標 '{indicator_name}' 的數據從資料庫快取加載成功。")
+            cached_data.name = indicator_name
+            return cached_data
 
-        conn = database.get_db_connection()
-        cursor = conn.cursor()
-
-        logger.info(f"正在為指標 '{indicator_name}' 清除舊數據...")
-        cursor.execute("DELETE FROM macro_data WHERE indicator = ?", (indicator_name,))
-
-        logger.info(f"正在將 {len(series)} 筆 '{indicator_name}' 新數據寫入資料庫...")
-        df_to_insert = series.reset_index()
-        df_to_insert.columns = ['date', 'value']
-
-        rows_to_insert = [
-            (indicator_name, row['date'].strftime('%Y-%m-%d'), float(row['value']))
-            for _, row in df_to_insert.iterrows()
-        ]
-
-        cursor.executemany(
-            "INSERT INTO macro_data (indicator, date, value) VALUES (?, ?, ?)",
-            rows_to_insert
-        )
-
-        conn.commit()
-        conn.close()
-        logger.info(f"✅ 成功儲存 {len(rows_to_insert)} 筆 '{indicator_name}' 數據。")
-        return len(rows_to_insert)
-
-    def fetch_and_store_data(self, indicator_name: str) -> int:
-        """根據指標名稱，觸發對應的抓取器並儲存數據。"""
-        fetcher = self.fetcher_map.get(indicator_name.lower())
+        # 2. 快取未命中，從網路抓取
+        logger.info(f"指標 '{indicator_name}' 在快取中未找到，將從網路抓取。")
+        fetcher = self._fetcher_map.get(indicator_name)
         if not fetcher:
-            logger.warning(f"在 DataManager 中找不到指標 '{indicator_name}' 的抓取器，將跳過。")
-            return 0
+            logger.error(f"找不到指標 '{indicator_name}' 對應的資料抓取器。")
+            return None
 
-        logger.info(f"正在為指標 '{indicator_name}' 執行資料抓取...")
         try:
-            # 某些抓取器（如 FRED 的）需要 API 金鑰
+            fetcher_args = {"start_date": start_date, "end_date": end_date}
+
             if "fred" in fetcher.__module__:
-                series_data = fetcher(self.api_key)
-            else:
-                series_data = fetcher()
+                fetcher_args["api_key"] = self.api_key
+
+            fresh_data = fetcher(**fetcher_args)
+
+            if fresh_data is None or fresh_data.empty:
+                logger.warning(f"網路抓取器為指標 '{indicator_name}' 返回了空的 Series。")
+                return None
+
+            fresh_data.name = indicator_name
+            return fresh_data
+
         except Exception as e:
-            logger.error(f"執行指標 '{indicator_name}' 的抓取器時發生錯誤: {e}", exc_info=True)
-            return 0
-
-        if series_data is not None:
-            return self.save_series_to_db(series_data, indicator_name)
-        return 0
-
-    def get_data(self, indicator_name: str) -> list[dict]:
-        """從資料庫中獲取指定指標的數據，以供圖表使用。"""
-        conn = database.get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute(
-            "SELECT date, value FROM macro_data WHERE indicator = ? ORDER BY date ASC",
-            (indicator_name,)
-        )
-        rows = cursor.fetchall()
-        conn.close()
-        return [{"date": row["date"], "value": row["value"]} for row in rows]
+            logger.error(f"為指標 '{indicator_name}' 執行資料抓取器時發生錯誤: {e}", exc_info=True)
+            return None

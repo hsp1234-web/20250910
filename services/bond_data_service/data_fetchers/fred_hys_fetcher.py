@@ -1,44 +1,55 @@
 # services/bond_data_service/data_fetchers/fred_hys_fetcher.py
 
 import pandas as pd
-from fredapi import Fred
+import yfinance as yf
 import logging
+from services.bond_data_service.db_utils import save_series_to_db
 
 # 確保日誌記錄器名稱與模組路徑一致
 logger = logging.getLogger(__name__)
 
-def fetch_hys_data(api_key: str) -> pd.Series:
+def fetch_hys_data(start_date: str, end_date: str) -> pd.Series:
     """
-    從 FRED 抓取美國高收益債利差 (BofA US High Yield Index Option-Adjusted Spread)。
-    序列 ID: BAMLH0A0HYM2
+    (替代方案) 從 Yahoo Finance 抓取高收益債券 ETF (HYG) 在指定日期範圍內的歷史收盤價，
+    作為高收益債市場情緒的替代指標，並將結果存入資料庫。
 
     Args:
-        api_key (str): 用於 FRED API 驗證的金鑰。
+        start_date (str): 開始日期 (YYYY-MM-DD).
+        end_date (str): 結束日期 (YYYY-MM-DD).
 
     Returns:
-        pd.Series: 包含高收益債利差數據的時間序列，若抓取失敗則返回帶有正確名稱的空 Series。
+        pd.Series: 包含 HYG 收盤價的時間序列，若抓取失敗則返回帶有正確名稱的空 Series。
+                   Series 的名稱將被設為 'us_high_yield_spread' 以便與舊系統兼容。
     """
-    # 檢查 API 金鑰是否為預設的無效金鑰或空值
-    if not api_key or "YOUR_DEFAULT_API_KEY" in api_key:
-        logger.warning("未提供有效的 FRED API 金鑰，將跳過高收益債利差數據的抓取。")
-        return pd.Series(dtype='float64', name='us_high_yield_spread')
+    ticker = "HYG"
+    # 內部使用的系列名稱，以保持與系統其他部分的兼容性
+    series_name = "us_high_yield_spread"
+    logger.info(f"開始從 Yahoo Finance 抓取 {ticker} 數據 ({start_date} 至 {end_date})。")
 
     try:
-        fred = Fred(api_key=api_key)
-        hys_series = fred.get_series('BAMLH0A0HYM2')
-        hys_series.name = 'us_high_yield_spread'
+        hyg_ticker = yf.Ticker(ticker)
+        # 使用指定的日期範圍抓取數據
+        hist = hyg_ticker.history(start=start_date, end=end_date)
 
+        if hist.empty or 'Close' not in hist.columns:
+            logger.warning(f"從 Yahoo Finance 抓取 '{ticker}' 數據時，返回的 DataFrame 為空或缺少 'Close' 欄。")
+            return pd.Series(dtype='float64', name=series_name)
+
+        hys_series = hist['Close']
         # 進行數據清理
         hys_series = hys_series.dropna()
-        hys_series.index = pd.to_datetime(hys_series.index)
+        hys_series.index = pd.to_datetime(hys_series.index).tz_localize(None) # 確保移除時區
 
-        logger.info(f"成功從 FRED 抓取 {len(hys_series)} 筆高收益債利差數據。")
+        logger.info(f"成功從 Yahoo Finance 抓取 {len(hys_series)} 筆 '{ticker}' 數據。")
+
+        # 抓取成功後，將數據儲存到資料庫
+        # 儲存到資料庫時，我們使用 'HYG' 作為 ticker
+        save_series_to_db(hys_series, ticker)
+
+        # 返回的 Series 應使用內部名稱 'us_high_yield_spread'
+        hys_series.name = series_name
         return hys_series
-    except ValueError as e:
-        # fredapi 在金鑰無效時會引發 ValueError，我們在這裡特別捕捉它
-        logger.warning(f"從 FRED 抓取高收益債利差數據時發生錯誤，很可能是 API 金鑰無效或已過期: {e}")
-        return pd.Series(dtype='float64', name='us_high_yield_spread')
+
     except Exception as e:
-        # 處理其他可能的網路或 API 錯誤
-        logger.error(f"從 FRED 抓取高收益債利差數據時發生未預期的錯誤: {e}", exc_info=True)
-        return pd.Series(dtype='float64', name='us_high_yield_spread')
+        logger.error(f"從 Yahoo Finance 抓取 '{ticker}' 數據時發生未預期的錯誤: {e}", exc_info=True)
+        return pd.Series(dtype='float64', name=series_name)

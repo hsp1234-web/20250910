@@ -2,39 +2,44 @@
 
 import os
 from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import Response, JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
-import database
-from data_manager import DataManager
-import stress_index_calculator
-import charting
 import logging
 import pandas as pd
-import numpy as np
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Dict, Any, List
+from pathlib import Path
 
-# --- Global instances ---
-data_manager = None
-# 新增一個快取，用於儲存計算好的完整指標，避免重複計算
-metrics_cache = {"data": None, "timestamp": None}
+# 匯入重構後的模組
+from .database import initialize_database
+from .data_manager import DataManager
+from .stress_index_calculator import calculate_full_metrics
 
-# 設定日誌
-logging.basicConfig(level=logging.INFO)
+# --- 全域實例 ---
+data_manager: Optional[DataManager] = None
+
+# --- 日誌設定 ---
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
+# --- 專案路徑設定 ---
+# .../services/bond_data_service/main.py -> .../src
+SRC_PATH = Path(__file__).resolve().parent.parent.parent / 'src'
+STATIC_PATH = SRC_PATH / 'static'
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    """應用程式生命週期管理"""
     global data_manager
     logger.info("債券資料服務啟動中...")
-    database.initialize_database()
+    initialize_database()
 
-    default_api_key = "YOUR_DEFAULT_API_KEY"
-    api_key = os.getenv("FRED_API_KEY", default_api_key)
-
-    if api_key == default_api_key:
-        logger.warning("未偵測到 FRED_API_KEY 環境變數，將使用預設的假金鑰。資料抓取功能將無法運作。")
+    api_key = os.getenv("FRED_API_KEY")
+    if not api_key:
+        logger.warning("未偵測到 FRED_API_KEY 環境變數。部分 FRED 數據抓取功能可能無法運作。")
     else:
         logger.info("成功讀取 FRED_API_KEY。")
 
@@ -44,9 +49,9 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     lifespan=lifespan,
-    title="債券與一級交易商分析服務",
-    description="一個提供債券相關宏觀經濟數據，並計算與呈現一級交易商壓力指數相關圖表的微服務。",
-    version="1.2.0",
+    title="債券與一級交易商分析服務 API",
+    description="一個提供債券相關宏觀經濟數據，並計算壓力指數的 API 服務。",
+    version="2.0.0",
 )
 
 # --- CORS 設定 ---
@@ -60,7 +65,7 @@ app.add_middleware(
 
 # --- API 端點 ---
 
-@app.get("/ping", summary="服務健康檢查")
+@app.get("/ping", summary="服務健康檢查", tags=["系統"])
 async def ping():
     """
     執行一個快速的健康檢查。
@@ -68,132 +73,71 @@ async def ping():
     """
     return {"status": "ok", "message": "債券資料服務運行中。"}
 
-@app.post("/fetch/{indicator}", summary="手動觸發資料抓取")
-async def fetch_data_endpoint(indicator: str):
-    """手動觸發特定基礎指標的資料抓取與儲存"""
-    try:
-        logger.info(f"收到對 '{indicator}' 的手動資料抓取請求...")
-        count = data_manager.fetch_and_store_data(indicator)
-        return {"indicator": indicator, "message": f"成功為 '{indicator}' 抓取並儲存了 {count} 筆數據。"}
-    except ValueError as e:
-        logger.error(f"找不到指標 '{indicator}' 的抓取器: {e}")
-        raise HTTPException(status_code=404, detail=f"找不到指標 '{indicator}' 的抓取器。")
-    except Exception as e:
-        logger.error(f"處理抓取請求 '{indicator}' 時發生內部錯誤: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"處理 '{indicator}' 時發生內部錯誤: {e}")
-
-@app.get("/debug/all_metrics")
-async def get_all_metrics_debug():
-    """
-    [除錯用] 獲取所有計算指標的原始 DataFrame 數據。
-    注意：這會回傳大量數據，僅供開發和驗證使用。
-    """
-    try:
-        logger.info("[除錯] 正在請求所有指標數據...")
-        full_metrics_df = stress_index_calculator.calculate_full_metrics(data_manager)
-
-        # 將 NaN 轉換為 None (JSON 可序列化) 並重置索引，使日期成為一欄
-        df_serializable = full_metrics_df.reset_index().replace({pd.NaT: None, np.nan: None})
-
-        # 轉換為 JSON 字串，處理日期格式
-        json_str = df_serializable.to_json(orient='records', date_format='iso')
-
-        logger.info(f"[除錯] 成功生成指標數據，共 {len(df_serializable)} 筆。")
-        return Response(content=json_str, media_type="application/json")
-
-    except Exception as e:
-        logger.error(f"[除錯] 生成所有指標數據時發生錯誤: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"生成除錯數據時發生內部錯誤: {e}")
-
-@app.get("/chart/{chart_id}")
-async def get_unified_chart_endpoint(
-    chart_id: str,
-    start_date: Optional[str] = Query(None, description="圖表數據的開始日期 (YYYY-MM-DD)"),
-    end_date: Optional[str] = Query(None, description="圖表數據的結束日期 (YYYY-MM-DD)")
+@app.get("/api/chart_data/{indicator_id}", summary="獲取格式化後的圖表數據 (JSON)", tags=["圖表數據"])
+async def get_chart_data(
+    indicator_id: str,
+    start_date: str = Query("2018-01-01", description="開始日期 (YYYY-MM-DD)"),
+    end_date: str = Query(datetime.now().strftime('%Y-%m-%d'), description="結束日期 (YYYY-MM-DD)")
 ):
     """
-    統一的圖表生成端點。
-    根據 chart_id 生成對應的圖表並以圖片格式返回。
-    支援可選的日期範圍篩選。
+    為指定指標提供用於前端圖表渲染的 JSON 數據。
     """
-    global metrics_cache
+    if data_manager is None:
+        raise HTTPException(status_code=503, detail="服務尚未完全初始化，請稍後再試。")
 
-    # 擴充後的圖表ID與繪圖函式的分派字典
-    chart_dispatcher = {
-        "sofr": charting.plot_sofr,
-        "vix": charting.plot_vix,
-        "stress_index": charting.plot_stress_index,
-        "gauge": charting.plot_gauge,
-        "trend": charting.plot_trend,
-        "us_bond_2y_10y_spread": charting.plot_spread_10y2y,
-        "spread_10y2y": charting.plot_spread_10y2y,
-        "dealer_net_positions": charting.plot_dealer_positions,
-        "dealer_positions": charting.plot_dealer_positions,
-        "stress_index_macd": charting.plot_macd,
-        "macd": charting.plot_macd,
-        "ofr_fci": charting.plot_stress_index,
-        "us_high_yield_spread": charting.plot_us_high_yield_spread,
-        "dealer_short_term_positions": lambda df: charting.plot_dealer_positions_by_maturity(df, 'short'),
-        "dealer_long_term_positions": lambda df: charting.plot_dealer_positions_by_maturity(df, 'long'),
-        "dealer_net_position_ranking": lambda df: charting.plot_not_available("交易商淨部位排名"),
-        "dealer_position_change_ranking": lambda df: charting.plot_not_available("交易商部位變動排名"),
-        "reserves": charting.plot_reserves,
-        "etf_tlt": charting.plot_etf_tlt,
-        "pos_res_ratio": charting.plot_pos_res_ratio,
-    }
-
-    plot_function = chart_dispatcher.get(chart_id)
+    logger.info(f"收到對 '{indicator_id}' 的圖表數據請求 ({start_date} to {end_date})。")
 
     try:
-        logger.info(f"開始為圖表 '{chart_id}' 計算完整指標...")
-        full_metrics_df = stress_index_calculator.calculate_full_metrics(data_manager)
+        full_metrics_df = calculate_full_metrics(data_manager, start_date, end_date)
 
-        if full_metrics_df.empty:
-            logger.error("指標計算結果為空，無法生成圖表。")
-            fig = charting.plot_not_available(f"圖表 '{chart_id}' (指標計算失敗)")
-            return Response(content=charting.generate_chart_response(fig), media_type="image/jpeg")
+        if full_metrics_df is None or full_metrics_df.empty:
+            raise HTTPException(status_code=404, detail=f"無法為指標 '{indicator_id}' 在指定日期範圍內計算或獲取數據。")
 
-        # --- 日期篩選邏輯 ---
-        filtered_df = full_metrics_df
-        if start_date or end_date:
-            try:
-                start_dt = pd.to_datetime(start_date) if start_date else None
-                end_dt = pd.to_datetime(end_date) if end_date else None
+        labels = full_metrics_df.index.strftime('%Y-%m-%d').tolist()
+        datasets: List[Dict[str, Any]] = []
 
-                if start_dt:
-                    filtered_df = filtered_df[filtered_df.index >= start_dt]
-                if end_dt:
-                    filtered_df = filtered_df[filtered_df.index <= end_dt]
+        # 根據指標ID，準備對應的數據集
+        if indicator_id == 'sofr':
+            datasets.append({'label': 'SOFR', 'data': full_metrics_df['sofr'].where(pd.notna(full_metrics_df['sofr']), None).tolist()})
+            datasets.append({'label': 'SOFR 60日移動平均', 'data': full_metrics_df['sofr_ma60'].where(pd.notna(full_metrics_df['sofr_ma60']), None).tolist()})
+        elif indicator_id == 'vix':
+            datasets.append({'label': 'VIX 恐慌指數', 'data': full_metrics_df['vix'].where(pd.notna(full_metrics_df['vix']), None).tolist()})
+        elif indicator_id == 'us_bond_2y_10y_spread':
+            data_bps = (full_metrics_df['spread_10y2y'] * 100).where(pd.notna(full_metrics_df['spread_10y2y']), None)
+            datasets.append({'label': '美債2年與10年利差 (BPS)', 'data': data_bps.tolist()})
+        elif indicator_id == 'us_high_yield_spread':
+            datasets.append({'label': '高收益債ETF (HYG) 價格', 'data': full_metrics_df['us_high_yield_spread'].where(pd.notna(full_metrics_df['us_high_yield_spread']), None).tolist()})
+        elif indicator_id == 'stress_index':
+            datasets.append({'label': '綜合壓力指數', 'data': full_metrics_df['dealer_stress_index'].where(pd.notna(full_metrics_df['dealer_stress_index']), None).tolist()})
+        elif indicator_id == 'dealer_net_positions':
+            data_bil = (full_metrics_df['dealer_net_positions'] / 1000).where(pd.notna(full_metrics_df['dealer_net_positions']), None)
+            datasets.append({'label': '淨部位 (十億美元)', 'data': data_bil.tolist()})
+        elif indicator_id == 'dealer_long_term_positions':
+            data_bil = (full_metrics_df['dealer_long_term_positions'] / 1000).where(pd.notna(full_metrics_df['dealer_long_term_positions']), None)
+            datasets.append({'label': '長天期淨部位 (十億美元)', 'data': data_bil.tolist()})
+        elif indicator_id == 'dealer_short_term_positions':
+            data_bil = (full_metrics_df['dealer_short_term_positions'] / 1000).where(pd.notna(full_metrics_df['dealer_short_term_positions']), None)
+            datasets.append({'label': '短天期淨部位 (十億美元)', 'data': data_bil.tolist()})
+        elif indicator_id == 'stress_index_macd':
+            datasets.append({'label': '壓力指數 MACD', 'data': full_metrics_df['macd_hist'].where(pd.notna(full_metrics_df['macd_hist']), None).tolist(), 'type': 'bar'})
+        else:
+            logger.warning(f"指標 '{indicator_id}' 的數據準備邏輯尚未定義。")
+            raise HTTPException(status_code=404, detail=f"指標 '{indicator_id}' 的數據準備邏輯尚未定義。")
 
-                logger.info(f"數據已篩選，範圍: {start_date} 至 {end_date}。剩餘 {len(filtered_df)} 行。")
+        if not any(d['data'] for d in datasets) or all(all(x is None for x in d['data']) for d in datasets):
+            logger.warning(f"為指標 '{indicator_id}' 生成的數據集為空。")
 
-                if filtered_df.empty:
-                    logger.warning(f"在指定日期範圍內沒有圖表 '{chart_id}' 的數據。")
-                    fig = charting.plot_not_available(f"圖表 '{chart_id}' (範圍內無數據)")
-                    return Response(content=charting.generate_chart_response(fig), media_type="image/jpeg")
-            except Exception as e:
-                logger.error(f"無效的日期格式或篩選錯誤: {e}")
-                fig = charting.plot_not_available(f"圖表 '{chart_id}' (日期格式無效)")
-                return Response(content=charting.generate_chart_response(fig), media_type="image/jpeg", status_code=400)
-
-        if not plot_function:
-            logger.warning(f"找不到 chart_id '{chart_id}' 的對應函式。")
-            fig = charting.plot_not_available(f"圖表 '{chart_id}'")
-            return Response(content=charting.generate_chart_response(fig), media_type="image/jpeg")
-
-        logger.info(f"正在為 '{chart_id}' 調用繪圖函式...")
-        fig = plot_function(filtered_df)
-
-        if fig is None:
-            logger.warning(f"圖表 '{chart_id}' 因數據不足而無法生成。")
-            fig = charting.plot_not_available(f"圖表 '{chart_id}' (數據不足)")
-            return Response(content=charting.generate_chart_response(fig), media_type="image/jpeg")
-
-        img_bytes = charting.generate_chart_response(fig)
-        logger.info(f"圖表 '{chart_id}' 已成功生成並準備回傳。")
-        return Response(content=img_bytes, media_type="image/jpeg")
+        return JSONResponse(content={"labels": labels, "datasets": datasets})
 
     except Exception as e:
-        logger.error(f"為 '{chart_id}' 生成圖表時發生未預期錯誤: {e}", exc_info=True)
-        fig = charting.plot_not_available(f"圖表 '{chart_id}' (內部錯誤)")
-        return Response(content=charting.generate_chart_response(fig), media_type="image/jpeg", status_code=500)
+        logger.error(f"為 '{indicator_id}' 獲取圖表數據時發生未預期錯誤: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"處理對 '{indicator_id}' 的請求時發生內部伺服器錯誤。")
+
+# --- 掛載靜態檔案 ---
+# 這會將 'src/static' 目錄下的所有檔案掛載到 '/static' 路徑
+app.mount("/static", StaticFiles(directory=STATIC_PATH), name="static")
+
+@app.get("/", include_in_schema=False)
+async def root():
+    """提供主儀表板頁面"""
+    return FileResponse(str(STATIC_PATH / 'primary_dealer_analysis.html'))

@@ -1,16 +1,14 @@
-# services/bond_data_service/data_fetchers/fred_wresbal_fetcher.py
+# services/bond_data_service/data_fetchers/fred_dgs30_fetcher.py
 import pandas as pd
 from fredapi import Fred
 import logging
 from services.bond_data_service.db_utils import save_series_to_db
 
-# 設置日誌
 logger = logging.getLogger(__name__)
 
-def fetch_wresbal_data(api_key: str, start_date: str, end_date: str) -> pd.Series:
+def fetch_dgs30_data(api_key: str, start_date: str, end_date: str) -> pd.Series:
     """
-    使用 FRED API 獲取聯邦儲備銀行準備金餘額 (WRESBAL) 在指定日期範圍內的資料，並存入資料庫。
-    注意：此為週頻數據。
+    使用 FRED API 獲取 30 年期美國公債固定期限利率 (DGS30) 在指定日期範圍內的資料，並存入資料庫。
 
     Args:
         api_key (str): FRED API 金鑰。
@@ -18,11 +16,11 @@ def fetch_wresbal_data(api_key: str, start_date: str, end_date: str) -> pd.Serie
         end_date (str): 結束日期 (YYYY-MM-DD)。
 
     Returns:
-        pd.Series: 包含 WRESBAL 資料的 pandas Series，索引為日期。
+        pd.Series: 包含 DGS30 資料的 pandas Series，索引為日期。
                    如果發生錯誤或找不到資料，則返回一個空的 Series。
     """
-    ticker = 'WRESBAL'
-    series_name = 'wresbal'
+    ticker = 'DGS30'
+    series_name = 'dgs30'
     logger.info(f"開始從 FRED 抓取 {ticker} 數據 ({start_date} 至 {end_date})。")
 
     try:
