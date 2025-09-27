@@ -3,7 +3,7 @@
 import pandas as pd
 import yfinance as yf
 import logging
-from services.bond_data_service.db_utils import save_series_to_db
+from db_utils import save_series_to_db
 
 # 確保日誌記錄器名稱與模組路徑一致
 logger = logging.getLogger(__name__)

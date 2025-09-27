@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>一級交易商分析儀表板</title>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
     <link rel="stylesheet" href="/static/css/main.css">
     <style>
         /* --- 此頁面專用樣式 --- */
@@ -157,9 +158,10 @@
                 </div>
             </div>
             <div class="panel" data-indicator-id="stress_index_macd">
-                <h2>壓力指數MACD</h2>
-                <div class="chart-container">
-                    <img id="chart-img-stress_index_macd" src="" alt="圖表載入中..." />
+                <h2>壓力指數MACD (動態圖)</h2>
+                <div id="dynamic-chart-stress-index-macd" class="chart-container">
+                    <!-- Plotly.js 將會把圖表渲染到這裡 -->
+                    <div class="placeholder">圖表載入中...</div>
                 </div>
             </div>
         </div>
