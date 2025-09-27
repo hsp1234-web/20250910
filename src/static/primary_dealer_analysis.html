@@ -90,77 +90,76 @@
         </div>
 
         <div class="dashboard-grid">
-            <!-- 12 張圖表卡片 -->
+            <!-- 12 張圖表卡片，現在全部使用 div 容器 -->
             <div class="panel" data-indicator-id="sofr">
                 <h2>SOFR (擔保隔夜融資利率)</h2>
-                <div class="chart-container">
-                    <img id="chart-img-sofr" src="" alt="圖表載入中..." />
-                </div>
-            </div>
-            <div class="panel" data-indicator-id="ofr_fci">
-                <h2>OFR FCI (金融壓力指數)</h2>
-                <div class="chart-container">
-                    <img id="chart-img-ofr_fci" src="" alt="圖表載入中..." />
-                </div>
-            </div>
-            <div class="panel" data-indicator-id="vix">
-                <h2>VIX (恐慌指數)</h2>
-                <div class="chart-container">
-                    <img id="chart-img-vix" src="" alt="圖表載入中..." />
-                </div>
-            </div>
-            <div class="panel" data-indicator-id="us_bond_2y_10y_spread">
-                <h2>美債2年與10年利差</h2>
-                <div class="chart-container">
-                    <img id="chart-img-us_bond_2y_10y_spread" src="" alt="圖表載入中..." />
-                </div>
-            </div>
-            <div class="panel" data-indicator-id="us_high_yield_spread">
-                <h2>高收益債利差</h2>
-                <div class="chart-container">
-                    <img id="chart-img-us_high_yield_spread" src="" alt="圖表載入中..." />
+                <div id="chart-container-sofr" class="chart-container">
+                    <div class="placeholder">圖表載入中...</div>
                 </div>
             </div>
             <div class="panel" data-indicator-id="stress_index">
                 <h2>綜合壓力指數</h2>
-                <div class="chart-container">
-                    <img id="chart-img-stress_index" src="" alt="圖表載入中..." />
+                <div id="chart-container-stress_index" class="chart-container">
+                    <div class="placeholder">圖表載入中...</div>
                 </div>
             </div>
-            <div class="panel" data-indicator-id="dealer_net_positions">
-                <h2>淨部位</h2>
-                <div class="chart-container">
-                    <img id="chart-img-dealer_net_positions" src="" alt="圖表載入中..." />
+            <div class="panel" data-indicator-id="vix">
+                <h2>VIX (恐慌指數)</h2>
+                <div id="chart-container-vix" class="chart-container">
+                    <div class="placeholder">圖表載入中...</div>
                 </div>
             </div>
-            <div class="panel" data-indicator-id="dealer_long_term_positions">
-                <h2>長天期淨部位</h2>
-                <div class="chart-container">
-                    <img id="chart-img-dealer_long_term_positions" src="" alt="圖表載入中..." />
+            <div class="panel" data-indicator-id="us_bond_2y_10y_spread">
+                <h2>美債2年與10年利差</h2>
+                <div id="chart-container-us_bond_2y_10y_spread" class="chart-container">
+                    <div class="placeholder">圖表載入中...</div>
                 </div>
             </div>
-            <div class="panel" data-indicator-id="dealer_short_term_positions">
-                <h2>短天期淨部位</h2>
-                <div class="chart-container">
-                    <img id="chart-img-dealer_short_term_positions" src="" alt="圖表載入中..." />
-                </div>
-            </div>
-            <div class="panel" data-indicator-id="dealer_net_position_ranking">
-                <h2>淨部位排名</h2>
-                <div class="chart-container">
-                    <img id="chart-img-dealer_net_position_ranking" src="" alt="圖表載入中..." />
-                </div>
-            </div>
-            <div class="panel" data-indicator-id="dealer_position_change_ranking">
-                <h2>淨部位變動排名</h2>
-                <div class="chart-container">
-                    <img id="chart-img-dealer_position_change_ranking" src="" alt="圖表載入中..." />
+            <div class="panel" data-indicator-id="us_high_yield_spread">
+                <h2>高收益債利差</h2>
+                <div id="chart-container-us_high_yield_spread" class="chart-container">
+                    <div class="placeholder">圖表載入中...</div>
                 </div>
             </div>
             <div class="panel" data-indicator-id="stress_index_macd">
-                <h2>壓力指數MACD (動態圖)</h2>
-                <div id="dynamic-chart-stress-index-macd" class="chart-container">
-                    <!-- Plotly.js 將會把圖表渲染到這裡 -->
+                <h2>壓力指數 MACD</h2>
+                <div id="chart-container-stress_index_macd" class="chart-container">
+                    <div class="placeholder">圖表載入中...</div>
+                </div>
+            </div>
+            <div class="panel" data-indicator-id="dealer_net_positions">
+                <h2>一級交易商淨部位</h2>
+                <div id="chart-container-dealer_net_positions" class="chart-container">
+                    <div class="placeholder">圖表載入中...</div>
+                </div>
+            </div>
+            <div class="panel" data-indicator-id="dealer_long_term_positions">
+                <h2>一級交易商長天期部位</h2>
+                <div id="chart-container-dealer_long_term_positions" class="chart-container">
+                    <div class="placeholder">圖表載入中...</div>
+                </div>
+            </div>
+            <div class="panel" data-indicator-id="dealer_short_term_positions">
+                <h2>一級交易商短天期部位</h2>
+                <div id="chart-container-dealer_short_term_positions" class="chart-container">
+                    <div class="placeholder">圖表載入中...</div>
+                </div>
+            </div>
+            <div class="panel" data-indicator-id="dealer_net_position_ranking">
+                <h2>各類部位最新淨值排名</h2>
+                <div id="chart-container-dealer_net_position_ranking" class="chart-container">
+                    <div class="placeholder">圖表載入中...</div>
+                </div>
+            </div>
+            <div class="panel" data-indicator-id="dealer_position_change_ranking">
+                <h2>各類部位最新變動排名</h2>
+                <div id="chart-container-dealer_position_change_ranking" class="chart-container">
+                    <div class="placeholder">圖表載入中...</div>
+                </div>
+            </div>
+             <div class="panel" data-indicator-id="ofr_fci">
+                <h2>OFR 金融壓力指數</h2>
+                <div id="chart-container-ofr_fci" class="chart-container">
                     <div class="placeholder">圖表載入中...</div>
                 </div>
             </div>

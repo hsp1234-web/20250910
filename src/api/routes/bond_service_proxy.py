@@ -24,37 +24,28 @@ async def get_bond_service_url() -> str:
     port = service_info['port']
     return f"http://127.0.0.1:{port}"
 
-@router.get("/chart/{indicator_id}")
-async def proxy_chart_request(indicator_id: str, request: Request):
+@router.get("/health")
+async def proxy_health_check(request: Request):
     """
-    代理對 bond_data_service 的**圖片圖表**請求。
-    此版本會完整讀取下游服務的回應，而不是串流，以增加穩定性。
-    同時，它會轉發原始請求中的所有查詢參數。
+    代理對 bond_data_service 的健康檢查請求。
     """
     try:
         base_url = await get_bond_service_url()
-        # 轉發查詢參數
-        query_params = request.url.query
-        chart_url = f"{base_url}/chart/{indicator_id}?{query_params}" if query_params else f"{base_url}/chart/{indicator_id}"
+        health_url = f"{base_url}/health"
 
         async with httpx.AsyncClient() as client:
-            response = await client.get(chart_url, timeout=60.0)
+            response = await client.get(health_url, timeout=5.0) # 使用較短的超時
             response.raise_for_status()
             return Response(
                 content=response.content,
                 status_code=response.status_code,
-                media_type=response.headers.get("content-type")
+                media_type='application/json'
             )
-    except httpx.HTTPStatusError as e:
-        try:
-            detail = e.response.json().get('detail', e.response.text)
-        except json.JSONDecodeError:
-            detail = e.response.text
-        raise HTTPException(status_code=e.response.status_code, detail=f"債券資料服務錯誤: {detail}")
-    except httpx.RequestError as e:
-        raise HTTPException(status_code=502, detail=f"無法連線至債券資料服務: {e}")
+    except httpx.RequestError:
+        # 如果請求失敗（例如服務尚未啟動），回傳一個清晰的「服務不可用」狀態
+        raise HTTPException(status_code=503, detail="債券資料服務目前無法連線。")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"代理請求時發生內部錯誤: {e}")
+        raise HTTPException(status_code=500, detail=f"代理健康檢查時發生內部錯誤: {e}")
 
 
 @router.get("/charts/{chart_id}")
@@ -87,3 +78,34 @@ async def proxy_chart_data_request(chart_id: str, request: Request):
         raise HTTPException(status_code=502, detail=f"無法連線至債券資料服務(數據): {e}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"代理數據請求時發生內部錯誤: {e}")
+
+
+@router.get("/data/{chart_id}")
+async def proxy_dynamic_data_request(chart_id: str, request: Request):
+    """
+    代理對 bond_data_service 的**動態圖表 JSON 數據**請求。
+    這是為了支援 V2.1 前端動態渲染所有圖表的新架構。
+    """
+    try:
+        base_url = await get_bond_service_url()
+        query_params = request.url.query
+        data_url = f"{base_url}/data/{chart_id}?{query_params}" if query_params else f"{base_url}/data/{chart_id}"
+
+        async with httpx.AsyncClient() as client:
+            response = await client.get(data_url, timeout=30.0)
+            response.raise_for_status()
+            return Response(
+                content=response.content,
+                status_code=response.status_code,
+                media_type='application/json'
+            )
+    except httpx.HTTPStatusError as e:
+        try:
+            detail = e.response.json().get('detail', e.response.text)
+        except json.JSONDecodeError:
+            detail = e.response.text
+        raise HTTPException(status_code=e.response.status_code, detail=f"債券資料服務(動態數據)錯誤: {detail}")
+    except httpx.RequestError as e:
+        raise HTTPException(status_code=502, detail=f"無法連線至債券資料服務(動態數據): {e}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"代理動態數據請求時發生內部錯誤: {e}")
