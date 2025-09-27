@@ -1,26 +1,18 @@
 // src/static/js/primary_dealer_analysis.js
 
 document.addEventListener('DOMContentLoaded', () => {
-    console.log("一級交易商分析頁面腳本已載入。");
+    console.log("儀表板動態載入腳本 V2.1 已啟動 (全中文化)。");
 
-    // --- DOM 元素 ---
     const startDateInput = document.getElementById('start-date');
     const endDateInput = document.getElementById('end-date');
     const updateBtn = document.getElementById('update-charts-btn');
 
-    // --- 指標清單 ---
-    // 將 "stress_index_macd" 移除，因為它現在是動態載入的
-    const indicators = [
-        "sofr", "ofr_fci", "vix", "us_bond_2y_10y_spread",
-        "us_high_yield_spread", "stress_index", "dealer_net_positions",
-        "dealer_long_term_positions", "dealer_short_term_positions",
-        "dealer_net_position_ranking", "dealer_position_change_ranking"
-    ];
-
-    // --- 函式定義 ---
+    // 從 HTML 中自動獲取所有指標 ID
+    const chartPanels = document.querySelectorAll('.panel[data-indicator-id]');
+    const indicators = Array.from(chartPanels).map(panel => panel.dataset.indicatorId);
 
     /**
-     * 載入所有圖表。會讀取當前日期選擇器的值。
+     * 載入所有圖表的核心函式
      */
     function loadAllCharts() {
         const startDate = startDateInput.value;
@@ -30,211 +22,262 @@ document.addEventListener('DOMContentLoaded', () => {
             alert("請確保已選擇開始和結束日期。");
             return;
         }
-
         console.log(`開始載入所有圖表，日期範圍: ${startDate} 至 ${endDate}`);
 
-        // 為每個圖表容器顯示 loading 提示
-        indicators.forEach(id => {
-            const imgElement = document.getElementById(`chart-img-${id}`);
-            if (imgElement) {
-                imgElement.src = ""; // 清空舊圖片
-                imgElement.alt = "圖表載入中...";
+        indicators.forEach(indicatorId => {
+            const container = document.getElementById(`chart-container-${indicatorId}`);
+            if (container) {
+                container.innerHTML = '<div class="placeholder">圖表載入中...</div>'; // 顯示載入提示
+                fetchAndPlotChart(indicatorId, startDate, endDate);
             }
         });
-
-        // 遍歷所有指標並非同步載入圖表
-        indicators.forEach(indicatorId => {
-            loadChart(indicatorId, startDate, endDate);
-        });
     }
 
     /**
-     * 根據指標 ID 和日期範圍載入單一圖表。
-     * @param {string} indicatorId - 指標的唯一 ID。
-     * @param {string} startDate - 開始日期 (YYYY-MM-DD)。
-     * @param {string} endDate - 結束日期 (YYYY-MM-DD)。
+     * 根據指標 ID 獲取數據並繪製圖表
+     * @param {string} indicatorId - 指標的唯一 ID
+     * @param {string} startDate - 開始日期
+     * @param {string} endDate - 結束日期
      */
-    function loadChart(indicatorId, startDate, endDate) {
-        const imgElement = document.getElementById(`chart-img-${indicatorId}`);
-        if (!imgElement) {
-            console.error(`找不到指標 ID 為 ${indicatorId} 的圖片元素。`);
-            return;
+    async function fetchAndPlotChart(indicatorId, startDate, endDate) {
+        const container = document.getElementById(`chart-container-${indicatorId}`);
+        const apiUrl = `/api/bond_service/data/${indicatorId}?start_date=${startDate}&end_date=${endDate}`;
+
+        try {
+            const response = await fetch(apiUrl);
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({'error': `數據請求失敗: ${response.statusText}`}));
+                throw new Error(errorData.error || `數據請求失敗: ${response.statusText}`);
+            }
+            const data = await response.json();
+
+            if (!data || data.length === 0 || data.error) {
+                throw new Error(data.error || '無可用數據');
+            }
+
+            // 根據指標 ID 選擇對應的繪圖邏輯
+            const plotFunction = getPlotFunction(indicatorId);
+            plotFunction(container, data, indicatorId);
+
+        } catch (error) {
+            console.error(`載入圖表 ${indicatorId} 時發生錯誤:`, error);
+            container.innerHTML = `<div class="placeholder" style="text-align: center; color: #d63031;">圖表載入失敗<br><small>${error.message}</small></div>`;
+        }
+    }
+
+    /**
+     * 根據指標 ID 返回對應的繪圖函式
+     * @param {string} indicatorId
+     * @returns {Function}
+     */
+    function getPlotFunction(indicatorId) {
+        const plotMapping = {
+            "sofr": plotSimpleLineChart,
+            "ofr_fci": plotSimpleLineChart,
+            "vix": plotSimpleLineChart,
+            "us_bond_2y_10y_spread": plotSpreadChart,
+            "us_high_yield_spread": plotSimpleLineChart,
+            "stress_index": plotStressIndexChart,
+            "dealer_net_positions": plotSimpleLineChart,
+            "dealer_long_term_positions": plotSimpleLineChart,
+            "dealer_short_term_positions": plotSimpleLineChart,
+            "dealer_net_position_ranking": plotRankingBarChart,
+            "dealer_position_change_ranking": plotChangeRankingBarChart,
+            "stress_index_macd": plotMacdChart,
+        };
+        return plotMapping[indicatorId] || plotSimpleLineChart;
+    }
+
+    // --- 通用繪圖函式 (全中文化) ---
+
+    function plotSimpleLineChart(container, data, indicatorId) {
+        const chartTitle = container.parentElement.querySelector('h2').textContent;
+        const yAxisTitleMapping = {
+            'sofr': '利率 (%)',
+            'us_high_yield_spread': '利差 (%)',
+            'vix': '指數值',
+            'ofr_fci': '指數值',
+            'dealer_net_positions': '金額 (十億美元)',
+            'dealer_long_term_positions': '金額 (十億美元)',
+            'dealer_short_term_positions': '金額 (十億美元)',
+        };
+        const dataKey = Object.keys(data[0]).find(k => k !== 'date');
+        let yValues = data.map(d => d[dataKey]);
+
+        if (indicatorId.includes('positions')) {
+             yValues = yValues.map(v => v / 1000);
         }
 
-        // 建立 API 端點 URL，並附加日期參數
-        let apiUrl = `/api/bond_service/chart/${indicatorId}?start_date=${startDate}&end_date=${endDate}`;
-        // 附加時間戳以避免瀏覽器快取舊圖片
-        const finalUrl = `${apiUrl}&t=${new Date().getTime()}`;
+        const traces = [{
+            x: data.map(d => d.date),
+            y: yValues,
+            type: 'scatter',
+            mode: 'lines',
+            name: chartTitle
+        }];
 
-        imgElement.onload = () => {
-            console.log(`${indicatorId} 圖表載入成功。`);
-            imgElement.alt = `指標 ${indicatorId} 的圖表`;
+        const layout = {
+            title: chartTitle,
+            xaxis: { title: '日期' },
+            yaxis: { title: yAxisTitleMapping[indicatorId] || '數值' },
+            margin: { l: 60, r: 20, t: 40, b: 40 },
+            template: 'plotly_white',
+            showlegend: false
         };
+        Plotly.newPlot(container, traces, layout, { responsive: true });
+    }
 
-        imgElement.onerror = () => {
-            console.error(`${indicatorId} 圖表載入失敗。`);
-            imgElement.alt = "圖表載入失敗，請檢查後端服務或日期範圍。";
+    function plotStressIndexChart(container, data, indicatorId) {
+        const chartTitle = container.parentElement.querySelector('h2').textContent;
+        const traces = [{
+            x: data.map(d => d.date),
+            y: data.map(d => d.dealer_stress_index),
+            type: 'scatter',
+            mode: 'lines',
+            name: chartTitle
+        }];
+        const layout = {
+            title: chartTitle,
+            xaxis: { title: '日期' },
+            yaxis: { title: '指數 (0-100)', range: [0, 100] },
+            shapes: [
+                { type: 'rect', xref: 'paper', yref: 'y', x0: 0, y0: 60, x1: 1, y1: 80, fillcolor: 'rgba(255, 255, 0, 0.2)', layer: 'below', line: {width: 0}},
+                { type: 'rect', xref: 'paper', yref: 'y', x0: 0, y0: 80, x1: 1, y1: 100, fillcolor: 'rgba(255, 0, 0, 0.2)', layer: 'below', line: {width: 0}}
+            ],
+            annotations: [
+                { xref: 'paper', yref: 'y', x: 0.98, y: 70, text: '高壓力區', showarrow: false, font: { color: 'orange' } },
+                { xref: 'paper', yref: 'y', x: 0.98, y: 90, text: '極端壓力區', showarrow: false, font: { color: 'red' } }
+            ],
+            margin: { l: 60, r: 20, t: 40, b: 40 },
+            template: 'plotly_white',
+            showlegend: false
         };
+        Plotly.newPlot(container, traces, layout, { responsive: true });
+    }
 
-        // 開始非同步載入圖片
-        imgElement.src = finalUrl;
+    function plotSpreadChart(container, data, indicatorId) {
+        const chartTitle = container.parentElement.querySelector('h2').textContent;
+        const traces = [{
+            x: data.map(d => d.date),
+            y: data.map(d => d.spread_10y2y * 100), // 轉換為基點
+            type: 'scatter',
+            mode: 'lines',
+            name: '利差'
+        }];
+        const layout = {
+            title: chartTitle,
+            xaxis: { title: '日期' },
+            yaxis: { title: '基點 (BPS)' },
+            shapes: [{ type: 'line', xref: 'paper', yref: 'y', x0: 0, y0: 0, x1: 1, y1: 0, line: { color: 'grey', dash: 'dash' }}],
+            margin: { l: 60, r: 20, t: 40, b: 40 },
+            template: 'plotly_white',
+            showlegend: false
+        };
+        Plotly.newPlot(container, traces, layout, { responsive: true });
+    }
+
+    function plotMacdChart(container, data, indicatorId) {
+        const chartTitle = container.parentElement.querySelector('h2').textContent;
+        const dates = data.map(d => d.date);
+        const macdHist = data.map(d => d.macd_hist);
+        const plotData = [
+            { x: dates, y: data.map(d => d.macd_line), type: 'scatter', mode: 'lines', name: 'MACD 線', yaxis: 'y2' },
+            { x: dates, y: data.map(d => d.macd_signal_line), type: 'scatter', mode: 'lines', name: '訊號線', yaxis: 'y2' },
+            { x: dates, y: macdHist, type: 'bar', name: 'MACD 柱', yaxis: 'y2', marker: { color: macdHist.map(v => v >= 0 ? 'rgba(214, 48, 49, 0.7)' : 'rgba(0, 184, 148, 0.7)') } },
+            { x: dates, y: data.map(d => d.dealer_stress_index), type: 'scatter', mode: 'lines', name: '壓力指數', yaxis: 'y1' }
+        ];
+        const layout = {
+            title: chartTitle,
+            xaxis: { title: '日期' },
+            yaxis: { title: '壓力指數', side: 'left' },
+            yaxis2: { title: 'MACD', overlaying: 'y', side: 'right', showgrid: false },
+            legend: { x: 0, y: 1.15, orientation: 'h' },
+            margin: { l: 50, r: 50, t: 40, b: 50 },
+            template: 'plotly_white'
+        };
+        Plotly.newPlot(container, plotData, layout, { responsive: true });
+    }
+
+    function plotRankingBarChart(container, data, indicatorId) {
+        const chartTitle = container.parentElement.querySelector('h2').textContent;
+        const latestData = data[data.length - 1];
+        const positions = {
+            "淨部位": latestData.dealer_net_positions,
+            "長天期": latestData.dealer_long_term_positions,
+            "短天期": latestData.dealer_short_term_positions
+        };
+        const sortedPositions = Object.entries(positions).sort(([,a],[,b]) => a-b);
+        const plotData = [{
+            x: sortedPositions.map(([,v]) => v / 1000),
+            y: sortedPositions.map(([k,]) => k),
+            type: 'bar',
+            orientation: 'h',
+            text: sortedPositions.map(([,v]) => (v/1000).toFixed(2)),
+            textposition: 'inside'
+        }];
+        const layout = {
+            title: chartTitle,
+            xaxis: { title: '金額 (十億美元)' },
+            yaxis: { title: '部位類型' },
+            margin: { l: 80, r: 20, t: 40, b: 40 },
+            template: 'plotly_white'
+        };
+        Plotly.newPlot(container, plotData, layout, { responsive: true });
+    }
+
+    function plotChangeRankingBarChart(container, data, indicatorId) {
+        const chartTitle = container.parentElement.querySelector('h2').textContent;
+        if (data.length < 2) {
+            container.innerHTML = '<div class="placeholder">數據不足，無法計算變動</div>';
+            return;
+        }
+        const latest = data[data.length - 1];
+        const previous = data[data.length - 2];
+        const positions = {
+            "淨部位": (latest.dealer_net_positions - previous.dealer_net_positions),
+            "長天期": (latest.dealer_long_term_positions - previous.dealer_long_term_positions),
+            "短天期": (latest.dealer_short_term_positions - previous.dealer_short_term_positions)
+        };
+        const sortedPositions = Object.entries(positions).sort(([,a],[,b]) => a-b);
+        const values = sortedPositions.map(([,v]) => v / 1000);
+        const plotData = [{
+            x: values,
+            y: sortedPositions.map(([k,]) => k),
+            type: 'bar',
+            orientation: 'h',
+            text: values.map(v => v.toFixed(2)),
+            textposition: 'inside',
+            marker: { color: values.map(v => v >= 0 ? '#2ca02c' : '#d62728') }
+        }];
+        const layout = {
+            title: chartTitle,
+            xaxis: { title: '變動金額 (十億美元)' },
+            yaxis: { title: '部位類型' },
+            margin: { l: 80, r: 20, t: 40, b: 40 },
+            template: 'plotly_white'
+        };
+        Plotly.newPlot(container, plotData, layout, { responsive: true });
     }
 
     /**
-     * 設定預設日期範圍。
+     * 設定預設日期範圍
      */
     function setDefaultDates() {
         const today = new Date();
         const endDate = today.toISOString().split('T')[0];
-
-        // 預設開始日期為 2020-01-01
         const startDate = "2020-01-01";
-
         startDateInput.value = startDate;
         endDateInput.value = endDate;
         console.log(`已設定預設日期範圍: ${startDate} 至 ${endDate}`);
     }
 
     // --- 初始化與事件綁定 ---
-
-    // 1. 為更新按鈕綁定點擊事件
     if (updateBtn) {
         updateBtn.addEventListener('click', loadAllCharts);
     } else {
         console.error("找不到更新按鈕元素。");
     }
 
-    // 2. 設定預設日期並在頁面首次載入時獲取圖表
     setDefaultDates();
     loadAllCharts();
-
-    /**
-     * 初始化動態圖表，包括獲取初始數據和設定 SSE 連線。
-     */
-    async function initializeDynamicChart() {
-        const chartContainer = document.getElementById('dynamic-chart-stress-index-macd');
-        if (!chartContainer) {
-            console.error("找不到動態圖表的容器。");
-            return;
-        }
-
-        try {
-            // 1. 獲取初始圖表數據
-            console.log("正在獲取壓力指數圖表的初始數據...");
-            const response = await fetch('/api/bond_service/charts/stress-index');
-            if (!response.ok) {
-                throw new Error(`獲取初始數據失敗: ${response.statusText}`);
-            }
-            const data = await response.json();
-            console.log(`成功獲取 ${data.length} 筆初始數據。`);
-
-            if (data.length === 0) {
-                chartContainer.innerHTML = '<div class="placeholder">無可用數據來繪製圖表。</div>';
-                return;
-            }
-
-            // 處理數據以適應 Plotly
-            const dates = data.map(d => d.date);
-            const stressIndex = data.map(d => d.dealer_stress_index);
-            const macdLine = data.map(d => d.macd_line);
-            const macdSignalLine = data.map(d => d.macd_signal_line);
-            const macdHist = data.map(d => d.macd_hist);
-
-            // 2. 使用 Plotly.js 繪製初始圖表
-            const plotData = [
-                {
-                    x: dates,
-                    y: stressIndex,
-                    type: 'scatter',
-                    mode: 'lines',
-                    name: '壓力指數',
-                    yaxis: 'y1'
-                },
-                {
-                    x: dates,
-                    y: macdLine,
-                    type: 'scatter',
-                    mode: 'lines',
-                    name: 'MACD 線',
-                    yaxis: 'y2'
-                },
-                {
-                    x: dates,
-                    y: macdSignalLine,
-                    type: 'scatter',
-                    mode: 'lines',
-                    name: '訊號線',
-                    yaxis: 'y2'
-                },
-                {
-                    x: dates,
-                    y: macdHist,
-                    type: 'bar',
-                    name: 'MACD 柱',
-                    yaxis: 'y2',
-                    marker: {
-                        color: macdHist.map(v => v >= 0 ? 'rgba(255, 0, 0, 0.6)' : 'rgba(0, 128, 0, 0.6)')
-                    }
-                }
-            ];
-
-            const layout = {
-                title: '壓力指數與 MACD (即時更新)',
-                xaxis: { title: '日期' },
-                yaxis: { title: '壓力指數', side: 'left' },
-                yaxis2: {
-                    title: 'MACD',
-                    overlaying: 'y',
-                    side: 'right',
-                    showgrid: false
-                },
-                legend: { x: 0, y: 1.15, orientation: 'h' },
-                margin: { l: 50, r: 50, t: 80, b: 50 }
-            };
-
-            Plotly.newPlot(chartContainer, plotData, layout, {responsive: true});
-            console.log("動態圖表已成功初始化。");
-
-            // 3. 設定 Server-Sent Events (SSE) 以接收即時更新
-            connectToSSE();
-
-        } catch (error) {
-            console.error("初始化動態圖表時發生錯誤:", error);
-            chartContainer.innerHTML = `<div class="placeholder">圖表載入失敗: ${error.message}</div>`;
-        }
-    }
-
-    /**
-     * 連接到 SSE 端點並設定事件監聽器。
-     */
-    function connectToSSE() {
-        console.log("正在連接到 SSE 端點以接收即時更新...");
-        const eventSource = new EventSource('/api/bond_service/charts/stream-updates');
-
-        eventSource.onmessage = function(event) {
-            const newData = JSON.parse(event.data);
-            console.log("收到 SSE 更新:", newData);
-
-            // 使用 Plotly.extendTraces 來新增數據點
-            Plotly.extendTraces('dynamic-chart-stress-index-macd', {
-                x: [[newData.date], [newData.date], [newData.date], [newData.date]],
-                y: [
-                    [newData.dealer_stress_index],
-                    [newData.macd_line],
-                    [newData.macd_signal_line],
-                    [newData.macd_hist]
-                ]
-            }, [0, 1, 2, 3]); // 對應到 plotData 中的四個軌跡
-        };
-
-        eventSource.onerror = function(error) {
-            console.error("SSE 連線發生錯誤，將在 10 秒後嘗試重新連接:", error);
-            eventSource.close();
-            // 關鍵修正：使用 setTimeout 來安排重連，而不是直接遞迴呼叫，以避免堆疊溢位。
-            setTimeout(connectToSSE, 10000);
-        };
-    }
-
-    // 3. 初始化動態圖表
-    initializeDynamicChart();
 });
