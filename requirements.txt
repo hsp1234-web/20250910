@@ -7,7 +7,9 @@ python-multipart
 # Services Dependencies
 ollama
 pandas==2.2.2
+openpyxl
 fredapi==0.5.2
+yfinance
 
 # System & E2E Test Dependencies
 psutil
