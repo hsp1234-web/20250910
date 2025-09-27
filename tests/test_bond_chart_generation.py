@@ -2,20 +2,28 @@
 
 import pytest
 import requests
+import os
+
+# 確保我們有 API 金鑰，否則跳過測試
+FRED_API_KEY = os.getenv("FRED_API_KEY")
+pytestmark = pytest.mark.skipif(not FRED_API_KEY, reason="需要設定 FRED_API_KEY 環境變數以執行整合測試")
 
 # 從既有的測試檔案中匯入 fixture
 # 雖然最好的做法是將 fixture 移至 conftest.py，但為了快速完成任務，暫時直接匯入
-from test_bond_service_startup import bond_service
+try:
+    from .test_bond_service_startup import bond_service
+except ImportError:
+    from test_bond_service_startup import bond_service
 
-@pytest.mark.skip(reason="此測試與 bond_data_service 微服務相關，在目前的 CI/CD 環境中無法啟動該服務的虛擬環境。暫時跳過以專注於核心功能測試。")
+
 @pytest.mark.timeout(180) # 給予更長的超時，因為這包含了資料抓取和圖表生成
-@pytest.mark.parametrize("indicator", ["gdp", "cpi"])
+@pytest.mark.parametrize("indicator", ["sofr"])
 def test_get_chart_image_endpoint(bond_service, indicator):
     """
     測試 /chart/{indicator_id} 端點是否能成功生成並回傳一張圖片。
-    這個測試會對多個指標 ("gdp", "cpi") 進行參數化測試。
+    這個測試會對 'sofr' 指標進行測試，以驗證 OpenBB 的整合。
     """
-    print(f"\n--- 開始測試指標: {indicator.upper()} ---")
+    print(f"\n--- 開始測試指標: {indicator.upper()} (使用 OpenBB) ---")
 
     # --- 步驟 1: 觸發資料抓取，確保服務中有資料 ---
     fetch_url = f"{bond_service}/fetch/{indicator}"
@@ -30,7 +38,8 @@ def test_get_chart_image_endpoint(bond_service, indicator):
         pytest.fail(f"觸發資料抓取時發生網路錯誤: {e}")
 
     # --- 步驟 2: 請求圖表圖片 ---
-    chart_url = f"{bond_service}/chart/{indicator}"
+    # 增加日期範圍參數以測試我們之前的修復
+    chart_url = f"{bond_service}/chart/{indicator}?start_date=2023-01-01&end_date=2023-12-31"
     print(f"[{indicator.upper()}] [步驟 2/3] 正在向 {chart_url} 請求圖表圖片...")
 
     try:

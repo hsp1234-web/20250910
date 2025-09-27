@@ -6,6 +6,7 @@ from fastapi.responses import Response, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import database
+from openbb import obb
 from data_manager import DataManager
 import stress_index_calculator
 import charting
@@ -37,6 +38,12 @@ async def lifespan(app: FastAPI):
         logger.warning("未偵測到 FRED_API_KEY 環境變數，將使用預設的假金鑰。資料抓取功能將無法運作。")
     else:
         logger.info("成功讀取 FRED_API_KEY。")
+        # 將讀取到的金鑰設定給 OpenBB SDK
+        try:
+            obb.user.credentials.fred_api_key = api_key
+            logger.info("已成功將 FRED API 金鑰設定至 OpenBB SDK。")
+        except Exception as e:
+            logger.error(f"將 FRED API 金鑰設定至 OpenBB SDK 時發生錯誤: {e}", exc_info=True)
 
     data_manager = DataManager(api_key=api_key)
     yield
