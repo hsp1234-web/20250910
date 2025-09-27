@@ -132,7 +132,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             const plotFunction = getPlotFunction(indicatorId);
-            plotFunction(container, data, indicatorId);
+            await plotFunction(container, data, indicatorId);
 
         } catch (error) {
             console.error(`載入圖表 ${indicatorId} 時發生錯誤:`, error);
@@ -188,7 +188,7 @@ document.addEventListener('DOMContentLoaded', () => {
             yaxis: { title: yAxisTitleMapping[indicatorId] || '數值' },
             margin: { l: 60, r: 20, t: 40, b: 40 }, template: 'plotly_white', showlegend: false
         };
-        Plotly.newPlot(container, traces, layout, { responsive: true });
+        return Plotly.newPlot(container, traces, layout, { responsive: true });
     }
 
     function plotStressIndexChart(container, data, indicatorId) {
@@ -208,7 +208,7 @@ document.addEventListener('DOMContentLoaded', () => {
             ],
             margin: { l: 60, r: 20, t: 40, b: 40 }, template: 'plotly_white', showlegend: false
         };
-        Plotly.newPlot(container, traces, layout, { responsive: true });
+        return Plotly.newPlot(container, traces, layout, { responsive: true });
     }
 
     function plotSpreadChart(container, data, indicatorId) {
@@ -221,7 +221,7 @@ document.addEventListener('DOMContentLoaded', () => {
             shapes: [{ type: 'line', xref: 'paper', yref: 'y', x0: 0, y0: 0, x1: 1, y1: 0, line: { color: 'grey', dash: 'dash' }}],
             margin: { l: 60, r: 20, t: 40, b: 40 }, template: 'plotly_white', showlegend: false
         };
-        Plotly.newPlot(container, traces, layout, { responsive: true });
+        return Plotly.newPlot(container, traces, layout, { responsive: true });
     }
 
     function plotMacdChart(container, data, indicatorId) {
@@ -241,7 +241,7 @@ document.addEventListener('DOMContentLoaded', () => {
             yaxis2: { title: 'MACD', overlaying: 'y', side: 'right', showgrid: false },
             legend: { x: 0, y: 1.15, orientation: 'h' }, margin: { l: 50, r: 50, t: 40, b: 50 }, template: 'plotly_white'
         };
-        Plotly.newPlot(container, plotData, layout, { responsive: true });
+        return Plotly.newPlot(container, plotData, layout, { responsive: true });
     }
 
     function plotRankingBarChart(container, data, indicatorId) {
@@ -264,7 +264,7 @@ document.addEventListener('DOMContentLoaded', () => {
             yaxis: { title: '部位類型' },
             margin: { l: 80, r: 20, t: 40, b: 40 }, template: 'plotly_white'
         };
-        Plotly.newPlot(container, plotData, layout, { responsive: true });
+        return Plotly.newPlot(container, plotData, layout, { responsive: true });
     }
 
     function plotChangeRankingBarChart(container, data, indicatorId) {
@@ -293,7 +293,7 @@ document.addEventListener('DOMContentLoaded', () => {
             yaxis: { title: '部位類型' },
             margin: { l: 80, r: 20, t: 40, b: 40 }, template: 'plotly_white'
         };
-        Plotly.newPlot(container, plotData, layout, { responsive: true });
+        return Plotly.newPlot(container, plotData, layout, { responsive: true });
     }
 
     /**
@@ -305,19 +305,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
         console.log(`正在對齊 ${panels.length} 個面板...`);
 
-        // 使用 setTimeout 確保瀏覽器有足夠時間渲染圖表並計算出最終高度
-        setTimeout(() => {
-            // 找出這批面板中的最大高度
-            const maxHeight = Math.max(...panels.map(p => p.offsetHeight));
+        // 由於現在能確保圖表已渲染完畢，可以直接計算高度，無需延遲
+        // 找出這批面板中的最大高度
+        const maxHeight = Math.max(...panels.map(p => p.offsetHeight));
 
-            // 將這批面板的高度全部設置為最大值
-            if (maxHeight > 0) {
-                panels.forEach(p => {
-                    p.style.height = `${maxHeight}px`;
-                });
-                console.log(`面板已對齊至高度: ${maxHeight}px`);
-            }
-        }, 100); // 延遲 100ms 確保渲染完成
+        // 將這批面板的高度全部設置為最大值
+        if (maxHeight > 0) {
+            panels.forEach(p => {
+                p.style.height = `${maxHeight}px`;
+            });
+            console.log(`面板已對齊至高度: ${maxHeight}px`);
+        }
     }
 
     function setDefaultDates() {
