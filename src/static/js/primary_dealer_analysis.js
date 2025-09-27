@@ -53,9 +53,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
 
     /**
-     * 載入所有圖表的核心函式
+     * 載入所有圖表的核心函式，並在完成後執行對齊
      */
-    function loadAllCharts() {
+    async function loadAllCharts() {
         const startDate = startDateInput.value;
         const endDate = endDateInput.value;
 
@@ -65,13 +65,26 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         console.log(`開始載入所有圖表，日期範圍: ${startDate} 至 ${endDate}`);
 
-        indicators.forEach(indicatorId => {
+        // 建立一個 Promise 陣列，用於追蹤所有圖表的載入狀態
+        const chartPromises = indicators.map(indicatorId => {
             const container = document.getElementById(`chart-container-${indicatorId}`);
             if (container) {
                 container.innerHTML = '<div class="placeholder">圖表載入中...</div>'; // 顯示載入提示
-                fetchAndPlotChart(indicatorId, startDate, endDate);
+                // fetchAndPlotChart 是一個異步函式，會返回一個 Promise
+                return fetchAndPlotChart(indicatorId, startDate, endDate);
             }
+            return Promise.resolve(); // 如果容器不存在，返回一個已解決的 Promise
         });
+
+        try {
+            // 等待所有圖表都載入完成
+            await Promise.all(chartPromises);
+            console.log("所有圖表均已載入完成。");
+            // 所有圖表載入後，執行對齊函式
+            alignChartPanels();
+        } catch (error) {
+            console.error("載入圖表過程中發生了一個或多個錯誤:", error);
+        }
     }
 
     /**
@@ -261,6 +274,44 @@ document.addEventListener('DOMContentLoaded', () => {
         Plotly.newPlot(container, plotData, layout, { responsive: true });
     }
 
+    /**
+     * 對齊所有圖表卡片，確保同一行的卡片等高。
+     * 這是解決 Plotly.js 動態內容導致佈局錯位的最終方案。
+     */
+    function alignChartPanels() {
+        console.log("正在執行圖表對齊程序...");
+        const panels = Array.from(document.querySelectorAll('.dashboard-grid .panel[data-indicator-id]'));
+
+        // 步驟 1: 重設所有面板的高度，以便在重新計算前獲得其自然高度
+        panels.forEach(panel => {
+            panel.style.height = 'auto';
+        });
+
+        // 使用 setTimeout 確保瀏覽器有時間重新渲染並計算 'auto' 高度
+        setTimeout(() => {
+            // 步驟 2: 按垂直位置 (offsetTop) 將面板分組到不同的列
+            const rows = new Map();
+            panels.forEach(panel => {
+                const offsetTop = panel.offsetTop;
+                if (!rows.has(offsetTop)) {
+                    rows.set(offsetTop, []);
+                }
+                rows.get(offsetTop).push(panel);
+            });
+
+            // 步驟 3: 遍歷每一列，找出最大高度，並將該列所有面板設為此高度
+            rows.forEach(rowPanels => {
+                if (rowPanels.length > 0) {
+                    const maxHeight = Math.max(...rowPanels.map(p => p.offsetHeight));
+                    rowPanels.forEach(p => {
+                        p.style.height = `${maxHeight}px`;
+                    });
+                }
+            });
+            console.log(`圖表對齊完成，共處理了 ${rows.size} 列。`);
+        }, 100); // 給予 100 毫秒的延遲，以確保 DOM 更新
+    }
+
     function setDefaultDates() {
         const today = new Date();
         const endDate = today.toISOString().split('T')[0];
@@ -276,6 +327,14 @@ document.addEventListener('DOMContentLoaded', () => {
     } else {
         console.error("找不到更新按鈕元素。");
     }
+
+    // 新增：處理視窗大小變更事件，以重新對齊圖表
+    let resizeTimer;
+    window.addEventListener('resize', () => {
+        // 使用計時器進行 debounce，避免在拖拉過程中頻繁觸發
+        clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(alignChartPanels, 200); // 延遲 200 毫秒後執行
+    });
 
     setDefaultDates();
     // 啟動應用程式的主流程：等待服務就緒，然後載入圖表
