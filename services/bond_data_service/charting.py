@@ -253,3 +253,98 @@ def plot_trend(df: pd.DataFrame, days: int = 60) -> Optional[go.Figure]:
 
     fig.update_layout(title=f"{get_chart_title('trend')} (Last {days} Days)", xaxis_title="Date", yaxis_title="Index (0-100)", template="plotly_white", yaxis_range=[0, 100])
     return fig
+
+
+def plot_dealer_net_position_ranking(df: pd.DataFrame) -> Optional[go.Figure]:
+    """
+    繪製一個水平長條圖，顯示各類部位的最新淨值排名。
+    """
+    positions = {
+        "淨部位 (Net)": "dealer_net_positions",
+        "長期部位 (Long-Term)": "dealer_long_term_positions",
+        "短期部位 (Short-Term)": "dealer_short_term_positions"
+    }
+
+    latest_values = {}
+    for name, col in positions.items():
+        if col in df and not df[col].dropna().empty:
+            latest_values[name] = df[col].dropna().iloc[-1] / 1000  # 轉換為 Billions
+        else:
+            latest_values[name] = 0
+
+    if not any(p != 0 for p in latest_values.values()):
+        return None
+
+    data_series = pd.Series(latest_values).sort_values()
+
+    fig = go.Figure(go.Bar(
+        x=data_series.values,
+        y=data_series.index,
+        orientation='h',
+        marker=dict(color='skyblue'),
+        text=[f'{v:.2f}' for v in data_series.values],
+        textposition='inside'
+    ))
+
+    fig.update_layout(
+        title_text="各類公債部位最新淨值 (單位: 十億美元)",
+        xaxis_title="金額 (Billions USD)",
+        yaxis_title="部位類型",
+        template="plotly_white",
+        margin=dict(l=150) # 增加左邊距以顯示長標籤
+    )
+    return fig
+
+def plot_dealer_position_change_ranking(df: pd.DataFrame) -> Optional[go.Figure]:
+    """
+    繪製一個水平長條圖，顯示各類部位最近一週的變動排名。
+    """
+    positions = {
+        "淨部位 (Net)": "dealer_net_positions",
+        "長期部位 (Long-Term)": "dealer_long_term_positions",
+        "短期部位 (Short-Term)": "dealer_short_term_positions"
+    }
+
+    changes = {}
+    # 使用最近 7 天的數據來計算變動
+    for name, col in positions.items():
+        series = df[col].dropna()
+        if len(series) >= 2:
+            latest_value = series.iloc[-1]
+            # 找到一週前的數據點
+            one_week_ago = series.index[-1] - pd.Timedelta(days=7)
+            # 使用 asof 找到最接近但不超過該時間點的索引
+            previous_value = series.asof(one_week_ago)
+
+            if pd.notna(previous_value):
+                change = (latest_value - previous_value) / 1000 # 轉換為 Billions
+                changes[name] = change
+            else:
+                changes[name] = 0 # 如果找不到一週前的數據
+        else:
+            changes[name] = 0
+
+    if not any(c != 0 for c in changes.values()):
+        return None
+
+    data_series = pd.Series(changes).sort_values()
+
+    colors = ['#2ca02c' if v >= 0 else '#d62728' for v in data_series.values]
+
+    fig = go.Figure(go.Bar(
+        x=data_series.values,
+        y=data_series.index,
+        orientation='h',
+        marker_color=colors,
+        text=[f'{v:+.2f}' for v in data_series.values],
+        textposition='inside'
+    ))
+
+    fig.update_layout(
+        title_text="各類公債部位週變動量 (單位: 十億美元)",
+        xaxis_title="變動金額 (Billions USD)",
+        yaxis_title="部位類型",
+        template="plotly_white",
+        margin=dict(l=150) # 增加左邊距
+    )
+    return fig
