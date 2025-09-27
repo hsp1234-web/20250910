@@ -260,9 +260,9 @@ def plot_dealer_net_position_ranking(df: pd.DataFrame) -> Optional[go.Figure]:
     繪製一個水平長條圖，顯示各類部位的最新淨值排名。
     """
     positions = {
-        "淨部位 (Net)": "dealer_net_positions",
-        "長期部位 (Long-Term)": "dealer_long_term_positions",
-        "短期部位 (Short-Term)": "dealer_short_term_positions"
+        "Net": "dealer_net_positions",
+        "Long-Term": "dealer_long_term_positions",
+        "Short-Term": "dealer_short_term_positions"
     }
 
     latest_values = {}
@@ -287,9 +287,9 @@ def plot_dealer_net_position_ranking(df: pd.DataFrame) -> Optional[go.Figure]:
     ))
 
     fig.update_layout(
-        title_text="各類公債部位最新淨值 (單位: 十億美元)",
-        xaxis_title="金額 (Billions USD)",
-        yaxis_title="部位類型",
+        title_text="Latest Net Value of Treasury Positions (in Billions USD)",
+        xaxis_title="Amount (Billions USD)",
+        yaxis_title="Position Type",
         template="plotly_white",
         margin=dict(l=150) # 增加左邊距以顯示長標籤
     )
@@ -300,28 +300,24 @@ def plot_dealer_position_change_ranking(df: pd.DataFrame) -> Optional[go.Figure]
     繪製一個水平長條圖，顯示各類部位最近一週的變動排名。
     """
     positions = {
-        "淨部位 (Net)": "dealer_net_positions",
-        "長期部位 (Long-Term)": "dealer_long_term_positions",
-        "短期部位 (Short-Term)": "dealer_short_term_positions"
+        "Net": "dealer_net_positions",
+        "Long-Term": "dealer_long_term_positions",
+        "Short-Term": "dealer_short_term_positions"
     }
 
     changes = {}
-    # 使用最近 7 天的數據來計算變動
+    # 修正：改為計算最新的兩個數據點之間的變動，以增加穩定性
     for name, col in positions.items():
         series = df[col].dropna()
         if len(series) >= 2:
+            # 取用最新的兩個數據點
             latest_value = series.iloc[-1]
-            # 找到一週前的數據點
-            one_week_ago = series.index[-1] - pd.Timedelta(days=7)
-            # 使用 asof 找到最接近但不超過該時間點的索引
-            previous_value = series.asof(one_week_ago)
+            previous_value = series.iloc[-2]
 
-            if pd.notna(previous_value):
-                change = (latest_value - previous_value) / 1000 # 轉換為 Billions
-                changes[name] = change
-            else:
-                changes[name] = 0 # 如果找不到一週前的數據
+            change = (latest_value - previous_value) / 1000 # 轉換為 Billions
+            changes[name] = change
         else:
+            # 如果數據點少於兩個，則無法計算變動
             changes[name] = 0
 
     if not any(c != 0 for c in changes.values()):
@@ -341,9 +337,9 @@ def plot_dealer_position_change_ranking(df: pd.DataFrame) -> Optional[go.Figure]
     ))
 
     fig.update_layout(
-        title_text="各類公債部位週變動量 (單位: 十億美元)",
-        xaxis_title="變動金額 (Billions USD)",
-        yaxis_title="部位類型",
+        title_text="Weekly Change in Treasury Positions (in Billions USD)",
+        xaxis_title="Change in Amount (Billions USD)",
+        yaxis_title="Position Type",
         template="plotly_white",
         margin=dict(l=150) # 增加左邊距
     )

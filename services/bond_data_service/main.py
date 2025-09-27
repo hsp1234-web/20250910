@@ -228,6 +228,9 @@ async def get_stress_index_data(
         df_serializable = chart_df.reset_index().replace({pd.NaT: None, np.nan: None})
         df_serializable = df_serializable.rename(columns={'index': 'date'})
 
+        # 修正：將日期物件轉換為 ISO 格式的字串以進行 JSON 序列化
+        df_serializable['date'] = df_serializable['date'].dt.strftime('%Y-%m-%d')
+
         # 轉換為 JSON 格式
         json_payload = df_serializable.to_dict(orient='records')
 

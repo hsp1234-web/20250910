@@ -1,10 +1,13 @@
 # -*- coding: utf-8 -*-
 # ╔══════════════════════════════════════════════════════════════════╗
 # ║                                                                      ║
-# ║   ✨🐺 善狼一鍵啟動器 (v28.1) 🐺                                 ✨🐺 ║
+# ║   ✨🐺 善狼一鍵啟動器 (v32) 🐺                                   ✨🐺 ║
 # ║                                                                      ║
 # ╠══════════════════════════════════════════════════════════════════╣
 # ║                                                                      ║
+# ║ - V32 更新日誌 (2025-09-27):                                         ║
+# ║   - **新增功能**: 自動偵測並顯示 `localtunnel` 的通道密碼，無需     ║
+# ║     使用者手動查詢。                                               ║
 # ║ - V28.1 更新日誌 (2025-09-16):                                       ║
 # ║   - **增強日誌**: 為金鑰自動驗證流程添加更詳細的日誌記錄，以便追蹤   ║
 # ║     執行狀態並診斷潛在問題。                                       ║
@@ -15,7 +18,7 @@
 # ║                                                                      ║
 # ╚══════════════════════════════════════════════════════════════════╝
 
-#@title ✨🐺 善狼一鍵啟動器 (v28.1) - 終極簡化版 🐺 { vertical-output: true, display-mode: "form" }
+#@title ✨🐺 善狼一鍵啟動器 (v32) - 終極簡化版 🐺 { vertical-output: true, display-mode: "form" }
 #@markdown ---
 #@markdown ### **核心設定**
 #@markdown > **請確認以下兩個核心設定。**
@@ -138,7 +141,7 @@ class DisplayManager:
         self._thread = threading.Thread(target=self._run, daemon=True)
 
     def _build_output_buffer(self) -> list[str]:
-        output_buffer = ["✨🐺 善狼一鍵啟動器 (v28.1) 🐺", ""]
+        output_buffer = ["✨🐺 善狼一鍵啟動器 (v32) 🐺", ""]
         logs_to_display = self._log_manager.get_display_logs()
         for log in logs_to_display:
             ts = log['timestamp'].strftime('%H:%M:%S')
@@ -553,7 +556,22 @@ class TunnelManager:
             if self._stop_event.is_set(): break
             self._log("DEBUG", line.strip(), "Localtunnel")
             if match := url_pattern.search(line):
-                self._update_url_status("Localtunnel", "ready", url=match.group(1), priority=3); return
+                tunnel_url = match.group(1)
+                self._log("INFO", f"✅ Localtunnel URL '{tunnel_url}' 已獲取，正在查詢通道密碼...", "Localtunnel")
+                password = "查詢中..."
+                try:
+                    # 使用 curl 查詢密碼 (公開 IP)
+                    result = subprocess.run(["curl", "https://loca.lt/mytunnelpassword"], capture_output=True, text=True, timeout=10, check=True)
+                    password = result.stdout.strip()
+                    self._log("SUCCESS", f"✅ 已成功獲取 Localtunnel 密碼。", "Localtunnel")
+                except (subprocess.TimeoutExpired, subprocess.CalledProcessError, FileNotFoundError) as e:
+                    self._log("WARN", f"查詢 Localtunnel 密碼失敗: {e}", "Localtunnel")
+                    password = "查詢失敗"
+                except Exception as e:
+                    self._log("ERROR", f"查詢 Localtunnel 密碼時發生未知錯誤: {e}", "Localtunnel")
+                    password = "未知錯誤"
+                self._update_url_status("Localtunnel", "ready", url=tunnel_url, password=password, priority=3)
+                return
         if not self._stop_event.is_set(): self._update_url_status("Localtunnel", "error", error="無法從日誌中解析 URL")
 
     def _run_colab_proxy(self):
