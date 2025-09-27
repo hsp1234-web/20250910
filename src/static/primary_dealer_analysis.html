@@ -7,12 +7,22 @@
     <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
     <link rel="stylesheet" href="/static/css/main.css">
     <style>
-        /* --- 此頁面專用樣式 --- */
+        /* --- 此頁面專用樣式 (Flexbox 解決方案) --- */
         .dashboard-grid {
-            display: grid;
-            /* 預設（大螢幕）：自動適應欄位，最小寬度 500px */
-            grid-template-columns: repeat(auto-fit, minmax(500px, 1fr));
-            gap: 20px; /* 網格項目間距 */
+            /* 改用 Flexbox 佈局 */
+            display: flex;
+            flex-wrap: wrap; /* 允許項目換行 */
+            gap: 20px; /* 項目間距 */
+        }
+        .panel {
+            /* 設定 Flexbox 子項目的行為 */
+            /* flex: [擴展] [收縮] [基礎寬度]; */
+            flex: 1 1 500px;
+            box-sizing: border-box;
+
+            /* 讓 panel 內部也成為 Flex 容器，以便圖表可以擴展 */
+            display: flex;
+            flex-direction: column;
         }
         .chart-container {
             width: 100%;
@@ -21,6 +31,8 @@
             display: flex;
             align-items: center;
             justify-content: center;
+            /* 新增：讓圖表容器擴展以填滿 panel 中的剩餘空間 */
+            flex-grow: 1;
         }
         .chart-container img {
             width: 100%;
@@ -63,12 +75,9 @@
             font-weight: bold;
             color: #007bff;
         }
-        /* --- 手機版響應式媒體查詢 --- */
+        /* --- 手機版響應式媒體查詢 (Flexbox 已自動處理，此區塊可保留或移除) --- */
         @media (max-width: 600px) {
-            .dashboard-grid {
-                /* 在較小螢幕上切換為單欄佈局 */
-                grid-template-columns: 1fr;
-            }
+            /* Flexbox 的 flex-wrap 會自動處理換行，因此不再需要覆寫 grid-template-columns */
         }
     </style>
 </head>
