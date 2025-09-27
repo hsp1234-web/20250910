@@ -1,44 +1,96 @@
 # services/bond_data_service/data_fetchers/fred_hys_fetcher.py
 
 import pandas as pd
-from fredapi import Fred
+import yfinance as yf
 import logging
+import sqlite3
+from pathlib import Path
 
 # 確保日誌記錄器名稱與模組路徑一致
 logger = logging.getLogger(__name__)
 
-def fetch_hys_data(api_key: str) -> pd.Series:
+# 定義資料庫檔案的路徑 (相對於此檔案的位置)
+# __file__ -> .../services/bond_data_service/data_fetchers/fred_hys_fetcher.py
+# .parent -> .../data_fetchers
+# .parent.parent -> .../bond_data_service
+# .parent.parent.parent -> .../services
+# .parent.parent.parent.parent -> /app (專案根目錄)
+DB_FILE = Path(__file__).resolve().parent.parent.parent.parent / 'financial_data.sqlite'
+
+def save_series_to_db(series: pd.Series, ticker: str):
     """
-    從 FRED 抓取美國高收益債利差 (BofA US High Yield Index Option-Adjusted Spread)。
-    序列 ID: BAMLH0A0HYM2
+    將時間序列數據儲存到 SQLite 資料庫。
+
+    使用 'INSERT OR REPLACE' 語句，如果數據已存在 (基於日期和 ticker)，則會更新它。
 
     Args:
-        api_key (str): 用於 FRED API 驗證的金鑰。
+        series (pd.Series): 要儲存的時間序列數據 (索引應為 DatetimeIndex)。
+        ticker (str): 該數據的標的代碼。
+    """
+    if series.empty:
+        logger.info(f"標的 '{ticker}' 的數據序列為空，跳過資料庫儲存。")
+        return
+
+    if not DB_FILE.exists():
+        logger.error(f"資料庫檔案不存在於: {DB_FILE}。請先執行 create_database.py。")
+        return
+
+    conn = None
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
+
+        # 準備要插入的數據，格式為 (日期字串, 標的代碼, 價格)
+        data_to_insert = [
+            (idx.strftime('%Y-%m-%d'), ticker, val)
+            for idx, val in series.items()
+        ]
+
+        # 使用 INSERT OR REPLACE 處理已存在的數據，避免重複插入錯誤
+        sql = "INSERT OR REPLACE INTO time_series_data (date, ticker, price) VALUES (?, ?, ?)"
+        cursor.executemany(sql, data_to_insert)
+        conn.commit()
+        logger.info(f"成功將 {len(data_to_insert)} 筆 '{ticker}' 的數據儲存/更新至資料庫。")
+
+    except sqlite3.Error as e:
+        logger.error(f"儲存 '{ticker}' 數據時發生資料庫錯誤: {e}", exc_info=True)
+    finally:
+        if conn:
+            conn.close()
+
+def fetch_hys_data() -> pd.Series:
+    """
+    (POC 替代方案) 從 Yahoo Finance 抓取高收益債券 ETF (HYG) 的歷史收盤價，
+    作為高收益債市場情緒的替代指標，並將結果存入資料庫。
 
     Returns:
-        pd.Series: 包含高收益債利差數據的時間序列，若抓取失敗則返回帶有正確名稱的空 Series。
+        pd.Series: 包含 HYG 收盤價的時間序列，若抓取失敗則返回帶有正確名稱的空 Series。
+                   Series 的名稱將被設為 'us_high_yield_spread' 以便與舊系統兼容。
     """
-    # 檢查 API 金鑰是否為預設的無效金鑰或空值
-    if not api_key or "YOUR_DEFAULT_API_KEY" in api_key:
-        logger.warning("未提供有效的 FRED API 金鑰，將跳過高收益債利差數據的抓取。")
-        return pd.Series(dtype='float64', name='us_high_yield_spread')
+    ticker = "HYG"
+    series_name = "us_high_yield_spread"
+    logger.info(f"開始從 Yahoo Finance 抓取 {ticker} 數據作為 '{series_name}' 的替代。")
 
     try:
-        fred = Fred(api_key=api_key)
-        hys_series = fred.get_series('BAMLH0A0HYM2')
-        hys_series.name = 'us_high_yield_spread'
+        hyg_ticker = yf.Ticker(ticker)
+        hist = hyg_ticker.history(period="max")
 
-        # 進行數據清理
+        if hist.empty or 'Close' not in hist.columns:
+            logger.warning(f"從 Yahoo Finance 抓取 '{ticker}' 數據時，返回的 DataFrame 為空或缺少 'Close' 欄。")
+            return pd.Series(dtype='float64', name=series_name)
+
+        hys_series = hist['Close']
+        hys_series.name = series_name
         hys_series = hys_series.dropna()
-        hys_series.index = pd.to_datetime(hys_series.index)
+        hys_series.index = pd.to_datetime(hys_series.index).tz_localize(None) # 確保移除時區
 
-        logger.info(f"成功從 FRED 抓取 {len(hys_series)} 筆高收益債利差數據。")
+        logger.info(f"成功從 Yahoo Finance 抓取 {len(hys_series)} 筆 '{ticker}' 數據。")
+
+        # 抓取成功後，將數據儲存到資料庫
+        save_series_to_db(hys_series, ticker)
+
         return hys_series
-    except ValueError as e:
-        # fredapi 在金鑰無效時會引發 ValueError，我們在這裡特別捕捉它
-        logger.warning(f"從 FRED 抓取高收益債利差數據時發生錯誤，很可能是 API 金鑰無效或已過期: {e}")
-        return pd.Series(dtype='float64', name='us_high_yield_spread')
+
     except Exception as e:
-        # 處理其他可能的網路或 API 錯誤
-        logger.error(f"從 FRED 抓取高收益債利差數據時發生未預期的錯誤: {e}", exc_info=True)
-        return pd.Series(dtype='float64', name='us_high_yield_spread')
+        logger.error(f"從 Yahoo Finance 抓取 '{ticker}' 數據時發生未預期的錯誤: {e}", exc_info=True)
+        return pd.Series(dtype='float64', name=series_name)
