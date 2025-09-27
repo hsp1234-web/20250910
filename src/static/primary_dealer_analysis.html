@@ -14,6 +14,11 @@
             grid-template-columns: repeat(auto-fit, minmax(500px, 1fr));
             gap: 20px; /* 網格項目間距 */
         }
+        .panel {
+            /* 新增：啟用 Flexbox 並設定為垂直方向 */
+            display: flex;
+            flex-direction: column;
+        }
         .chart-container {
             width: 100%;
             background-color: #f9f9f9; /* 圖表區域的淺色背景 */
@@ -21,6 +26,8 @@
             display: flex;
             align-items: center;
             justify-content: center;
+            /* 新增：允許此容器擴展以填滿其父容器 (panel) 的剩餘空間 */
+            flex-grow: 1;
         }
         .chart-container img {
             width: 100%;
