@@ -173,3 +173,37 @@ ul li label {
     white-space: pre-wrap; /* Preserve line breaks */
     font-family: "Courier New", Courier, monospace;
 }
+
+/* --- 儀表板網格佈局 --- */
+.dashboard-grid {
+    display: grid;
+    /* 在大螢幕上，建立一個自動適應的網格，最小欄寬為 500px */
+    grid-template-columns: repeat(auto-fit, minmax(500px, 1fr));
+    gap: 20px; /* 網格項目之間的間距 */
+}
+
+/* --- 圖表容器樣式 --- */
+.chart-container {
+    width: 100%;
+    min-height: 350px; /* 設定最小高度，避免圖表載入前容器塌陷 */
+    background-color: #fdfdfd;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-top: 1px solid #eee;
+    margin-top: 15px;
+    padding-top: 15px;
+}
+
+.chart-container .placeholder {
+    color: #888;
+    font-size: 1rem;
+}
+
+/* --- 響應式媒體查詢 (針對小螢幕) --- */
+@media (max-width: 600px) {
+    .dashboard-grid {
+        /* 在小螢幕上，切換為單欄佈局 */
+        grid-template-columns: 1fr;
+    }
+}
