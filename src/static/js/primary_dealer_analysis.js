@@ -53,9 +53,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
 
     /**
-     * 載入所有圖表的核心函式
+     * 載入所有圖表的核心函式，採用分批循序載入策略。
      */
-    function loadAllCharts() {
+    async function loadAllCharts() {
         const startDate = startDateInput.value;
         const endDate = endDateInput.value;
 
@@ -63,15 +63,50 @@ document.addEventListener('DOMContentLoaded', () => {
             alert("請確保已選擇開始和結束日期。");
             return;
         }
-        console.log(`開始載入所有圖表，日期範圍: ${startDate} 至 ${endDate}`);
+        console.log(`啟動分批循序載入程序...`);
 
-        indicators.forEach(indicatorId => {
-            const container = document.getElementById(`chart-container-${indicatorId}`);
-            if (container) {
-                container.innerHTML = '<div class="placeholder">圖表載入中...</div>'; // 顯示載入提示
-                fetchAndPlotChart(indicatorId, startDate, endDate);
-            }
-        });
+        // 在開始前重設所有面板的高度
+        const allPanels = Array.from(document.querySelectorAll('.panel[data-indicator-id]'));
+        allPanels.forEach(p => p.style.height = 'auto');
+
+        // 步驟 1: 動態計算每列的圖表數量
+        const grid = document.querySelector('.dashboard-grid');
+        // 使用 CSS 中設定的最小寬度 500px 作為計算基準
+        const panelMinWidth = 500;
+        const columns = Math.max(1, Math.floor(grid.offsetWidth / panelMinWidth));
+        console.log(`偵測到每列可容納 ${columns} 個圖表。`);
+
+        // 步驟 2: 將指標陣列分批
+        const chunks = [];
+        for (let i = 0; i < indicators.length; i += columns) {
+            chunks.push(indicators.slice(i, i + columns));
+        }
+        console.log(`已將圖表分為 ${chunks.length} 批進行載入。`);
+
+        // 步驟 3: 循序處理每一批
+        for (const chunk of chunks) {
+            console.log(`正在載入批次: ${chunk.join(', ')}`);
+
+            const currentBatchPanels = chunk.map(id => document.querySelector(`.panel[data-indicator-id="${id}"]`));
+
+            const promises = chunk.map(indicatorId => {
+                const container = document.getElementById(`chart-container-${indicatorId}`);
+                if (container) {
+                    container.innerHTML = '<div class="placeholder">圖表載入中...</div>';
+                    return fetchAndPlotChart(indicatorId, startDate, endDate);
+                }
+                return Promise.resolve();
+            });
+
+            // 等待當前批次的圖表全部載入
+            await Promise.all(promises);
+            console.log(`批次 ${chunk.join(', ')} 載入完成。`);
+
+            // 步驟 4: 對剛剛載入完成的這一列進行對齊
+            alignChartPanels(currentBatchPanels);
+        }
+
+        console.log("所有圖表批次均已載入並對齊。");
     }
 
     /**
@@ -261,6 +296,30 @@ document.addEventListener('DOMContentLoaded', () => {
         Plotly.newPlot(container, plotData, layout, { responsive: true });
     }
 
+    /**
+     * 對齊指定的一批圖表卡片，確保它們等高。
+     * @param {HTMLElement[]} panels - 需要對齊的 DOM 元素陣列 (通常是一列的 panel)。
+     */
+    function alignChartPanels(panels) {
+        if (!panels || panels.length === 0) return;
+
+        console.log(`正在對齊 ${panels.length} 個面板...`);
+
+        // 使用 setTimeout 確保瀏覽器有足夠時間渲染圖表並計算出最終高度
+        setTimeout(() => {
+            // 找出這批面板中的最大高度
+            const maxHeight = Math.max(...panels.map(p => p.offsetHeight));
+
+            // 將這批面板的高度全部設置為最大值
+            if (maxHeight > 0) {
+                panels.forEach(p => {
+                    p.style.height = `${maxHeight}px`;
+                });
+                console.log(`面板已對齊至高度: ${maxHeight}px`);
+            }
+        }, 100); // 延遲 100ms 確保渲染完成
+    }
+
     function setDefaultDates() {
         const today = new Date();
         const endDate = today.toISOString().split('T')[0];
@@ -276,6 +335,14 @@ document.addEventListener('DOMContentLoaded', () => {
     } else {
         console.error("找不到更新按鈕元素。");
     }
+
+    // 新增：處理視窗大小變更事件，以重新觸發整個載入和對齊流程
+    let resizeTimer;
+    window.addEventListener('resize', () => {
+        clearTimeout(resizeTimer);
+        // 當視窗大小改變時，重新執行整個載入流程，以重新計算欄數和批次
+        resizeTimer = setTimeout(loadAllCharts, 200);
+    });
 
     setDefaultDates();
     // 啟動應用程式的主流程：等待服務就緒，然後載入圖表
