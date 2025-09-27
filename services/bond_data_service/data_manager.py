@@ -1,13 +1,14 @@
 # services/bond_data_service/data_manager.py
 
 import pandas as pd
+import logging
 import database
 # 匯入所有資料抓取器
 from data_fetchers import (
     fred_gdp_fetcher,
     fred_cpi_fetcher,
     fred_fedfunds_fetcher,
-    nyfed_positions_fetcher, # 仍然匯入模組本身
+    nyfed_positions_fetcher,
     yahoo_finance_fetcher,
     fred_sofr_fetcher,
     fred_dgs10_fetcher,
@@ -18,10 +19,13 @@ from data_fetchers import (
     fred_hys_fetcher
 )
 
+logger = logging.getLogger(__name__)
+
 class DataManager:
+    """負責管理所有宏觀經濟數據的抓取、儲存與讀取。"""
     def __init__(self, api_key: str):
         self.api_key = api_key
-        # 擴充 fetcher_map 以包含所有新的指標
+        # 將所有指標的抓取函式映射到其名稱
         self.fetcher_map = {
             "gdp": fred_gdp_fetcher.fetch_gdp_data,
             "cpi": fred_cpi_fetcher.fetch_cpi_data,
@@ -39,41 +43,35 @@ class DataManager:
             "us_high_yield_spread": fred_hys_fetcher.fetch_hys_data,
         }
 
-    def save_series_to_db(self, series: pd.Series, indicator_name: str):
-        """將 pandas Series 儲存到資料庫"""
+    def save_series_to_db(self, series: pd.Series, indicator_name: str) -> int:
+        """將 pandas Series 儲存到資料庫，並進行資料清理。"""
         if series is None or series.empty:
-            print(f"沒有可儲存的 '{indicator_name}' 數據。")
+            logger.info(f"指標 '{indicator_name}' 沒有需要儲存的新數據。")
             return 0
 
         # 強制將索引轉換為 datetime 物件，並移除無效日期，增加穩健性
         series.index = pd.to_datetime(series.index, errors='coerce')
+        series = series.dropna()
         series = series[series.index.notna()]
 
         if series.empty:
-            print(f"警告：在日期轉換後，'{indicator_name}' 沒有剩下任何有效數據。")
+            logger.warning(f"指標 '{indicator_name}' 在清理後沒有剩下任何有效數據。")
             return 0
 
         conn = database.get_db_connection()
         cursor = conn.cursor()
 
-        # 為了避免重複，我們先刪除該指標的所有舊數據
-        # 更好的方法是使用 INSERT OR REPLACE，這裡為了簡單先用 DELETE
-        print(f"正在清除 '{indicator_name}' 的舊數據...")
+        logger.info(f"正在為指標 '{indicator_name}' 清除舊數據...")
         cursor.execute("DELETE FROM macro_data WHERE indicator = ?", (indicator_name,))
 
-        print(f"正在將 {len(series)} 筆 '{indicator_name}' 新數據寫入資料庫...")
-        rows_to_insert = []
-
-        # 將 Series 轉換為 DataFrame 並迭代，這是更穩健的作法
+        logger.info(f"正在將 {len(series)} 筆 '{indicator_name}' 新數據寫入資料庫...")
         df_to_insert = series.reset_index()
-        df_to_insert.columns = ['date', 'value'] # 明確命名欄位
+        df_to_insert.columns = ['date', 'value']
 
-        for _, row in df_to_insert.iterrows():
-            date_obj = row['date']  # 這確保了我們處理的是 Timestamp 物件
-            value = row['value']
-            # 將 pandas 的 Timestamp 轉換為 'YYYY-MM-DD' 格式的字串
-            date_str = date_obj.strftime('%Y-%m-%d')
-            rows_to_insert.append((indicator_name, date_str, float(value)))
+        rows_to_insert = [
+            (indicator_name, row['date'].strftime('%Y-%m-%d'), float(row['value']))
+            for _, row in df_to_insert.iterrows()
+        ]
 
         cursor.executemany(
             "INSERT INTO macro_data (indicator, date, value) VALUES (?, ?, ?)",
@@ -82,34 +80,33 @@ class DataManager:
 
         conn.commit()
         conn.close()
-        print(f"✅ 成功儲存 {len(rows_to_insert)} 筆 '{indicator_name}' 數據。")
+        logger.info(f"✅ 成功儲存 {len(rows_to_insert)} 筆 '{indicator_name}' 數據。")
         return len(rows_to_insert)
 
-    def fetch_and_store_data(self, indicator_name: str):
+    def fetch_and_store_data(self, indicator_name: str) -> int:
         """根據指標名稱，觸發對應的抓取器並儲存數據。"""
         fetcher = self.fetcher_map.get(indicator_name.lower())
         if not fetcher:
-            # raise ValueError(f"找不到指標 '{indicator_name}' 的抓取器。")
-            # --- 修改：找不到抓取器時，不再拋出錯誤，而是記錄警告並返回 ---
-            print(f"警告：在 data_manager 中找不到指標 '{indicator_name}' 的抓取器。將跳過此指標的抓取。")
-            logger.warning(f"在 data_manager 中找不到指標 '{indicator_name}' 的抓取器。")
+            logger.warning(f"在 DataManager 中找不到指標 '{indicator_name}' 的抓取器，將跳過。")
             return 0
 
-        print(f"正在為指標 '{indicator_name}' 執行抓取...")
-        # 確保 fetcher 函式被正確呼叫
+        logger.info(f"正在為指標 '{indicator_name}' 執行資料抓取...")
         try:
-            series_data = fetcher(self.api_key)
+            # 某些抓取器（如 FRED 的）需要 API 金鑰
+            if "fred" in fetcher.__module__:
+                series_data = fetcher(self.api_key)
+            else:
+                series_data = fetcher()
         except Exception as e:
-            print(f"錯誤：執行指標 '{indicator_name}' 的抓取器時發生錯誤: {e}")
-            logger.error(f"執行指標 '{indicator_name}' 的抓取器時出錯: {e}", exc_info=True)
+            logger.error(f"執行指標 '{indicator_name}' 的抓取器時發生錯誤: {e}", exc_info=True)
             return 0
 
         if series_data is not None:
             return self.save_series_to_db(series_data, indicator_name)
         return 0
 
-    def get_data(self, indicator_name: str):
-        """從資料庫中獲取指定指標的數據。"""
+    def get_data(self, indicator_name: str) -> list[dict]:
+        """從資料庫中獲取指定指標的數據，以供圖表使用。"""
         conn = database.get_db_connection()
         cursor = conn.cursor()
         cursor.execute(
@@ -118,5 +115,4 @@ class DataManager:
         )
         rows = cursor.fetchall()
         conn.close()
-        # 將結果轉換為適合圖表庫的格式
         return [{"date": row["date"], "value": row["value"]} for row in rows]

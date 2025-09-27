@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global data_manager
-    logger.info("Bond Data Service is starting up...")
+    logger.info("債券資料服務啟動中...")
     database.initialize_database()
 
     default_api_key = "YOUR_DEFAULT_API_KEY"
@@ -40,13 +40,13 @@ async def lifespan(app: FastAPI):
 
     data_manager = DataManager(api_key=api_key)
     yield
-    logger.info("Bond Data Service is shutting down...")
+    logger.info("債券資料服務已關閉。")
 
 app = FastAPI(
     lifespan=lifespan,
     title="債券與一級交易商分析服務",
     description="一個提供債券相關宏觀經濟數據，並計算與呈現一級交易商壓力指數相關圖表的微服務。",
-    version="1.1.0",
+    version="1.2.0",
 )
 
 # --- CORS 設定 ---
@@ -60,23 +60,27 @@ app.add_middleware(
 
 # --- API 端點 ---
 
-@app.get("/ping")
+@app.get("/ping", summary="服務健康檢查")
 async def ping():
-    """健康檢查端點"""
-    return {"status": "ok", "message": "Bond Data Service is running."}
+    """
+    執行一個快速的健康檢查。
+    如果服務正常運行，會返回一個成功的訊息。
+    """
+    return {"status": "ok", "message": "債券資料服務運行中。"}
 
-@app.post("/fetch/{indicator}")
+@app.post("/fetch/{indicator}", summary="手動觸發資料抓取")
 async def fetch_data_endpoint(indicator: str):
     """手動觸發特定基礎指標的資料抓取與儲存"""
     try:
-        logger.info(f"收到 '{indicator}' 的手動資料抓取請求...")
+        logger.info(f"收到對 '{indicator}' 的手動資料抓取請求...")
         count = data_manager.fetch_and_store_data(indicator)
-        return {"indicator": indicator, "message": f"成功抓取並儲存了 {count} 筆數據。"}
+        return {"indicator": indicator, "message": f"成功為 '{indicator}' 抓取並儲存了 {count} 筆數據。"}
     except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        logger.error(f"找不到指標 '{indicator}' 的抓取器: {e}")
+        raise HTTPException(status_code=404, detail=f"找不到指標 '{indicator}' 的抓取器。")
     except Exception as e:
-        logger.error(f"處理抓取請求時發生內部錯誤: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"處理時發生內部錯誤: {e}")
+        logger.error(f"處理抓取請求 '{indicator}' 時發生內部錯誤: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"處理 '{indicator}' 時發生內部錯誤: {e}")
 
 @app.get("/debug/all_metrics")
 async def get_all_metrics_debug():
