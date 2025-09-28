@@ -70,12 +70,64 @@
                 grid-template-columns: 1fr;
             }
         }
+        /* --- 新增：互動圖表彈出視窗樣式 --- */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.7); /* 半透明黑色背景 */
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000; /* 確保在最上層 */
+        }
+        .modal-content {
+            background-color: #fff;
+            padding: 20px;
+            border-radius: 8px;
+            width: 90%;
+            max-width: 1200px; /* 限制最大寬度 */
+            height: 85%;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+        }
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid #eee;
+            padding-bottom: 10px;
+            margin-bottom: 10px;
+        }
+        .modal-header h2 {
+            margin: 0;
+            font-size: 1.5rem;
+        }
+        .modal-close-btn {
+            border: none;
+            background: transparent;
+            font-size: 2.5rem;
+            cursor: pointer;
+            line-height: 1;
+            padding: 0;
+        }
+        .modal-chart-container {
+            flex-grow: 1;
+            position: relative;
+        }
     </style>
 </head>
 <body>
     <!-- 導覽列 -->
     <nav class="navbar">
         <a href="/" class="navbar-brand">返回主頁</a>
+        <ul class="navbar-links">
+            <li><a href="/primary_dealer_analysis" class="active">分析儀表板</a></li>
+            <li><a href="/primary_dealer_key_management">金鑰管理</a></li>
+        </ul>
     </nav>
 
     <div class="content">
@@ -86,7 +138,7 @@
             <input type="date" id="start-date">
             <label for="end-date">結束日期:</label>
             <input type="date" id="end-date">
-            <button id="update-charts-btn">更新圖表</button>
+            <button id="update-charts-btn">開始分析</button>
         </div>
 
         <div class="dashboard-grid">
@@ -165,6 +217,20 @@
             </div>
         </div>
     </div>
+
+    <!-- 新增：互動圖表彈出視窗的 HTML 結構 -->
+    <div id="interactive-chart-modal" class="modal-overlay" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="modal-chart-title">互動圖表</h2>
+                <button id="modal-close-btn" class="modal-close-btn">&times;</button>
+            </div>
+            <div id="modal-chart-container" class="modal-chart-container">
+                <!-- 互動圖表將會在此處渲染 -->
+            </div>
+        </div>
+    </div>
+
 
     <!-- 引用對應的 JavaScript 檔案 -->
     <script src="/static/js/primary_dealer_analysis.js"></script>
