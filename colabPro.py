@@ -448,6 +448,21 @@ class ServerManager:
             process_env = os.environ.copy()
             src_path_str = str((project_path / "src").resolve())
             process_env['PYTHONPATH'] = f"{src_path_str}{os.pathsep}{process_env.get('PYTHONPATH', '')}".strip(os.pathsep)
+
+            # 安全地注入 FRED API 金鑰
+            try:
+                from google.colab import userdata
+                fred_api_key = userdata.get('FRED_API_KEY')
+                if fred_api_key:
+                    process_env['FRED_API_KEY'] = fred_api_key
+                    self._log_manager.log("SUCCESS", "✅ 成功從 Colab Secrets 讀取並注入 FRED_API_KEY。")
+                else:
+                    self._log_manager.log("WARN", "🟡 在 Colab Secrets 中找到 FRED_API_KEY，但其值為空。")
+            except (ImportError, userdata.SecretNotFoundError):
+                self._log_manager.log("WARN", "🟡 未在 Colab Secrets 中找到 FRED_API_KEY，部分圖表可能無法顯示。")
+            except Exception as e:
+                self._log_manager.log("ERROR", f"讀取 FRED_API_KEY 時發生錯誤: {e}")
+
             self.server_process = subprocess.Popen(launch_command, cwd=str(project_path), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8', preexec_fn=os.setsid, env=process_env)
 
             # --- 階段 4: [已停用] V5.5 之後，大型依賴的安裝由使用者在需要時觸發 ---

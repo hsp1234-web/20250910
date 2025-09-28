@@ -53,7 +53,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
 
     /**
-     * [重構後] 載入所有圖表的核心函式，採用整合型 API 端點策略。
+     * [V4.0 重構] 載入所有圖表的核心函式，採用獨立 API 端點策略以提升健壯性。
+     * 每個圖表都會單獨請求數據，一個圖表的失敗不會影響其他圖表。
      */
     async function loadAllCharts() {
         const startDate = startDateInput.value;
@@ -63,64 +64,64 @@ document.addEventListener('DOMContentLoaded', () => {
             alert("請確保已選擇開始和結束日期。");
             return;
         }
-        console.log(`啟動整合載入程序...`);
+        console.log(`啟動獨立圖表載入程序 (Robust V4.0)...`);
 
-        // 步驟 1: 進入全域載入狀態
+        // 步驟 1: 將所有圖表容器設置為「載入中」狀態
         const allPanels = Array.from(document.querySelectorAll('.panel[data-indicator-id]'));
         allPanels.forEach(panel => {
-            panel.style.height = 'auto'; // 重設高度
+            panel.style.height = 'auto'; // 重設高度，以便後續對齊
             const container = panel.querySelector('.chart-container');
             if (container) {
                 container.innerHTML = '<div class="placeholder">圖表載入中...</div>';
             }
         });
 
-        // 步驟 2: 發起單一 API 請求獲取所有數據
-        const apiUrl = `/api/bond_service/dashboard_data?start_date=${startDate}&end_date=${endDate}`;
-        try {
-            const response = await fetch(apiUrl);
-            if (!response.ok) {
-                const errorData = await response.json().catch(() => ({'detail': `數據請求失敗: ${response.statusText}`}));
-                throw new Error(errorData.detail || `數據請求失敗: ${response.statusText}`);
-            }
-            const allData = await response.json();
+        // 步驟 2: 為每個圖表建立一個獨立的載入 promise
+        const chartLoadPromises = indicators.map(indicatorId => {
+            return (async () => {
+                // 最終修復：使用完整的代理路徑 /api/bond_service/data/{indicatorId}
+                const apiUrl = `/api/bond_service/data/${indicatorId}?start_date=${startDate}&end_date=${endDate}`;
+                try {
+                    const response = await fetch(apiUrl);
+                    if (!response.ok) {
+                        const errorData = await response.json().catch(() => ({ 'detail': `數據請求失敗: ${response.statusText}` }));
+                        throw new Error(errorData.detail || `數據請求失敗: ${response.statusText}`);
+                    }
+                    const chartData = await response.json();
+                    if (!chartData || chartData.length === 0) {
+                        throw new Error('後端未返回任何數據');
+                    }
 
-            if (!allData || allData.length === 0) {
-                throw new Error('後端未返回任何數據');
-            }
+                    // 數據獲取成功，呼叫繪圖函式
+                    await plotChartFromData(indicatorId, chartData, startDate, endDate);
 
-            console.log("成功獲取整合數據，開始繪製所有圖表。");
-
-            // 步驟 3: 遍歷所有指標，使用同一份數據進行繪製
-            const plotPromises = indicators.map(indicatorId =>
-                plotChartFromData(indicatorId, allData, startDate, endDate)
-            );
-
-            await Promise.all(plotPromises);
-            console.log("所有圖表繪製完成。");
-
-            // 步驟 4: 對齊所有圖表的高度
-            // 需要分列對齊
-            const grid = document.querySelector('.dashboard-grid');
-            const panelMinWidth = 500;
-            const columns = Math.max(1, Math.floor(grid.offsetWidth / panelMinWidth));
-            const chunks = [];
-             for (let i = 0; i < allPanels.length; i += columns) {
-                chunks.push(allPanels.slice(i, i + columns));
-            }
-            chunks.forEach(chunk => alignChartPanels(chunk));
-            console.log("所有圖表已對齊。");
-
-        } catch (error) {
-            console.error("載入儀表板數據時發生嚴重錯誤:", error);
-            // 若請求失敗，將所有圖表容器更新為錯誤訊息
-            allPanels.forEach(panel => {
-                const container = panel.querySelector('.chart-container');
-                if (container) {
-                    container.innerHTML = `<div class="placeholder" style="text-align: center; color: #d63031;">儀表板載入失敗<br><small>${error.message}</small></div>`;
+                } catch (error) {
+                    // 如果任何一個步驟失敗，就在該圖表的容器中顯示錯誤訊息
+                    console.error(`載入圖表 ${indicatorId} 時發生錯誤:`, error);
+                    const container = document.getElementById(`chart-container-${indicatorId}`);
+                    if (container) {
+                        container.innerHTML = `<div class="placeholder" style="text-align: center; color: #d63031;">圖表載入失敗<br><small>${error.message}</small></div>`;
+                    }
+                    // 讓 Promise.allSettled 知道這個 promise 失敗了
+                    return Promise.reject(error);
                 }
-            });
+            })();
+        });
+
+        // 步驟 3: 使用 Promise.allSettled 等待所有載入任務完成，無論成功或失敗
+        const results = await Promise.allSettled(chartLoadPromises);
+        console.log("所有圖表載入流程已完成。結果:", results);
+
+        // 步驟 4: 在所有圖表都嘗試渲染後，對齊它們的高度
+        const grid = document.querySelector('.dashboard-grid');
+        const panelMinWidth = 500;
+        const columns = Math.max(1, Math.floor(grid.offsetWidth / panelMinWidth));
+        const chunks = [];
+         for (let i = 0; i < allPanels.length; i += columns) {
+            chunks.push(allPanels.slice(i, i + columns));
         }
+        chunks.forEach(chunk => alignChartPanels(chunk));
+        console.log("所有圖表已對齊。");
     }
 
     /**
