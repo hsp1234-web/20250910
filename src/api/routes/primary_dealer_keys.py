@@ -45,7 +45,7 @@ def _get_key_service_url():
 @router.post("/fred", summary="儲存 FRED API 金鑰")
 async def save_fred_key(
     payload: KeyPayload,
-    key_service_url: str = Depends(_get_key_service_url) # 使用本地輔助函式作為依賴
+    key_service_url: str = Depends(_get_key_service_url)
 ):
     """
     將使用者提供的 FRED API 金鑰安全地儲存到 key_service 微服務中。
@@ -53,44 +53,58 @@ async def save_fred_key(
     if not payload.api_key:
         raise HTTPException(status_code=400, detail="API 金鑰不可為空。")
 
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=15.0) as client:
         try:
-            # 呼叫 key_service 來儲存金鑰
+            # 修正1: 呼叫 key_service 正確的端點 /api/keys
+            # 修正2: 傳送 key_service 預期的 JSON 結構 {"api_key": ..., "name": ...}
             response = await client.post(
-                f"{key_service_url}/keys/generic",
-                json={"key_name": "FRED_API_KEY", "key_value": payload.api_key}
+                f"{key_service_url}/api/keys",
+                json={"api_key": payload.api_key, "name": "FRED_API_KEY"}
             )
+
+            # 如果金鑰已存在 (409 Conflict)，我們視為一個可接受的「成功」場景
+            if response.status_code == 409:
+                return {"message": "金鑰已存在，無需更新。"}
+
             response.raise_for_status()
             return response.json()
+
         except httpx.RequestError as e:
             logger.error(f"無法連接到 key_service：{e}")
             raise HTTPException(status_code=503, detail="金鑰服務目前無法使用，請稍後再試。")
         except httpx.HTTPStatusError as e:
             logger.error(f"key_service 回應錯誤：{e.response.status_code} - {e.response.text}")
-            detail = e.response.json().get("detail", "儲存金鑰時發生未知錯誤。")
-            raise HTTPException(status_code=e.response.status_code, detail=detail)
+            detail_json = e.response.json()
+            detail_msg = detail_json.get("detail", "儲存金鑰時發生未知錯誤。")
+            raise HTTPException(status_code=e.response.status_code, detail=detail_msg)
 
 @router.get("/fred", summary="獲取 FRED API 金鑰的狀態")
 async def get_fred_key_status(
-    key_service_url: str = Depends(_get_key_service_url) # 使用本地輔助函式作為依賴
+    key_service_url: str = Depends(_get_key_service_url)
 ):
     """
     從 key_service 檢查 FRED API 金鑰是否存在及其有效性。
-    為了安全，此端點不會回傳完整的金鑰。
     """
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=10.0) as client:
         try:
-            response = await client.get(f"{key_service_url}/keys/generic/FRED_API_KEY")
+            # 修正: 呼叫我們在 key_service 中新增的按名稱查詢端點
+            response = await client.get(f"{key_service_url}/api/keys/FRED_API_KEY")
 
-            if response.status_code == 404:
+            if response.status_code == 200:
+                key_data = response.json()
+                return {
+                    "is_set": True,
+                    "is_valid": key_data.get("is_valid", False),
+                    "detail": "FRED API 金鑰已設定。"
+                }
+            elif response.status_code == 404:
                 return {"is_set": False, "is_valid": False, "detail": "尚未設定 FRED API 金鑰。"}
-
-            response.raise_for_status()
-            return {"is_set": True, "is_valid": True, "detail": "FRED API 金鑰已設定。"}
+            else:
+                response.raise_for_status()
 
         except httpx.RequestError as e:
             logger.error(f"無法連接到 key_service：{e}")
-            return {"is_set": False, "is_valid": False, "detail": "無法連接到金鑰服務。"}
+            raise HTTPException(status_code=503, detail="無法連接到金鑰服務。")
         except httpx.HTTPStatusError as e:
             logger.error(f"key_service 回應錯誤：{e.response.status_code} - {e.response.text}")
-            return {"is_set": False, "is_valid": False, "detail": "檢查金鑰狀態時發生錯誤。"}
+            raise HTTPException(status_code=500, detail="檢查金鑰狀態時發生錯誤。")
