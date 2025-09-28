@@ -9,10 +9,10 @@ from typing import Optional
 # 設定日誌
 logger = logging.getLogger(__name__)
 
-# 定義資料庫檔案的絕對路徑
+# 定義資料庫檔案的絕對路徑，確保與 database.py 初始化時使用的檔案一致。
 # __file__ -> .../services/bond_data_service/db_utils.py
-# .parent.parent.parent -> /app (專案根目錄)
-DB_FILE = Path(__file__).resolve().parent.parent.parent / 'financial_data.sqlite'
+# .parent -> services/bond_data_service/
+DB_FILE = Path(__file__).resolve().parent / 'bond_data.sqlite3'
 
 def save_series_to_db(series: pd.Series, ticker: str):
     """
