@@ -121,16 +121,15 @@
     </style>
 </head>
 <body>
-    <!-- 導覽列 -->
-    <nav class="navbar">
-        <a href="/" class="navbar-brand">返回主頁</a>
-        <ul class="navbar-links">
-            <li><a href="/primary_dealer_analysis" class="active">分析儀表板</a></li>
-            <li><a href="/primary_dealer_key_management">金鑰管理</a></li>
-        </ul>
-    </nav>
-
     <div class="content">
+        <!-- 返回主頁的連結和子導覽列 -->
+        <div class="breadcrumb">
+            <a href="/" class="back-link">‹ 返回主頁</a>
+        </div>
+        <nav class="sub-nav">
+            <a href="/primary_dealer_analysis" class="sub-nav-button active">分析儀表板</a>
+            <a href="/primary_dealer_key_management" class="sub-nav-button">金鑰管理</a>
+        </nav>
         <h1>一級交易商壓力指數儀表板</h1>
 
         <div class="panel date-filter-panel">

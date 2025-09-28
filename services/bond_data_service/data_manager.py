@@ -3,6 +3,9 @@
 import pandas as pd
 import logging
 from typing import Dict, Callable, Optional
+import httpx
+import json
+import os
 
 # 匯入我們新的資料庫工具和所有改造後的資料抓取器
 from db_utils import load_series_from_db
@@ -19,19 +22,52 @@ from data_fetchers import (
 
 logger = logging.getLogger(__name__)
 
+def _get_key_service_url() -> Optional[str]:
+    """從服務註冊檔案中讀取 key_service 的 URL。"""
+    try:
+        with open("/tmp/service_registry.json", "r") as f:
+            registry = json.load(f)
+        key_service_info = registry.get("key_service")
+        if key_service_info and "port" in key_service_info:
+            return f"http://127.0.0.1:{key_service_info['port']}"
+    except (FileNotFoundError, json.JSONDecodeError, KeyError):
+        pass # 找不到或解析失敗時，靜默處理，返回 None
+    return None
+
+def _get_latest_fred_api_key() -> Optional[str]:
+    """
+    即時獲取 FRED API 金鑰，實現多源回退。
+    優先順序: 1. key_service -> 2. 環境變數
+    """
+    key_service_url = _get_key_service_url()
+    if key_service_url:
+        try:
+            with httpx.Client(timeout=5.0) as client:
+                response = client.get(f"{key_service_url}/api/keys/FRED_API_KEY/value")
+                if response.status_code == 200:
+                    api_key = response.json().get("key_value")
+                    if api_key:
+                        logger.info("即時從 key_service 獲取了 FRED API 金鑰。")
+                        return api_key
+        except httpx.RequestError:
+            logger.warning("即時連接 key_service 失敗，將回退到環境變數。")
+
+    # 如果 key_service 失敗或未設定，回退到環境變數
+    api_key = os.getenv("FRED_API_KEY")
+    if api_key:
+        logger.info("從環境變數中獲取了 FRED API 金鑰。")
+    return api_key
+
+
 class DataManager:
     """
     負責管理所有金融數據的抓取與讀取，並實現了資料庫快取優先的邏輯。
     """
-    def __init__(self, api_key: str):
+    def __init__(self):
         """
         初始化 DataManager。
-
-        Args:
-            api_key (str): FRED API 金鑰，用於需要它的資料抓取器。
+        注意：API 金鑰現在是即時獲取的，不再於初始化時設定。
         """
-        self.api_key = api_key
-
         # 映射前端指標 ID 到後端抓取函式
         self._fetcher_map: Dict[str, Callable[..., pd.Series]] = {
             "sofr": fred_sofr_fetcher.fetch_sofr_data,
@@ -104,10 +140,14 @@ class DataManager:
             # 準備傳遞給抓取器的參數
             fetcher_args = {"start_date": start_date, "end_date": end_date}
 
-            # 只有 FRED 和 NY Fed 抓取器需要 API 金鑰，yfinance 的 fetcher 則不需要。
-            # 我們可以根據指標名稱來判斷。
-            if indicator_name != "us_high_yield_spread" and "nyfed" not in fetcher.__module__:
-                fetcher_args["api_key"] = self.api_key
+            # 判斷是否需要 API 金鑰
+            # 修正：不再從 self.api_key 讀取，而是在需要時即時獲取
+            if "fred_" in fetcher.__module__ or "nyfed_" in fetcher.__module__:
+                latest_api_key = _get_latest_fred_api_key()
+                if not latest_api_key:
+                    logger.error(f"無法為指標 '{indicator_name}' 獲取有效的 API 金鑰，抓取中止。")
+                    return None
+                fetcher_args["api_key"] = latest_api_key
 
             # 呼叫抓取器
             fresh_data = fetcher(**fetcher_args)
