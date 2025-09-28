@@ -63,7 +63,7 @@ SHOW_LOG_LEVEL_DEBUG = True
 
 # Part 4: 報告與歸檔設定
 LOG_ARCHIVE_ROOT_FOLDER = "paper"
-SERVER_READY_TIMEOUT = 60
+SERVER_READY_TIMEOUT = 150
 LOG_COPY_MAX_LINES = 5000
 
 # ==============================================================================
