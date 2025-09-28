@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>一級交易商 - 金鑰管理</title>
+    <link rel="stylesheet" href="/static/css/common.css">
+    <style>
+        .content { max-width: 800px; }
+        .key-status {
+            padding: 10px;
+            border-radius: 5px;
+            margin-top: 15px;
+            font-weight: bold;
+        }
+        .status-valid { background-color: #e8f5e9; color: #2e7d32; }
+        .status-invalid { background-color: #ffebee; color: #c62828; }
+        .status-loading { background-color: #e3f2fd; color: #1565c0; }
+    </style>
+</head>
+<body>
+    <div class="content">
+        <!-- 導覽列 -->
+        <nav class="navbar">
+            <a href="/" class="navbar-brand">返回主頁</a>
+            <ul class="navbar-links">
+                <li><a href="/primary_dealer_analysis">分析儀表板</a></li>
+                <li><a href="/primary_dealer_key_management" class="active">金鑰管理</a></li>
+            </ul>
+        </nav>
+
+        <div class="panel">
+            <h1>FRED API 金鑰管理</h1>
+            <p>此頁面用於設定「一級交易商分析」功能所需的 Federal Reserve Economic Data (FRED) API 金鑰。</p>
+            <p>系統會優先嘗試從 Colab Secrets 自動注入名為 <code>FRED_API_KEY</code> 的金鑰。如果注入失敗或您需要手動更新，請在此處輸入您的金鑰。</p>
+        </div>
+
+        <div class="panel">
+            <h2>設定 API 金鑰</h2>
+            <div class="form-group">
+                <label for="fred-api-key-input">FRED API 金鑰:</label>
+                <input type="password" id="fred-api-key-input" placeholder="請在此輸入您的 FRED API 金鑰">
+                <button id="save-key-btn">儲存金鑰</button>
+            </div>
+            <div id="key-status" class="key-status status-loading">正在檢查金鑰狀態...</div>
+        </div>
+    </div>
+
+    <script>
+    document.addEventListener('DOMContentLoaded', () => {
+        const keyInput = document.getElementById('fred-api-key-input');
+        const saveBtn = document.getElementById('save-key-btn');
+        const statusDiv = document.getElementById('key-status');
+
+        const renderStatus = (message, statusClass) => {
+            statusDiv.textContent = message;
+            statusDiv.className = `key-status ${statusClass}`;
+        };
+
+        const checkKeyStatus = async () => {
+            renderStatus('正在檢查金鑰狀態...', 'status-loading');
+            try {
+                const response = await fetch('/api/dealer_keys/fred');
+                const data = await response.json();
+                if (response.ok) {
+                    if (data.is_set) {
+                        renderStatus('✅ FRED API 金鑰已設定。', 'status-valid');
+                    } else {
+                        renderStatus('⚠️ 尚未設定 FRED API 金鑰。', 'status-invalid');
+                    }
+                } else {
+                    renderStatus(`❌ 檢查失敗: ${data.detail}`, 'status-invalid');
+                }
+            } catch (error) {
+                renderStatus('❌ 無法連接到後端服務。', 'status-invalid');
+            }
+        };
+
+        const saveKey = async () => {
+            const apiKey = keyInput.value.trim();
+            if (!apiKey) {
+                renderStatus('請輸入有效的 API 金鑰。', 'status-invalid');
+                return;
+            }
+
+            renderStatus('正在儲存金鑰...', 'status-loading');
+            saveBtn.disabled = true;
+            saveBtn.textContent = '儲存中...';
+
+            try {
+                const response = await fetch('/api/dealer_keys/fred', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ api_key: apiKey })
+                });
+                const result = await response.json();
+                if (!response.ok) {
+                    throw new Error(result.detail || '儲存金鑰時發生未知錯誤。');
+                }
+                renderStatus('✅ 金鑰已成功儲存！', 'status-valid');
+                keyInput.value = ''; // 清空輸入框
+            } catch (error) {
+                renderStatus(`❌ 儲存失敗: ${error.message}`, 'status-invalid');
+            } finally {
+                saveBtn.disabled = false;
+                saveBtn.textContent = '儲存金鑰';
+            }
+        };
+
+        saveBtn.addEventListener('click', saveKey);
+
+        // 頁面載入時立即檢查金鑰狀態
+        checkKeyStatus();
+    });
+    </script>
+</body>
+</html>
