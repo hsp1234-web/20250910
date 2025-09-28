@@ -28,7 +28,33 @@ sse_connections = []
 
 # 設定日誌
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("main") # 命名 logger 以便追蹤
+
+def get_fred_api_key():
+    """
+    以更穩健的方式獲取 FRED API 金鑰。
+    優先從 Colab Secrets 獲取，如果失敗則回退到環境變數。
+    """
+    api_key = None
+    # 優先嘗試從 Colab UserData 中獲取 (適用於在 Colab 環境中運行的情況)
+    try:
+        from google.colab import userdata
+        api_key = userdata.get('FRED_API_KEY')
+        if api_key:
+            logger.info("成功從 Colab Secrets 讀取 FRED_API_KEY。")
+            return api_key
+    except (ImportError, KeyError):
+        logger.info("非 Colab 環境或 Colab Secrets 中無 FRED_API_KEY，將嘗試從環境變數讀取。")
+
+    # 如果 Colab Secrets 中沒有，則從環境變數讀取
+    api_key = os.getenv("FRED_API_KEY")
+    if api_key:
+        logger.info("成功從環境變數讀取 FRED_API_KEY。")
+    else:
+        logger.warning("在 Colab Secrets 和環境變數中均未找到 FRED_API_KEY。")
+
+    return api_key
+
 
 # --- Background Task for Live Updates ---
 last_broadcasted_timestamp = None
@@ -91,13 +117,13 @@ async def lifespan(app: FastAPI):
     logger.info("債券資料服務啟動中...")
     database.initialize_database()
 
-    default_api_key = "YOUR_DEFAULT_API_KEY"
-    api_key = os.getenv("FRED_API_KEY", default_api_key)
+    # 使用新的輔助函式獲取金鑰
+    api_key = get_fred_api_key()
 
-    if api_key == default_api_key:
-        logger.warning("未偵測到 FRED_API_KEY 環境變數，將使用預設的假金鑰。資料抓取功能將無法運作。")
-    else:
-        logger.info("成功讀取 FRED_API_KEY。")
+    # 如果最終沒有獲取到金鑰，則使用預設值並發出明確警告
+    if not api_key:
+        api_key = "YOUR_DEFAULT_API_KEY" # 保持一個預設值
+        logger.warning("最終未能獲取 FRED_API_KEY，將使用預設的假金鑰。資料抓取功能將無法運作。")
 
     data_manager = DataManager(api_key=api_key)
 
