@@ -4,9 +4,24 @@ import pandas as pd
 import numpy as np
 import logging
 from typing import Dict, Optional
-from data_manager import DataManager
+from cachetools import cached, TTLCache
+from .data_manager import DataManager
 
 logger = logging.getLogger(__name__)
+
+# --- 快取設定 ---
+# 建立一個 TTL (Time-To-Live) 快取
+# maxsize: 快取中最多可以儲存 10 組不同的計算結果
+# ttl: 每筆快取結果的存活時間為 300 秒 (5 分鐘)
+metrics_cache = TTLCache(maxsize=10, ttl=300)
+
+# 自訂快取鍵產生函式
+# 我們只根據 start_date 和 end_date 來決定是否命中快取，
+# 忽略 data_manager 實例，因為它在應用程式生命週期中是同一個物件，但不可雜湊。
+def cache_key(data_manager, start_date, end_date):
+    return (start_date, end_date)
+
+# --- 指標計算設定 ---
 
 # 更新後的權重，加入了高收益債利差(HYG價格的反轉指標)，並調整了其他權重以維持總和為1.0
 STRESS_INDEX_WEIGHTS = {
@@ -22,10 +37,11 @@ ROLLING_WINDOW_DAYS = 252
 SMOOTHING_WINDOW = 5
 POS_RES_RATIO_THRESHOLD = 90
 
+@cached(cache=metrics_cache, key=cache_key)
 def calculate_full_metrics(data_manager: DataManager, start_date: str, end_date: str) -> Optional[pd.DataFrame]:
     """
     計算所有指標，包括基礎數據、衍生指標和最終的壓力指數。
-    採用 "快取優先" 策略獲取數據。
+    此函式的計算結果會被快取，以提升重複請求的效能。
 
     Args:
         data_manager (DataManager): 用於獲取基礎數據的 DataManager 實例。

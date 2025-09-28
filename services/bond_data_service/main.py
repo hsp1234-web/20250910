@@ -6,10 +6,10 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import Response, JSONResponse, StreamingResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
-import database
-from data_manager import DataManager
-import stress_index_calculator
-import charting
+from . import database
+from .data_manager import DataManager
+from . import stress_index_calculator
+from . import charting
 import logging
 import pandas as pd
 import numpy as np
@@ -209,6 +209,69 @@ async def get_all_metrics_debug():
     except Exception as e:
         logger.error(f"[除錯] 生成所有指標數據時發生錯誤: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"生成除錯數據時發生內部錯誤: {e}")
+
+
+# --- 整合型 API 端點 ---
+
+@app.get("/api/bond_service/dashboard_data", summary="獲取儀表板所需的所有整合數據")
+async def get_dashboard_data(
+    start_date: Optional[str] = Query(None, description="數據開始日期 (YYYY-MM-DD)"),
+    end_date: Optional[str] = Query(None, description="數據結束日期 (YYYY-MM-DD)")
+):
+    """
+    提供前端儀表板所需的一次性整合數據。
+    此端點會呼叫快取的計算函式，並回傳所有圖表需要的數據欄位。
+    """
+    try:
+        # 如果未提供日期，則設定預設範圍（過去五年）
+        if not end_date:
+            end_date = datetime.now().strftime('%Y-%m-%d')
+        if not start_date:
+            start_date = (datetime.now() - pd.DateOffset(years=5)).strftime('%Y-%m-%d')
+
+        logger.info(f"正在為儀表板獲取整合數據，範圍: {start_date} 至 {end_date}...")
+        # 由於 calculate_full_metrics 已被快取，此處的呼叫非常高效
+        full_metrics_df = stress_index_calculator.calculate_full_metrics(data_manager, start_date, end_date)
+
+        if full_metrics_df is None or full_metrics_df.empty:
+            logger.error("整合數據計算結果為空，無法提供儀表板數據。")
+            raise HTTPException(status_code=404, detail="在指定範圍內無足夠數據可生成儀表板。")
+
+        # 定義儀表板所有圖表需要的欄位
+        dashboard_cols = [
+            'sofr', 'sofr_ma60',
+            'dealer_stress_index', 'macd_line', 'macd_signal_line', 'macd_hist',
+            'vix',
+            'spread_10y2y',
+            'us_high_yield_spread',
+            'dealer_net_positions',
+            'dealer_long_term_positions',
+            'dealer_short_term_positions'
+        ]
+
+        # 篩選出實際存在於 DataFrame 中的欄位，避免因缺少某些數據源而出錯
+        cols_to_use = [col for col in dashboard_cols if col in full_metrics_df.columns]
+
+        if not cols_to_use:
+            logger.error("計算結果中不包含任何儀表板所需的核心指標欄位。")
+            raise HTTPException(status_code=500, detail="指標計算未能生成儀表板所需數據。")
+
+        chart_df = full_metrics_df[cols_to_use]
+
+        # 將 NaN 轉換為 None (JSON 可序列化) 並重置索引，使日期成為一欄
+        df_serializable = chart_df.reset_index().replace({pd.NaT: None, np.nan: None})
+        df_serializable = df_serializable.rename(columns={'index': 'date'})
+        df_serializable['date'] = df_serializable['date'].dt.strftime('%Y-%m-%d')
+
+        # 轉換為 JSON 格式
+        json_payload = df_serializable.to_dict(orient='records')
+
+        logger.info(f"成功生成整合儀表板數據，共 {len(json_payload)} 筆。")
+        return JSONResponse(content=json_payload)
+
+    except Exception as e:
+        logger.error(f"生成整合儀表板數據時發生錯誤: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"處理儀表板數據請求時發生內部錯誤: {e}")
 
 
 @app.get("/charts/stress-index", summary="獲取壓力指數圖表數據")

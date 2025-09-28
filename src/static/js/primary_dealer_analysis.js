@@ -53,7 +53,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 
     /**
-     * 載入所有圖表的核心函式，採用分批循序載入策略。
+     * [重構後] 載入所有圖表的核心函式，採用整合型 API 端點策略。
      */
     async function loadAllCharts() {
         const startDate = startDateInput.value;
@@ -63,111 +63,106 @@ document.addEventListener('DOMContentLoaded', () => {
             alert("請確保已選擇開始和結束日期。");
             return;
         }
-        console.log(`啟動分批循序載入程序...`);
+        console.log(`啟動整合載入程序...`);
 
-        // 在開始前重設所有面板的高度
+        // 步驟 1: 進入全域載入狀態
         const allPanels = Array.from(document.querySelectorAll('.panel[data-indicator-id]'));
-        allPanels.forEach(p => p.style.height = 'auto');
+        allPanels.forEach(panel => {
+            panel.style.height = 'auto'; // 重設高度
+            const container = panel.querySelector('.chart-container');
+            if (container) {
+                container.innerHTML = '<div class="placeholder">圖表載入中...</div>';
+            }
+        });
 
-        // 步驟 1: 動態計算每列的圖表數量
-        const grid = document.querySelector('.dashboard-grid');
-        // 使用 CSS 中設定的最小寬度 500px 作為計算基準
-        const panelMinWidth = 500;
-        const columns = Math.max(1, Math.floor(grid.offsetWidth / panelMinWidth));
-        console.log(`偵測到每列可容納 ${columns} 個圖表。`);
-
-        // 步驟 2: 將指標陣列分批
-        const chunks = [];
-        for (let i = 0; i < indicators.length; i += columns) {
-            chunks.push(indicators.slice(i, i + columns));
-        }
-        console.log(`已將圖表分為 ${chunks.length} 批進行載入。`);
-
-        // 步驟 3: 循序處理每一批
-        for (const chunk of chunks) {
-            console.log(`正在載入批次: ${chunk.join(', ')}`);
-
-            const currentBatchPanels = chunk.map(id => document.querySelector(`.panel[data-indicator-id="${id}"]`));
-
-            const promises = chunk.map(indicatorId => {
-                const container = document.getElementById(`chart-container-${indicatorId}`);
-                if (container) {
-                    container.innerHTML = '<div class="placeholder">圖表載入中...</div>';
-                    return fetchAndPlotChart(indicatorId, startDate, endDate);
-                }
-                return Promise.resolve();
-            });
-
-            // 等待當前批次的圖表全部載入
-            await Promise.all(promises);
-            console.log(`批次 ${chunk.join(', ')} 載入完成。`);
-
-            // 步驟 4: 對剛剛載入完成的這一列進行對齊
-            alignChartPanels(currentBatchPanels);
-        }
-
-        console.log("所有圖表批次均已載入並對齊。");
-    }
-
-    /**
-     * 根據指標 ID 獲取數據並繪製圖表
-     * @param {string} indicatorId - 指標的唯一 ID
-     * @param {string} startDate - 開始日期
-     * @param {string} endDate - 結束日期
-     */
-    async function fetchAndPlotChart(indicatorId, startDate, endDate) {
-        const container = document.getElementById(`chart-container-${indicatorId}`);
-        const apiUrl = `/api/bond_service/data/${indicatorId}?start_date=${startDate}&end_date=${endDate}`;
-
+        // 步驟 2: 發起單一 API 請求獲取所有數據
+        const apiUrl = `/api/bond_service/dashboard_data?start_date=${startDate}&end_date=${endDate}`;
         try {
             const response = await fetch(apiUrl);
             if (!response.ok) {
-                const errorData = await response.json().catch(() => ({'error': `數據請求失敗: ${response.statusText}`}));
-                throw new Error(errorData.error || `數據請求失敗: ${response.statusText}`);
+                const errorData = await response.json().catch(() => ({'detail': `數據請求失敗: ${response.statusText}`}));
+                throw new Error(errorData.detail || `數據請求失敗: ${response.statusText}`);
             }
-            const data = await response.json();
+            const allData = await response.json();
 
-            if (!data || data.length === 0 || data.error) {
-                throw new Error(data.error || '無可用數據');
+            if (!allData || allData.length === 0) {
+                throw new Error('後端未返回任何數據');
             }
 
+            console.log("成功獲取整合數據，開始繪製所有圖表。");
+
+            // 步驟 3: 遍歷所有指標，使用同一份數據進行繪製
+            const plotPromises = indicators.map(indicatorId =>
+                plotChartFromData(indicatorId, allData, startDate, endDate)
+            );
+
+            await Promise.all(plotPromises);
+            console.log("所有圖表繪製完成。");
+
+            // 步驟 4: 對齊所有圖表的高度
+            // 需要分列對齊
+            const grid = document.querySelector('.dashboard-grid');
+            const panelMinWidth = 500;
+            const columns = Math.max(1, Math.floor(grid.offsetWidth / panelMinWidth));
+            const chunks = [];
+             for (let i = 0; i < allPanels.length; i += columns) {
+                chunks.push(allPanels.slice(i, i + columns));
+            }
+            chunks.forEach(chunk => alignChartPanels(chunk));
+            console.log("所有圖表已對齊。");
+
+        } catch (error) {
+            console.error("載入儀表板數據時發生嚴重錯誤:", error);
+            // 若請求失敗，將所有圖表容器更新為錯誤訊息
+            allPanels.forEach(panel => {
+                const container = panel.querySelector('.chart-container');
+                if (container) {
+                    container.innerHTML = `<div class="placeholder" style="text-align: center; color: #d63031;">儀表板載入失敗<br><small>${error.message}</small></div>`;
+                }
+            });
+        }
+    }
+
+    /**
+     * [重構後] 使用一份完整的數據集來繪製單個圖表。
+     * @param {string} indicatorId - 指標的唯一 ID
+     * @param {Array} data - 從整合端點獲取的完整數據陣列
+     * @param {string} startDate - 開始日期
+     * @param {string} endDate - 結束日期
+     */
+    async function plotChartFromData(indicatorId, data, startDate, endDate) {
+        const container = document.getElementById(`chart-container-${indicatorId}`);
+        try {
             const plotFunction = getPlotFunction(indicatorId);
-            // 步驟 2.1: 繪製靜態圖表
+
+            // 繪製靜態圖表
             await plotFunction(container, data, indicatorId);
 
-            // 步驟 2.2: 將圖表轉換為圖片並替換
-            const dataUrl = await Plotly.toImage(container, {format: 'png', width: container.offsetWidth, height: container.offsetHeight, scale: 2});
+            // 將圖表轉換為圖片並替換
+            const dataUrl = await Plotly.toImage(container, { format: 'png', width: container.offsetWidth, height: container.offsetHeight, scale: 2 });
             const img = document.createElement('img');
             img.src = dataUrl;
             img.style.width = '100%';
-            img.style.height = 'auto'; // 維持圖片比例
+            img.style.height = 'auto';
 
-            // 清空容器並放入圖片
             container.innerHTML = '';
             container.appendChild(img);
 
-            // --- 新增：建立並附加互動圖表按鈕 ---
-            // 1. 先移除可能已存在的舊按鈕
+            // 建立並附加互動圖表按鈕
             const panel = container.closest('.panel');
             const existingBtn = panel.querySelector('.interactive-chart-btn');
-            if (existingBtn) {
-                existingBtn.remove();
-            }
+            if (existingBtn) existingBtn.remove();
 
-            // 2. 建立新按鈕
             const interactiveBtn = document.createElement('a');
             interactiveBtn.href = `/interactive_chart?indicator=${indicatorId}&start=${startDate}&end=${endDate}`;
             interactiveBtn.textContent = '查看互動圖表';
             interactiveBtn.className = 'interactive-chart-btn';
-            interactiveBtn.target = '_blank'; // 在新分頁中打開
-
-            // 3. 將按鈕附加到圖表卡片 (panel) 的底部
+            interactiveBtn.target = '_blank';
             panel.appendChild(interactiveBtn);
-            // --- 修改結束 ---
 
         } catch (error) {
-            console.error(`載入圖表 ${indicatorId} 時發生錯誤:`, error);
-            container.innerHTML = `<div class="placeholder" style="text-align: center; color: #d63031;">圖表載入失敗<br><small>${error.message}</small></div>`;
+            console.error(`繪製圖表 ${indicatorId} 時發生錯誤:`, error);
+            container.innerHTML = `<div class="placeholder" style="text-align: center; color: #d63031;">圖表繪製失敗<br><small>${error.message}</small></div>`;
         }
     }
 
