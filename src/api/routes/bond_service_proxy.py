@@ -109,3 +109,39 @@ async def proxy_dynamic_data_request(chart_id: str, request: Request):
         raise HTTPException(status_code=502, detail=f"無法連線至債券資料服務(動態數據): {e}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"代理動態數據請求時發生內部錯誤: {e}")
+
+
+@router.get("/dashboard_data")
+async def proxy_dashboard_data(request: Request):
+    """
+    代理對 bond_data_service 的儀表板數據請求。
+    這個端點專門處理來自前端的 /dashboard_data 請求，
+    並將其直接轉發到下游服務的同名端點。
+    """
+    try:
+        base_url = await get_bond_service_url()
+        query_params = request.url.query
+        # 將請求轉發到 bond_data_service 的 /api/bond_service/dashboard_data 端點
+        data_url = f"{base_url}/api/bond_service/dashboard_data?{query_params}" if query_params else f"{base_url}/api/bond_service/dashboard_data"
+
+        async with httpx.AsyncClient() as client:
+            response = await client.get(data_url, timeout=30.0)
+            # 直接回傳下游服務的內容、狀態碼和媒體類型
+            return Response(
+                content=response.content,
+                status_code=response.status_code,
+                headers=dict(response.headers)
+            )
+    except httpx.HTTPStatusError as e:
+        # 如果下游服務回傳錯誤，也將其轉發
+        try:
+            detail = e.response.json().get('detail', e.response.text)
+        except json.JSONDecodeError:
+            detail = e.response.text
+        raise HTTPException(status_code=e.response.status_code, detail=f"債券資料服務(儀表板)錯誤: {detail}")
+    except httpx.RequestError as e:
+        # 處理網路連線問題
+        raise HTTPException(status_code=502, detail=f"無法連線至債券資料服務(儀表板): {e}")
+    except Exception as e:
+        # 處理代理伺服器自身的問題
+        raise HTTPException(status_code=500, detail=f"代理儀表板數據請求時發生內部錯誤: {e}")
