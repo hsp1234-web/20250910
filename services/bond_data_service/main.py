@@ -61,9 +61,11 @@ def get_fred_api_key():
         try:
             # 使用同步的 httpx Client，因為這是在應用程式啟動時執行
             with httpx.Client(timeout=5.0) as client:
-                response = client.get(f"{key_service_url}/keys/generic/FRED_API_KEY")
+                # 修正: 呼叫為內部服務設計的、可直接返回金鑰值的端點
+                response = client.get(f"{key_service_url}/api/keys/FRED_API_KEY/value")
                 if response.status_code == 200:
                     key_data = response.json()
+                    # 修正: 從正確的 JSON 結構中讀取金鑰
                     api_key = key_data.get("key_value")
                     if api_key:
                         logger.info("成功從 key_service 獲取 FRED_API_KEY。")

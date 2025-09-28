@@ -108,6 +108,12 @@ def get_all_keys() -> List[Dict[str, Any]]:
     rows = _execute_query("SELECT key_name, key_hash, is_valid, last_validated_at FROM api_keys", fetch='all')
     return [dict(row) for row in rows] if rows else []
 
+def get_key_by_name(key_name: str) -> Optional[Dict[str, Any]]:
+    """根據名稱從資料庫中獲取一個金鑰的完整資訊。"""
+    query = "SELECT * FROM api_keys WHERE key_name = ?"
+    row = _execute_query(query, (key_name,), fetch='one')
+    return dict(row) if row else None
+
 def add_key(key_value: str, key_name: Optional[str] = None) -> Dict[str, Any]:
     """新增一個金鑰到資料庫，並使用直接驗證函式。"""
     if not key_value or not key_value.strip():
@@ -140,6 +146,34 @@ class KeyModel(BaseModel):
 @router.get("/keys", summary="獲取所有金鑰的狀態")
 async def get_keys_status_api():
     return get_all_keys()
+
+@router.get("/keys/{key_name}", summary="按名稱獲取特定金鑰的資訊")
+async def get_key_by_name_api(key_name: str):
+    """
+    根據提供的名稱檢索單一金鑰的詳細資訊。
+    如果找不到金鑰，將返回 404 錯誤。
+    """
+    # 為了安全，我們不直接回傳 key_value
+    # 這裡我們複製一份資料並移除敏感欄位
+    key_info = get_key_by_name(key_name)
+    if key_info:
+        # 可以在這裡決定要回傳哪些欄位，例如移除 'key_value'
+        safe_info = {k: v for k, v in key_info.items() if k != 'key_value'}
+        return safe_info
+    else:
+        raise HTTPException(status_code=404, detail=f"找不到名為 '{key_name}' 的金鑰。")
+
+@router.get("/keys/{key_name}/value", summary="按名稱獲取特定金鑰的原始值 (內部服務使用)")
+async def get_key_value_by_name_api(key_name: str):
+    """
+    根據提供的名稱檢索單一金鑰的原始值。
+    此端點應僅供內部受信任的服務呼叫。
+    """
+    key_info = get_key_by_name(key_name)
+    if key_info and 'key_value' in key_info:
+        return {"key_name": key_name, "key_value": key_info['key_value']}
+    else:
+        raise HTTPException(status_code=404, detail=f"找不到名為 '{key_name}' 的金鑰或其值。")
 
 @router.post("/keys", summary="新增並驗證一個 API 金鑰")
 async def add_new_key_api(payload: KeyModel):
