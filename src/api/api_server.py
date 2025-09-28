@@ -272,7 +272,10 @@ app.include_router(page7_prompts.router, tags=["API: 提示詞管理"])
 app.include_router(page8_details.router, prefix="/api", tags=["API: 檔案總覽"])
 app.include_router(page9_dashboard.router, prefix="/api/dashboard", tags=["API: 績效儀表板"])
 app.include_router(page10_test.router, prefix="/api/service_test", tags=["API: 微服務測試"])
-app.include_router(bond_service_proxy.router, prefix="/api/bond_service", tags=["API: Bond Service Proxy"])
+
+# 債券服務代理
+app.include_router(bond_service_proxy.router, prefix="/api/bond_service", tags=["API: Bond Service Proxy"]) # API 代理
+app.include_router(bond_service_proxy.page_router, tags=["UI: Bond Service Pages"]) # 頁面代理，無前綴
 
 # --- 路徑設定 ---
 # 新的上傳檔案儲存目錄

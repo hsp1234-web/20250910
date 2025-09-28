@@ -63,7 +63,8 @@ def calculate_full_metrics(data_manager: DataManager, start_date: str, end_date:
 
     all_series: Dict[str, pd.Series] = {}
     for indicator in indicator_list:
-        series = data_manager.get_series(indicator, start_date, end_date)
+        # 修正：強制刷新數據，確保從網路獲取最新資訊，而不是依賴可能過時的資料庫快取
+        series = data_manager.get_series(indicator, start_date, end_date, force_refresh=True)
         if series is not None:
             all_series[indicator] = series
         else:

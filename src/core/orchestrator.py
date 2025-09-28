@@ -116,6 +116,12 @@ def launch_microservice(service_path: Path):
     proc_env = os.environ.copy()
     proc_env["PORT"] = str(port)
 
+    # 修正：將主環境的 FRED_API_KEY 明確傳遞給子服務
+    if "FRED_API_KEY" in os.environ:
+        proc_env["FRED_API_KEY"] = os.environ["FRED_API_KEY"]
+        log.info(f"[{log_prefix}] 已將 FRED_API_KEY 注入到服務環境中。")
+
+
     command = [
         str(python_exec), "-m", "uvicorn",
         f"{main_script.stem}:app",

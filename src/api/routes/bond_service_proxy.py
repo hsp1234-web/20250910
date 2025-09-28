@@ -3,9 +3,37 @@ import httpx
 import json
 from pathlib import Path
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import Response
+from fastapi.responses import Response, HTMLResponse
 
 router = APIRouter()
+page_router = APIRouter() # 新增一個用於代理頁面的路由器
+
+@page_router.get("/interactive_chart", response_class=HTMLResponse, include_in_schema=False)
+async def proxy_interactive_chart_page(request: Request):
+    """
+    代理對 bond_data_service 的互動圖表頁面請求。
+    這個路由沒有 /api 前綴，直接從根路徑提供頁面。
+    """
+    try:
+        base_url = await get_bond_service_url()
+        query_params = request.url.query
+        target_url = f"{base_url}/interactive_chart?{query_params}" if query_params else f"{base_url}/interactive_chart"
+
+        async with httpx.AsyncClient() as client:
+            response = await client.get(target_url, timeout=10.0)
+            response.raise_for_status()
+            return Response(
+                content=response.content,
+                status_code=response.status_code,
+                headers=dict(response.headers)
+            )
+    except httpx.HTTPStatusError as e:
+        detail = e.response.text
+        raise HTTPException(status_code=e.response.status_code, detail=f"債券資料服務(頁面)錯誤: {detail}")
+    except httpx.RequestError as e:
+        raise HTTPException(status_code=502, detail=f"無法連線至債券資料服務(頁面): {e}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"代理互動圖表頁面時發生內部錯誤: {e}")
 
 SERVICE_REGISTRY_FILE = Path("/tmp/service_registry.json")
 
