@@ -146,6 +146,25 @@ document.addEventListener('DOMContentLoaded', () => {
             container.innerHTML = '';
             container.appendChild(img);
 
+            // --- 新增：建立並附加互動圖表按鈕 ---
+            // 1. 先移除可能已存在的舊按鈕
+            const panel = container.closest('.panel');
+            const existingBtn = panel.querySelector('.interactive-chart-btn');
+            if (existingBtn) {
+                existingBtn.remove();
+            }
+
+            // 2. 建立新按鈕
+            const interactiveBtn = document.createElement('a');
+            interactiveBtn.href = `/interactive_chart?indicator=${indicatorId}&start=${startDate}&end=${endDate}`;
+            interactiveBtn.textContent = '查看互動圖表';
+            interactiveBtn.className = 'interactive-chart-btn';
+            interactiveBtn.target = '_blank'; // 在新分頁中打開
+
+            // 3. 將按鈕附加到圖表卡片 (panel) 的底部
+            panel.appendChild(interactiveBtn);
+            // --- 修改結束 ---
+
         } catch (error) {
             console.error(`載入圖表 ${indicatorId} 時發生錯誤:`, error);
             container.innerHTML = `<div class="placeholder" style="text-align: center; color: #d63031;">圖表載入失敗<br><small>${error.message}</small></div>`;

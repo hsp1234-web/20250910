@@ -143,6 +143,26 @@ button:disabled {
     box-shadow: 0 4px 8px rgba(0,0,0,0.05);
 }
 
+/* --- 互動圖表按鈕樣式 --- */
+.interactive-chart-btn {
+    display: block;
+    width: fit-content;
+    margin: 15px auto 0; /* 上方間距、左右自動、下方無 */
+    padding: 8px 16px;
+    background-color: #007bff;
+    color: white;
+    text-decoration: none;
+    border-radius: 5px;
+    text-align: center;
+    font-weight: bold;
+    transition: background-color 0.2s ease-in-out;
+}
+
+.interactive-chart-btn:hover {
+    background-color: #0056b3;
+    color: white;
+}
+
 /* --- List Styles --- */
 ul {
     list-style: none;
