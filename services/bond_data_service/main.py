@@ -6,10 +6,10 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import Response, JSONResponse, StreamingResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
-from . import database
-from .data_manager import DataManager
-from . import stress_index_calculator
-from . import charting
+import database
+from data_manager import DataManager
+import stress_index_calculator
+import charting
 import logging
 import pandas as pd
 import numpy as np
@@ -126,17 +126,17 @@ app = FastAPI(
 # --- 靜態檔案與頁面路由 ---
 # 掛載 static 資料夾，讓前端可以訪問 /static/css/main.css 等檔案
 # 注意：這裡的路徑是相對於專案根目錄的相對路徑
-app.mount("/static", StaticFiles(directory="src/static"), name="static")
+app.mount("/static", StaticFiles(directory="../../src/static"), name="static")
 
 @app.get("/primary_dealer_analysis", response_class=FileResponse)
 async def get_primary_dealer_analysis_page():
     """提供一級交易商分析儀表板的主頁面。"""
-    return "src/static/primary_dealer_analysis.html"
+    return "../../src/static/primary_dealer_analysis.html"
 
 @app.get("/interactive_chart", response_class=FileResponse)
 async def get_interactive_chart_page():
     """提供可互動的單一圖表檢視頁面。"""
-    return "src/static/interactive_chart.html"
+    return "../../src/static/interactive_chart.html"
 
 
 # --- CORS 設定 ---
