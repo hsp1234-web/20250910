@@ -6,10 +6,10 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import Response, JSONResponse, StreamingResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
-from . import database
-from .data_manager import DataManager
-from . import stress_index_calculator
-from . import charting
+import database
+from data_manager import DataManager
+import stress_index_calculator
+import charting
 import logging
 import pandas as pd
 import numpy as np
