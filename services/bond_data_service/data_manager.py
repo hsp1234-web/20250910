@@ -60,18 +60,19 @@ class DataManager:
             "wresbal": "WRESBAL",
         }
 
-    def get_series(self, indicator_name: str, start_date: str, end_date: str) -> Optional[pd.Series]:
+    def get_series(self, indicator_name: str, start_date: str, end_date: str, force_refresh: bool = False) -> Optional[pd.Series]:
         """
         獲取指定指標的時間序列數據，採用「快取優先」策略。
 
         1.  首先嘗試從本地 SQLite 資料庫讀取數據。
-        2.  如果資料庫中沒有數據，則呼叫對應的網路抓取器。
+        2.  如果資料庫中沒有數據，或被要求強制刷新，則呼叫對應的網路抓取器。
         3.  抓取器會將從網路獲取的數據存入資料庫以供下次使用。
 
         Args:
             indicator_name (str): 內部使用的指標名稱 (例如 'sofr', 'vix')。
             start_date (str): 數據開始日期 (YYYY-MM-DD)。
             end_date (str): 數據結束日期 (YYYY-MM-DD)。
+            force_refresh (bool): 如果為 True，則繞過快取，強制從網路抓取新數據。
 
         Returns:
             Optional[pd.Series]: 包含所請求數據的 pandas Series，如果無法獲取則返回 None。
@@ -81,15 +82,19 @@ class DataManager:
             logger.error(f"找不到指標 '{indicator_name}' 對應的資料庫 Ticker。")
             return None
 
-        # 1. 嘗試從資料庫快取讀取
-        cached_data = load_series_from_db(db_ticker, start_date, end_date)
-        if cached_data is not None and not cached_data.empty:
-            logger.info(f"指標 '{indicator_name}' 的數據從資料庫快取加載成功。")
-            cached_data.name = indicator_name
-            return cached_data
+        # 1. 檢查是否需要強制刷新，如果不需要，則嘗試從快取讀取
+        if not force_refresh:
+            cached_data = load_series_from_db(db_ticker, start_date, end_date)
+            if cached_data is not None and not cached_data.empty:
+                logger.info(f"指標 '{indicator_name}' 的數據從資料庫快取加載成功。")
+                cached_data.name = indicator_name
+                return cached_data
 
-        # 2. 快取未命中，從網路抓取
-        logger.info(f"指標 '{indicator_name}' 在快取中未找到，將從網路抓取。")
+        # 2. 強制刷新或快取未命中，從網路抓取
+        if force_refresh:
+            logger.info(f"強制刷新指標 '{indicator_name}'，將從網路抓取。")
+        else:
+            logger.info(f"指標 '{indicator_name}' 在快取中未找到，將從網路抓取。")
         fetcher = self._fetcher_map.get(indicator_name)
         if not fetcher:
             logger.error(f"找不到指標 '{indicator_name}' 對應的資料抓取器。")
