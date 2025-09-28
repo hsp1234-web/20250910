@@ -2,7 +2,7 @@
 import pandas as pd
 from fredapi import Fred
 import logging
-from ..db_utils import save_series_to_db
+from db_utils import save_series_to_db
 
 # 設置日誌
 logger = logging.getLogger(__name__)

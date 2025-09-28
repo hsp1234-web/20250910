@@ -32,9 +32,19 @@ def initialize_database():
         )
         """)
 
+        # 修正：加入創建 time_series_data 資料表的邏輯
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS time_series_data (
+            date TEXT NOT NULL,
+            ticker TEXT NOT NULL,
+            price REAL NOT NULL,
+            PRIMARY KEY (date, ticker)
+        )
+        """)
+
         conn.commit()
         conn.close()
-        print("✅ 資料庫初始化完成。 `macro_data` 資料表已存在。")
+        print("✅ 資料庫初始化完成。 `macro_data` 和 `time_series_data` 資料表已存在。")
     except Exception as e:
         print(f"❌ 資料庫初始化失敗: {e}")
         raise
