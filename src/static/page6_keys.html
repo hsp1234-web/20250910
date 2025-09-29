@@ -7,6 +7,19 @@
     <link rel="stylesheet" href="/static/css/nav.css">
     <link rel="stylesheet" href="/static/css/common.css">
     <link rel="stylesheet" href="/static/css/page6.css">
+    <style>
+        /* 為金鑰類型標籤新增樣式 */
+        .key-item .key-type {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 10px;
+            color: white;
+            font-size: 0.8em;
+            margin-right: 10px;
+            font-weight: bold;
+            vertical-align: middle;
+        }
+    </style>
 </head>
 <body>
     <nav class="top-nav">
@@ -44,7 +57,12 @@
         <div id="manual-input-panel" class="panel">
             <h2>新增金鑰 (手動)</h2>
             <div class="form-group">
-                <textarea id="new-keys-textarea" placeholder="在此貼上多個 API 金鑰（一行一個）" rows="5"></textarea>
+                <label for="new-key-type-select">金鑰類型:</label>
+                <select id="new-key-type-select">
+                    <option value="gemini" selected>Gemini (用於 AI 分析)</option>
+                    <option value="fred">FRED (用於經濟數據)</option>
+                </select>
+                <textarea id="new-keys-textarea" placeholder="在此貼上一個或多個 API 金鑰（一行一個）" rows="5"></textarea>
                 <input type="text" id="new-key-name-input" placeholder="為金鑰設定一個別名 (可選)">
                 <small>說明：若貼上多個金鑰，別名只會套用於第一個金鑰。</small>
                 <button id="add-key-btn">新增金鑰</button>
@@ -144,6 +162,7 @@
         const newKeysTextarea = document.getElementById('new-keys-textarea');
         const newKeyNameInput = document.getElementById('new-key-name-input');
         const addKeyStatus = document.getElementById('add-key-status');
+        const newKeyTypeSelect = document.getElementById('new-key-type-select'); // 新增：金鑰類型選擇器
 
         // 授權模式元素
         const loadFromEnvBtn = document.getElementById('load-from-env-btn');
@@ -178,14 +197,25 @@
                 keyListContainer.innerHTML = '<p>目前沒有已儲存的金鑰。</p>';
                 return;
             }
+
+            // 定義金鑰類型的顏色
+            const typeColors = {
+                'gemini': '#4285F4', // Google Blue
+                'fred': '#D84315',   // Orange
+                'default': '#5F6368' // Grey
+            };
+
             let html = '<ul class="key-list">';
             keys.forEach(key => {
                 const statusClass = key.is_valid === true ? 'status-valid' : (key.is_valid === false ? 'status-invalid' : 'status-untested');
                 const statusText = key.is_valid === true ? '有效' : (key.is_valid === false ? '無效' : '未驗證');
                 const lastValidated = key.last_validated ? new Date(key.last_validated).toLocaleString('zh-TW') : '從未';
+                const keyTypeUpper = key.key_type ? key.key_type.toUpperCase() : '未知';
+                const typeColor = typeColors[key.key_type] || typeColors['default'];
 
                 html += `
                     <li class="key-item">
+                        <span class="key-type" style="background-color: ${typeColor};">${keyTypeUpper}</span>
                         <span class="key-name">${key.name}</span>
                         <span class="key-hash">雜湊值: ...${key.key_hash.slice(-8)}</span>
                         <span class="key-status ${statusClass}">${statusText}</span>
@@ -206,12 +236,13 @@
                 renderKeyList(keys);
 
                 // JULES (2025-09-21): 新增邏輯：檢查是否有有效金鑰，若有則觸發模型查詢
-                const hasValidKeys = keys.some(key => key.is_valid);
+                // 修改為只檢查 'gemini' 類型的有效金鑰
+                const hasValidKeys = keys.some(key => key.is_valid && key.key_type === 'gemini');
                 if (hasValidKeys) {
                     // 自動觸發一次模型查詢
                     fetchModels();
                 } else {
-                    modelListContainer.innerHTML = '<p>沒有可用的有效金鑰。請先手動驗證或新增有效金鑰。</p>';
+                    modelListContainer.innerHTML = '<p>沒有可用的有效 Gemini 金鑰。請先手動驗證或新增有效金鑰。</p>';
                 }
             } catch (error) {
                 keyListContainer.innerHTML = `<p style="color: red;">${error.message}</p>`;
@@ -235,6 +266,7 @@
         addKeyBtn.addEventListener('click', async () => {
             const keys = newKeysTextarea.value.trim().split('\\n').filter(k => k.trim() !== '');
             const name = newKeyNameInput.value.trim();
+            const keyType = newKeyTypeSelect.value; // 獲取選擇的金鑰類型
 
             if (keys.length === 0) {
                 renderStatus(addKeyStatus, 'API 金鑰不可為空。', true);
@@ -249,13 +281,17 @@
                 const key = keys[i].trim();
                 // 別名只套用在第一個金鑰上
                 const keyName = (i === 0 && name) ? name : null;
-                renderStatus(addKeyStatus, `正在處理金鑰 #${i + 1}...`, false, true);
+                renderStatus(addKeyStatus, `正在處理 ${keyType.toUpperCase()} 金鑰 #${i + 1}...`, false, true);
 
                 try {
                     const response = await fetch('/api/keys', {
                         method: 'POST',
                         headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({ api_key: key, name: keyName })
+                        body: JSON.stringify({
+                            api_key: key,
+                            name: keyName,
+                            key_type: keyType // 將金鑰類型傳遞給後端
+                        })
                     });
                     const result = await response.json();
                     if (!response.ok) throw new Error(result.detail || '新增失敗');

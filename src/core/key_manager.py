@@ -92,23 +92,33 @@ def _validate_single_key(api_key: str) -> bool:
 
 # --- 公開 API (介面維持不變) ---
 
-def get_all_keys() -> List[Dict[str, Any]]:
-    """獲取所有金鑰的狀態，但不包含原始金鑰值。"""
-    query = "SELECT key_name, key_hash, is_valid, last_validated_at, total_tokens_used FROM api_keys ORDER BY id"
-    rows = _execute_query(query, fetch='all')
-    # 將 sqlite3.Row 物件轉換為標準字典，並符合舊版函式的輸出格式
+def get_all_keys(key_type: Optional[str] = None) -> List[Dict[str, Any]]:
+    """
+    獲取所有金鑰的狀態，但不包含原始金鑰值。
+    可選擇性地根據 key_type 進行過濾。
+    """
+    query = "SELECT key_name, key_hash, is_valid, last_validated_at, total_tokens_used, key_type FROM api_keys"
+    params = []
+    if key_type:
+        query += " WHERE key_type = ?"
+        params.append(key_type)
+    query += " ORDER BY id"
+
+    rows = _execute_query(query, tuple(params), fetch='all')
+    # 將 sqlite3.Row 物件轉換為標準字典
     return [
         {
             "name": row["key_name"],
             "key_hash": row["key_hash"],
             "is_valid": bool(row["is_valid"]),
             "last_validated": row["last_validated_at"],
-            "total_tokens_used": row["total_tokens_used"]
+            "total_tokens_used": row["total_tokens_used"],
+            "key_type": row["key_type"]
         } for row in rows
     ]
 
-def add_key(key_value: str, key_name: Optional[str] = None, validate: bool = True) -> Dict[str, Any]:
-    """新增一個金鑰到資料庫。"""
+def add_key(key_value: str, key_name: Optional[str] = None, key_type: str = 'gemini', validate: bool = True) -> Dict[str, Any]:
+    """新增一個金鑰到資料庫，並可指定其類型。"""
     if not key_value or not key_value.strip():
         raise ValueError("API 金鑰不可為空。")
 
@@ -120,21 +130,32 @@ def add_key(key_value: str, key_name: Optional[str] = None, validate: bool = Tru
 
     is_valid = False
     validation_time = None
+
+    # 根據金鑰類型決定驗證方式
     if validate:
-        is_valid = _validate_single_key(key_value)
+        if key_type == 'gemini':
+            is_valid = _validate_single_key(key_value)
+        elif key_type == 'fred':
+            # 對於 FRED 金鑰，我們目前假設它是有效的，因為驗證方式不同。
+            # 實際的驗證可以在消費端進行。
+            is_valid = True
+        else:
+            # 對於未知的金鑰類型，預設為無效，需要手動驗證
+            is_valid = False
+
         validation_time = datetime.now().isoformat()
 
-    final_key_name = key_name or f"Key-{int(time.time())}" # 使用時間戳確保唯一性
+    final_key_name = key_name or f"{key_type.capitalize()}-{int(time.time())}"
 
     query = """
-        INSERT INTO api_keys (key_name, key_hash, key_value, is_valid, last_validated_at, status)
-        VALUES (?, ?, ?, ?, ?, ?)
+        INSERT INTO api_keys (key_name, key_hash, key_value, is_valid, last_validated_at, status, key_type)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
     """
-    params = (final_key_name, key_hash, key_value, is_valid, validation_time, 'active')
+    params = (final_key_name, key_hash, key_value, is_valid, validation_time, 'active', key_type)
     _execute_query(query, params)
 
-    # 回傳與舊版函式相同的格式
-    return {"name": final_key_name, "key_hash": key_hash, "is_valid": is_valid}
+    # 回傳包含 key_type 的結果
+    return {"name": final_key_name, "key_hash": key_hash, "is_valid": is_valid, "key_type": key_type}
 
 def delete_key(key_hash: str) -> bool:
     """根據雜湊值從資料庫中刪除一個金鑰。"""
@@ -152,9 +173,10 @@ def clear_all_keys() -> int:
 
 def validate_all_keys() -> List[Dict[str, Any]]:
     """
-    並行重新驗證所有已儲存的金鑰，以提升效率。
+    並行重新驗證所有已儲存的 'gemini' 金鑰，以提升效率。
     """
-    keys_to_validate = _execute_query("SELECT id, key_value FROM api_keys", fetch='all')
+    # 只驗證 gemini 類型的金鑰
+    keys_to_validate = _execute_query("SELECT id, key_value FROM api_keys WHERE key_type = 'gemini'", fetch='all')
     if not keys_to_validate:
         return []
 
@@ -175,18 +197,18 @@ def validate_all_keys() -> List[Dict[str, Any]]:
 
     return get_all_keys()
 
-def get_valid_key() -> Optional[str]:
+def get_valid_key(key_type: str = 'gemini') -> Optional[str]:
     """
-    從池中獲取一個有效的金鑰。
+    從池中獲取一個指定類型的有效金鑰。
     策略：優先選取最久未被使用的活躍金鑰。
     """
     query = """
         SELECT id, key_value FROM api_keys
-        WHERE status = 'active' AND is_valid = 1
+        WHERE status = 'active' AND is_valid = 1 AND key_type = ?
         ORDER BY last_used_at ASC NULLS FIRST
         LIMIT 1
     """
-    key_row = _execute_query(query, fetch='one')
+    key_row = _execute_query(query, (key_type,), fetch='one')
 
     if key_row:
         # 標記此金鑰為已使用
@@ -196,10 +218,10 @@ def get_valid_key() -> Optional[str]:
 
     return None
 
-def get_all_valid_keys_for_manager() -> List[Dict[str, str]]:
-    """獲取所有有效的金鑰，格式為 GeminiManager 所需的列表。"""
-    query = "SELECT key_name, key_value FROM api_keys WHERE is_valid = 1 AND status = 'active'"
-    rows = _execute_query(query, fetch='all')
+def get_all_valid_keys(key_type: str = 'gemini') -> List[Dict[str, str]]:
+    """獲取所有指定類型的有效金鑰。"""
+    query = "SELECT key_name, key_value FROM api_keys WHERE is_valid = 1 AND status = 'active' AND key_type = ?"
+    rows = _execute_query(query, (key_type,), fetch='all')
     return [{"name": row["key_name"], "value": row["key_value"]} for row in rows]
 
 def test_key(api_key: str) -> bool:
