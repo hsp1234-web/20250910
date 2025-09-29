@@ -1,0 +1,5 @@
+# 核心 Web 框架
+fastapi
+
+# ASGI 伺服器，用於執行 FastAPI
+uvicorn[standard]

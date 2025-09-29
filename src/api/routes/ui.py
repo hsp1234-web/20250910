@@ -86,6 +86,13 @@ async def serve_page8(request: Request):
 async def serve_page9(request: Request):
     return templates.TemplateResponse("page9_dashboard.html", {"request": request})
 
+@router.get("/key_master_dashboard", response_class=HTMLResponse)
+async def get_key_master_dashboard(request: Request):
+    """
+    提供金鑰大師儀表板頁面。
+    """
+    return templates.TemplateResponse("key_master_dashboard.html", {"request": request})
+
 @router.get("/page10_service_test.html", response_class=HTMLResponse)
 async def serve_page10(request: Request):
     return templates.TemplateResponse("page10_service_test.html", {"request": request})

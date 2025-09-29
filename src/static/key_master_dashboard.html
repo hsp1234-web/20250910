@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>金鑰大師儀表板</title>
+    <!-- 引用與主頁和其他頁面一致的通用樣式 -->
+    <link rel="stylesheet" href="/static/css/main.css">
+    <link rel="stylesheet" href="/static/css/common.css">
+    <style>
+        /* 針對此頁面的微調樣式 */
+        .key-table-container {
+            overflow-x: auto; /* 在小螢幕上提供水平捲動條 */
+        }
+        .key-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+        .key-table th, .key-table td {
+            border: 1px solid var(--phoenix-border-color);
+            padding: 12px 15px;
+            text-align: left;
+            white-space: nowrap; /* 防止內容換行 */
+        }
+        .key-table th {
+            background-color: #f2f2f2;
+            color: var(--phoenix-heading-color);
+        }
+        .key-table tr:nth-child(even) {
+            background-color: #f9f9f9;
+        }
+        .status-valid {
+            color: var(--phoenix-success-color);
+            font-weight: bold;
+        }
+        .status-invalid {
+            color: var(--phoenix-danger-color);
+            font-weight: bold;
+        }
+        .no-keys-message {
+            text-align: center;
+            padding: 20px;
+            font-style: italic;
+            color: var(--phoenix-secondary-color);
+        }
+    </style>
+</head>
+<body>
+    <div class="content">
+        <div class="panel">
+            <a href="/" class="button secondary" style="float: right;">&larr; 返回主頁</a>
+            <h1>金鑰大師儀表板</h1>
+            <p>此儀表板顯示由 `key_master_service` 集中管理的所有 API 金鑰的即時狀態。</p>
+        </div>
+
+        <div class="panel">
+            <h2>金鑰列表</h2>
+            <div id="key-list-container" class="key-table-container">
+                <p class="no-keys-message">正在從 Key Master Service 載入金鑰...</p>
+                <!-- JavaScript 將會在此處動態填入表格 -->
+            </div>
+        </div>
+    </div>
+
+    <!-- 引用即將建立的 JavaScript 檔案 -->
+    <script src="/static/js/key_master.js"></script>
+</body>
+</html>

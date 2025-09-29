@@ -22,4 +22,5 @@ matplotlib
 # Report & File Handling Dependencies
 WeasyPrint
 python-docx
-lxmlplotly
+lxml
+plotly
