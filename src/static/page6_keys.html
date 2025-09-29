@@ -26,7 +26,8 @@
     <div class="content">
         <div class="panel">
             <h1>金鑰管理</h1>
-            <p>此頁面用於管理您的 Google API 金鑰池。有效的金鑰將被用於 AI 分析任務。</p>
+            <!-- JULES: 更新說明文字 -->
+            <p>此頁面用於統一管理您所有服務的 API 金鑰，例如用於 AI 分析的 Gemini 金鑰，或用於財經數據的 FRED 金鑰。</p>
         </div>
 
         <!-- 新增：模式選擇 -->
@@ -36,18 +37,22 @@
                 <input type="radio" id="mode-manual" name="key-mode" value="manual" checked>
                 <label for="mode-manual">手動輸入</label>
                 <input type="radio" id="mode-authorized" name="key-mode" value="authorized">
-                <label for="mode-authorized">從授權來源載入</label>
+                <label for="mode-authorized">從授權來源載入 (僅限 Gemini)</label>
             </div>
         </div>
 
-        <!-- 模式一：手動輸入 -->
+        <!-- 模式一：手動輸入 (JULES: 已更新以支援多種類型金鑰) -->
         <div id="manual-input-panel" class="panel">
             <h2>新增金鑰 (手動)</h2>
             <div class="form-group">
-                <textarea id="new-keys-textarea" placeholder="在此貼上多個 API 金鑰（一行一個）" rows="5"></textarea>
+                <label for="key-type-select">金鑰類型:</label>
+                <select id="key-type-select">
+                    <option value="gemini" selected>Gemini (Google AI)</option>
+                    <option value="fred">FRED (美國聯準會經濟數據)</option>
+                </select>
+                <textarea id="new-key-textarea" placeholder="在此貼上一個 API 金鑰" rows="3"></textarea>
                 <input type="text" id="new-key-name-input" placeholder="為金鑰設定一個別名 (可選)">
-                <small>說明：若貼上多個金鑰，別名只會套用於第一個金鑰。</small>
-                <button id="add-key-btn">新增金鑰</button>
+                <button id="add-key-btn">新增並驗證金鑰</button>
             </div>
             <div id="add-key-status"></div>
         </div>
@@ -116,7 +121,7 @@
 
         <div class="panel">
             <div class="panel-header">
-                <h2>可用模型</h2>
+                <h2>可用模型 (僅限 Gemini)</h2>
                 <button id="fetch-models-btn">查詢可用模型</button>
             </div>
             <div id="model-list-container">
@@ -139,18 +144,19 @@
         const manualInputPanel = document.getElementById('manual-input-panel');
         const authorizedLoadPanel = document.getElementById('authorized-load-panel');
 
-        // 手動模式元素
+        // 手動模式元素 (JULES: 更新)
         const addKeyBtn = document.getElementById('add-key-btn');
-        const newKeysTextarea = document.getElementById('new-keys-textarea');
+        const newKeyTextarea = document.getElementById('new-key-textarea');
         const newKeyNameInput = document.getElementById('new-key-name-input');
         const addKeyStatus = document.getElementById('add-key-status');
+        const keyTypeSelect = document.getElementById('key-type-select');
 
         // 授權模式元素
         const loadFromEnvBtn = document.getElementById('load-from-env-btn');
         const keyLoadCountInput = document.getElementById('key-load-count');
         const loadFromEnvStatus = document.getElementById('load-from-env-status');
 
-        // JULES (2025-09-22): 全域 API 行為設定元素
+        // 全域 API 行為設定元素
         const timeoutInput = document.getElementById('api-timeout-input');
         const saveTimeoutBtn = document.getElementById('save-timeout-btn');
         const timeoutStatus = document.getElementById('timeout-status');
@@ -160,17 +166,10 @@
 
 
         // --- 通用函式 ---
-        const renderStatus = (element, message, isError = false, append = false) => {
-            if (append) {
-                const p = document.createElement('p');
-                p.textContent = message;
-                p.style.color = isError ? 'red' : 'green';
-                element.appendChild(p);
-            } else {
-                element.innerHTML = ''; // 清空
-                element.textContent = message;
-                element.style.color = isError ? 'red' : 'green';
-            }
+        const renderStatus = (element, message, isError = false) => {
+            element.innerHTML = ''; // 清空
+            element.textContent = message;
+            element.style.color = isError ? 'red' : 'green';
         };
 
         const renderKeyList = (keys) => {
@@ -184,9 +183,11 @@
                 const statusText = key.is_valid === true ? '有效' : (key.is_valid === false ? '無效' : '未驗證');
                 const lastValidated = key.last_validated ? new Date(key.last_validated).toLocaleString('zh-TW') : '從未';
 
+                // JULES: 新增 key_type 的顯示
                 html += `
                     <li class="key-item">
                         <span class="key-name">${key.name}</span>
+                        <span class="key-type-badge type-${key.key_type}">${key.key_type.toUpperCase()}</span>
                         <span class="key-hash">雜湊值: ...${key.key_hash.slice(-8)}</span>
                         <span class="key-status ${statusClass}">${statusText}</span>
                         <span class="key-validated">上次驗證: ${lastValidated}</span>
@@ -205,13 +206,11 @@
                 const keys = await response.json();
                 renderKeyList(keys);
 
-                // JULES (2025-09-21): 新增邏輯：檢查是否有有效金鑰，若有則觸發模型查詢
-                const hasValidKeys = keys.some(key => key.is_valid);
-                if (hasValidKeys) {
-                    // 自動觸發一次模型查詢
+                const hasValidGeminiKey = keys.some(key => key.is_valid && key.key_type === 'gemini');
+                if (hasValidGeminiKey) {
                     fetchModels();
                 } else {
-                    modelListContainer.innerHTML = '<p>沒有可用的有效金鑰。請先手動驗證或新增有效金鑰。</p>';
+                    modelListContainer.innerHTML = '<p>沒有可用的有效 Gemini 金鑰。請先新增或驗證一個 Gemini 金鑰以查詢模型。</p>';
                 }
             } catch (error) {
                 keyListContainer.innerHTML = `<p style="color: red;">${error.message}</p>`;
@@ -220,7 +219,6 @@
 
         // --- 事件監聽器 ---
 
-        // 模式切換邏輯
         modeManualRadio.addEventListener('change', () => {
             manualInputPanel.style.display = 'block';
             authorizedLoadPanel.style.display = 'none';
@@ -231,48 +229,46 @@
             authorizedLoadPanel.style.display = 'block';
         });
 
-        // 手動模式邏輯
+        // JULES: 更新手動新增邏輯
         addKeyBtn.addEventListener('click', async () => {
-            const keys = newKeysTextarea.value.trim().split('\\n').filter(k => k.trim() !== '');
+            const key = newKeyTextarea.value.trim();
             const name = newKeyNameInput.value.trim();
+            const keyType = keyTypeSelect.value;
 
-            if (keys.length === 0) {
+            if (!key) {
                 renderStatus(addKeyStatus, 'API 金鑰不可為空。', true);
                 return;
             }
 
             addKeyBtn.disabled = true;
             addKeyBtn.textContent = '新增中...';
-            addKeyStatus.innerHTML = ''; // 清空狀態區
+            renderStatus(addKeyStatus, `正在新增並驗證 ${keyType.toUpperCase()} 金鑰...`, false);
 
-            for (let i = 0; i < keys.length; i++) {
-                const key = keys[i].trim();
-                // 別名只套用在第一個金鑰上
-                const keyName = (i === 0 && name) ? name : null;
-                renderStatus(addKeyStatus, `正在處理金鑰 #${i + 1}...`, false, true);
-
-                try {
-                    const response = await fetch('/api/keys', {
-                        method: 'POST',
-                        headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({ api_key: key, name: keyName })
-                    });
-                    const result = await response.json();
-                    if (!response.ok) throw new Error(result.detail || '新增失敗');
-                    renderStatus(addKeyStatus, `✅ 金鑰 #${i + 1} (${result.name}) 新增成功。`, false, true);
-                } catch (error) {
-                    renderStatus(addKeyStatus, `❌ 金鑰 #${i + 1} 新增失敗: ${error.message}`, true, true);
-                }
+            try {
+                const response = await fetch('/api/keys', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        api_key: key,
+                        key_type: keyType,
+                        name: name || null
+                    })
+                });
+                const result = await response.json();
+                if (!response.ok) throw new Error(result.detail || '新增失敗');
+                renderStatus(addKeyStatus, `✅ 金鑰 '${result.name}' (類型: ${result.key_type}) 新增成功。有效性: ${result.is_valid ? '是' : '否'}`, false);
+            } catch (error) {
+                renderStatus(addKeyStatus, `❌ 金鑰新增失敗: ${error.message}`, true);
+            } finally {
+                newKeyTextarea.value = '';
+                newKeyNameInput.value = '';
+                addKeyBtn.disabled = false;
+                addKeyBtn.textContent = '新增並驗證金鑰';
+                fetchKeys();
             }
-
-            newKeysTextarea.value = '';
-            newKeyNameInput.value = '';
-            addKeyBtn.disabled = false;
-            addKeyBtn.textContent = '新增金鑰';
-            fetchKeys();
         });
 
-        // 授權模式邏輯
+        // 授權模式邏輯 (無變動)
         loadFromEnvBtn.addEventListener('click', async () => {
             const count = parseInt(keyLoadCountInput.value, 10);
             if (isNaN(count) || count < 0 || count > 20) {
@@ -313,7 +309,7 @@
         });
 
 
-        // 其他既有功能
+        // 其他既有功能 (無變動)
         keyListContainer.addEventListener('click', async (e) => {
             if (e.target.classList.contains('delete-btn')) {
                 const keyHash = e.target.dataset.hash;
@@ -322,8 +318,10 @@
                 }
                 try {
                     const response = await fetch(`/api/keys/${keyHash}`, { method: 'DELETE' });
-                    const result = await response.json();
-                    if (!response.ok) throw new Error(result.detail || '刪除失敗');
+                    if (!response.ok) {
+                        const result = await response.json();
+                        throw new Error(result.detail || '刪除失敗');
+                    }
                     fetchKeys();
                 } catch (error) {
                     alert(`刪除失敗: ${error.message}`);
@@ -348,7 +346,6 @@
             }
         });
 
-        // JULES (2025-09-21): 重構模型查詢邏輯，以便在頁面載入時自動執行
         const fetchModels = async () => {
             fetchModelsBtn.disabled = true;
             fetchModelsBtn.textContent = '查詢中...';
@@ -358,7 +355,6 @@
                 const response = await fetch('/api/keys/models');
                 const result = await response.json();
                 if (!response.ok) {
-                    // 如果沒有有效金鑰，後端會回傳 400 錯誤
                     if (response.status === 400) {
                          throw new Error('查詢失敗：請確保至少有一個有效金鑰。');
                     }
@@ -367,7 +363,6 @@
 
                 if (result.length > 0) {
                     let modelHtml = '<ul>';
-                    // 增加排序和格式化，使其與另一頁面一致
                     result.sort().forEach(model => {
                         modelHtml += `<li>${model.replace('models/', '')}</li>`;
                     });
@@ -385,15 +380,12 @@
             }
         };
 
-        // 按鈕現在只負責觸發已重構的函式
         fetchModelsBtn.addEventListener('click', fetchModels);
 
-        // --- JULES (2025-09-15): 超時設定邏輯 ---
-        // --- JULES (2025-09-17): 重構為通用設定處理函式 ---
+        // 設定管理邏輯 (無變動)
         const submissionDelayInput = document.getElementById('initial-submission-delay-input');
         const saveSubmissionDelayBtn = document.getElementById('save-submission-delay-btn');
         const submissionDelayStatus = document.getElementById('submission-delay-status');
-
         const rotationDelayInput = document.getElementById('key-rotation-delay-input');
         const saveRotationDelayBtn = document.getElementById('save-rotation-delay-btn');
         const rotationDelayStatus = document.getElementById('rotation-delay-status');
@@ -418,7 +410,7 @@
 
         const saveSetting = async (key, inputElement, statusElement, buttonElement) => {
             const value = parseFloat(inputElement.value);
-            if (isNaN(value) || value < 0 || value > 300) { // 擴大範圍以通用
+            if (isNaN(value) || value < 0 || value > 300) {
                 renderStatus(statusElement, '請輸入 0 到 300 之間的有效數字。', true);
                 return;
             }
@@ -450,7 +442,7 @@
         saveRotationDelayBtn.addEventListener('click', () => saveSetting('gemini_rotation_delay', rotationDelayInput, rotationDelayStatus, saveRotationDelayBtn));
 
         // --- 初始載入 ---
-        fetchKeys(); // fetchModels() is now correctly called from within fetchKeys()
+        fetchKeys();
         fetchSetting('api_timeout_seconds', timeoutInput, timeoutStatus);
         fetchSetting('api_max_retries', retriesInput, retriesStatus);
         fetchSetting('gemini_submission_delay', submissionDelayInput, submissionDelayStatus);
@@ -511,7 +503,6 @@
             const overlay = document.getElementById('readiness-overlay');
             const buttons = document.querySelectorAll('button, a.button, input[type="button"], input[type="submit"]');
 
-            // 輔助函數：啟用UI
             function enableUI() {
                 overlay.style.display = 'none';
                 buttons.forEach(btn => {
@@ -520,17 +511,15 @@
                 console.log('系統已就緒，UI 已啟用。');
             }
 
-            // 檢查 sessionStorage 中是否已有就緒標記
             if (sessionStorage.getItem('isSystemReady') === 'true') {
                 enableUI();
                 const overlayText = overlay.querySelector('p');
                 if(overlayText) {
                     overlayText.innerText = '系統已就緒';
                 }
-                return; // 如果已就緒，則不執行後續的輪詢
+                return;
             }
 
-            // 1. 預設禁用所有按鈕並顯示遮罩
             buttons.forEach(btn => {
                 if (!btn.closest('.navbar')) {
                     btn.disabled = true;
@@ -538,14 +527,12 @@
             });
             overlay.style.display = 'flex';
 
-            // 2. 定期輪詢 /api/health/ready 端點
             const readinessInterval = setInterval(() => {
                 fetch('/api/health/ready')
                     .then(response => {
                         if (response.ok) {
-                            // 3. 一旦請求成功，設定標記、啟用按鈕並隱藏遮罩
                             clearInterval(readinessInterval);
-                            sessionStorage.setItem('isSystemReady', 'true'); // 設定標記
+                            sessionStorage.setItem('isSystemReady', 'true');
                             enableUI();
                         } else {
                             console.log('等待核心服務就緒...');
@@ -558,7 +545,7 @@
                             overlayText.innerText = '無法連接到後端服務，請檢查連線或稍後重試。';
                         }
                     });
-            }, 2000); // 每 2 秒輪詢一次
+            }, 2000);
         });
     </script>
     <!-- V5.5 Readiness Overlay End -->

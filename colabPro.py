@@ -215,14 +215,10 @@ class ServerManager:
 
     def _inject_keys_background(self, project_path: Path):
         """
-        [背景執行] 負責從 Colab Secrets 獲取金鑰並透過腳本注入。
+        [背景執行] 負責從 Colab Secrets 獲取並注入所有類型的金鑰。
         """
-        self._log_manager.log("INFO", "[背景] 開始執行金鑰注入...")
+        self._log_manager.log("INFO", "[背景] 開始執行統一金鑰注入流程...")
         try:
-            # --- (中文註解) 核心金鑰注入邏輯（v2 修正版） ---
-            # 根本原因：在子程序中呼叫 google.colab.userdata.get() 會因缺少前端上下文而失敗。
-            # 解決方案：在擁有完整上下文的主程序中獲取所有金鑰，
-            # 然後將金鑰內容透過 `--mode manual` 安全地傳遞給子程序。
             key_injector_script = project_path / "scripts" / "colab_key_injector.py"
             if not key_injector_script.is_file():
                 self._log_manager.log("WARN", f"[背景] 未找到金鑰注入腳本 '{key_injector_script}'，跳過金鑰載入。")
@@ -231,51 +227,65 @@ class ServerManager:
             from google.colab import userdata
             self._log_manager.log("INFO", "[背景] 正在從 Colab Secrets 獲取金鑰...")
 
+            # --- 注入函式 ---
+            def run_injector(key_type, keys_string):
+                command = [
+                    sys.executable, str(key_injector_script.resolve()),
+                    "--mode", "manual",
+                    "--key-type", key_type,
+                    "--manual-keys", keys_string
+                ]
+                process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8')
+                for line in iter(process.stdout.readline, ''):
+                    self._log_manager.log("INFO", f"[背景] {line.strip()}", "KeyInjector")
+                process.wait()
+                if process.returncode == 0:
+                    self._log_manager.log("SUCCESS", f"[背景] ✅ {key_type.upper()} 金鑰注入成功。")
+                else:
+                    self._log_manager.log("WARN", f"[背景] {key_type.upper()} 金鑰注入腳本返回碼為 {process.returncode}。")
+
+            # --- 處理 Gemini 金鑰 ---
             base_key_name = "GOOGLE_API_KEY"
             target_key_names = [base_key_name]
             if KEY_LOAD_COUNT_LIMIT > 0:
                 target_key_names.extend([f"{base_key_name}_{i}" for i in range(1, KEY_LOAD_COUNT_LIMIT + 1)])
 
-            keys_to_inject = []
+            gemini_keys_to_inject = []
             for key_name in target_key_names:
                 try:
                     key_value = userdata.get(key_name)
                     if key_value and key_value.strip():
-                        keys_to_inject.append(key_value)
-                        self._log_manager.log("INFO", f"[背景] ✅ 已成功獲取金鑰 '{key_name}'。")
+                        gemini_keys_to_inject.append(key_value)
+                        self._log_manager.log("INFO", f"[背景] ✅ 已獲取 Gemini 金鑰 '{key_name}'。")
                 except userdata.SecretNotFoundError:
-                    self._log_manager.log("INFO", f"[背景] 🟡 未在 Colab Secrets 中找到金鑰 '{key_name}'，跳過。")
+                    self._log_manager.log("INFO", f"[背景] 🟡 未找到 Gemini 金鑰 '{key_name}'。")
                 except Exception as e:
-                    # 捕捉其他可能的錯誤，例如權限問題
-                    self._log_manager.log("WARN", f"[背景] 讀取金鑰 '{key_name}' 時發生錯誤: {e}，跳過。")
+                    self._log_manager.log("WARN", f"[背景] 讀取金鑰 '{key_name}' 時發生錯誤: {e}。")
 
-            if not keys_to_inject:
-                 self._log_manager.log("WARN", "[背景] 未從 Colab Secrets 中獲取到任何金鑰，跳過注入。")
-                 return
-
-            keys_string = "\n".join(keys_to_inject)
-            command = [
-                sys.executable, str(key_injector_script.resolve()),
-                "--mode", "manual", "--manual-keys", keys_string
-            ]
-
-            # 使用 Popen 以非阻塞方式執行，並透過 stream_reader 處理日誌
-            process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8')
-            for line in iter(process.stdout.readline, ''):
-                self._log_manager.log("INFO", f"[背景] {line.strip()}", "KeyInjector")
-            process.wait()
-
-            if process.returncode == 0:
-                self._log_manager.log("SUCCESS", "[背景] ✅ 金鑰注入腳本執行完畢。")
+            if gemini_keys_to_inject:
+                run_injector('gemini', "\n".join(gemini_keys_to_inject))
             else:
-                self._log_manager.log("WARN", f"[背景] 金鑰注入腳本執行結束，但返回碼為 {process.returncode}。")
+                 self._log_manager.log("INFO", "[背景] 未從 Colab Secrets 中獲取到任何 Gemini 金鑰。")
+
+            # --- 處理 FRED 金鑰 ---
+            try:
+                fred_api_key = userdata.get('FRED_API_KEY')
+                if fred_api_key and fred_api_key.strip():
+                    self._log_manager.log("INFO", f"[背景] ✅ 已獲取 FRED_API_KEY。")
+                    run_injector('fred', fred_api_key)
+                else:
+                    self._log_manager.log("INFO", "[背景] 🟡 未找到 FRED_API_KEY 或其值為空。")
+            except userdata.SecretNotFoundError:
+                self._log_manager.log("INFO", "[背景] 🟡 未在 Colab Secrets 中找到 FRED_API_KEY。")
+            except Exception as e:
+                self._log_manager.log("WARN", f"[背景] 讀取 FRED_API_KEY 時發生錯誤: {e}。")
 
         except ImportError:
             self._log_manager.log("WARN", "[背景] 無法匯入 google.colab.userdata，可能並非在 Colab 環境。跳過金鑰注入。")
         except Exception as e:
-            self._log_manager.log("ERROR", f"[背景] 執行金鑰注入時發生未預期的錯誤: {e}")
+            self._log_manager.log("ERROR", f"[背景] 執行金鑰注入時發生未預期的錯誤: {e}", exc_info=True)
         finally:
-            self._log_manager.log("INFO", "[背景] 金鑰注入執行緒結束。")
+            self._log_manager.log("INFO", "[背景] 統一金鑰注入流程結束。")
 
 
     def _run(self):
@@ -449,20 +459,9 @@ class ServerManager:
             src_path_str = str((project_path / "src").resolve())
             process_env['PYTHONPATH'] = f"{src_path_str}{os.pathsep}{process_env.get('PYTHONPATH', '')}".strip(os.pathsep)
 
-            # 安全地注入 FRED API 金鑰
-            try:
-                from google.colab import userdata
-                fred_api_key = userdata.get('FRED_API_KEY')
-                if fred_api_key:
-                    process_env['FRED_API_KEY'] = fred_api_key
-                    self._log_manager.log("SUCCESS", "✅ 成功從 Colab Secrets 讀取並注入 FRED_API_KEY。")
-                else:
-                    self._log_manager.log("WARN", "🟡 在 Colab Secrets 中找到 FRED_API_KEY，但其值為空。")
-            except (ImportError, userdata.SecretNotFoundError):
-                self._log_manager.log("WARN", "🟡 未在 Colab Secrets 中找到 FRED_API_KEY，部分圖表可能無法顯示。")
-            except Exception as e:
-                self._log_manager.log("ERROR", f"讀取 FRED_API_KEY 時發生錯誤: {e}")
-
+            # JULES (2025-09-29): 移除舊的 FRED 金鑰環境變數注入邏輯。
+            # 新的統一流程是透過 _inject_keys_background() 函式，
+            # 將所有金鑰（包括 FRED）都透過 colab_key_injector.py 腳本注入到中央金鑰管理器。
             self.server_process = subprocess.Popen(launch_command, cwd=str(project_path), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8', preexec_fn=os.setsid, env=process_env)
 
             # --- 階段 4: [已停用] V5.5 之後，大型依賴的安裝由使用者在需要時觸發 ---

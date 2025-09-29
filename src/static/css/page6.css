@@ -173,3 +173,23 @@ button:disabled {
         text-align: center;
     }
 }
+
+/* JULES (2025-09-29): 為金鑰類型標籤新增樣式 */
+.key-type-badge {
+    padding: 4px 10px;
+    border-radius: 12px;
+    font-size: 0.8em;
+    font-weight: bold;
+    color: white;
+    text-shadow: 1px 1px 1px rgba(0,0,0,0.2);
+    flex-shrink: 0; /* 防止標籤被壓縮 */
+    margin-right: auto; /* 將標籤推到左邊，與狀態標籤分開 */
+}
+
+.type-gemini {
+    background: linear-gradient(135deg, #4285F4, #34A853); /* Google Blue & Green */
+}
+
+.type-fred {
+    background: linear-gradient(135deg, #AC2025, #D43A3F); /* FRED Red */
+}

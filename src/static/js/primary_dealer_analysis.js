@@ -1,7 +1,7 @@
 // src/static/js/primary_dealer_analysis.js
 
 document.addEventListener('DOMContentLoaded', () => {
-    console.log("儀表板動態載入腳本 V5.0 已啟動 (整合互動圖表)。");
+    console.log("儀表板動態載入腳本 V5.1 已啟動 (整合統一金鑰管理)。");
 
     // --- 元素選擇器 ---
     const startDateInput = document.getElementById('start-date');
@@ -38,44 +38,51 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    // JULES (2025-09-29): 更新此函式以使用新的統一金鑰狀態 API
     async function checkKeyAndLoadCharts() {
-        console.log("✅ 後端服務已就緒！正在檢查 API 金鑰...");
+        console.log("✅ 後端服務已就緒！正在檢查 FRED API 金鑰狀態...");
 
-        // 檢查 API 金鑰狀態
         try {
-            const keyResponse = await fetch('/api/key_status');
-            if (keyResponse.ok) {
-                console.log("✅ API 金鑰已就緒，開始載入圖表。");
+            // 呼叫新的、特定類型的金鑰狀態檢查 API
+            const keyResponse = await fetch('/api/keys/status/fred');
+            const keyStatus = await keyResponse.json();
+
+            if (keyResponse.ok && keyStatus.available) {
+                console.log("✅ FRED API 金鑰已就緒，開始載入圖表。");
                 loadAllCharts();
             } else {
-                const errorData = await keyResponse.json().catch(() => ({}));
-                const message = errorData.message || "尚未設定 FRED API 金鑰。";
+                const message = "尚未設定或驗證有效的 FRED API 金鑰。請至「金鑰管理」頁面新增。";
                 console.warn("API 金鑰檢查失敗:", message);
                 indicators.forEach(id => {
-                    document.getElementById(`chart-container-${id}`).innerHTML = `<div class="placeholder" style="color: #d63031;">${message}</div>`;
+                    const container = document.getElementById(`chart-container-${id}`);
+                    if (container) {
+                        container.innerHTML = `<div class="placeholder" style="color: #d63031;">${message}</div>`;
+                    }
                 });
             }
         } catch (error) {
             console.error("檢查 API 金鑰狀態時發生網路錯誤:", error);
+            const message = "網路錯誤，無法檢查金鑰狀態。";
             indicators.forEach(id => {
-                document.getElementById(`chart-container-${id}`).innerHTML = `<div class="placeholder" style="color: #d6f31;">網路錯誤，無法檢查金鑰</div>`;
+                 const container = document.getElementById(`chart-container-${id}`);
+                 if (container) {
+                    container.innerHTML = `<div class="placeholder" style="color: #d63031;">${message}</div>`;
+                 }
             });
         }
     }
 
     function waitForServiceReady() {
-        // 顯示載入提示
         indicators.forEach(id => {
             const container = document.getElementById(`chart-container-${id}`);
             if (container) container.innerHTML = '<div class="placeholder">正在等待後端服務啟動...</div>';
         });
 
-        // 使用輪詢來探測後端服務
         const intervalId = setInterval(async () => {
             console.log("正在探測後端服務狀態...");
             if (await checkServiceHealth()) {
                 clearInterval(intervalId);
-                checkKeyAndLoadCharts(); // 服務就緒後，交由下一步處理
+                checkKeyAndLoadCharts();
             } else {
                 console.log("...後端服務尚未就緒，將在 2 秒後重試。");
             }
@@ -86,7 +93,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const startDate = startDateInput.value, endDate = endDateInput.value;
         if (!startDate || !endDate) { alert("請確保已選擇開始和結束日期。"); return; }
         console.log(`啟動獨立圖表載入程序...`);
-        fullData = {}; // 重設數據
+        fullData = {};
 
         const allPanels = Array.from(document.querySelectorAll('.panel[data-indicator-id]'));
         allPanels.forEach(panel => {
@@ -103,7 +110,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const chartData = await response.json();
                 if (!chartData || chartData.length === 0) throw new Error('後端未返回任何數據');
 
-                fullData[indicatorId] = chartData; // 儲存數據
+                fullData[indicatorId] = chartData;
                 await plotChartFromData(indicatorId, chartData);
             } catch (error) {
                 console.error(`載入圖表 ${indicatorId} 發生錯誤:`, error);
@@ -169,8 +176,6 @@ document.addEventListener('DOMContentLoaded', () => {
         return plotMapping[indicatorId] || plotSimpleLineChart;
     }
 
-    // --- 通用繪圖函式 (全中文化) ---
-    // 主要修改：增加 isInteractive 參數以控制 staticPlot
     function plotSimpleLineChart(container, data, indicatorId, isInteractive) {
         const chartTitle = titleMapping[indicatorId] || "圖表";
         const yAxisTitleMapping = {
@@ -263,7 +268,6 @@ document.addEventListener('DOMContentLoaded', () => {
         console.log(`已設定預設日期範圍: ${startDateInput.value} 至 ${endDateInput.value}`);
     }
 
-    // --- 初始化與事件綁定 ---
     if (updateBtn) {
         updateBtn.addEventListener('click', waitForServiceReady);
     } else {

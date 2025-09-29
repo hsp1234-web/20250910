@@ -12,20 +12,20 @@ SRC_DIR = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(SRC_DIR))
 
 from core import key_manager, config_manager
-# JULES V6 啟動優化：延遲載入
-# from tools.gemini_manager import GeminiManager
 
 # --- 常數與設定 ---
 log = logging.getLogger(__name__)
 router = APIRouter()
 
-# --- Pydantic 模型 ---
+# --- Pydantic 模型 (JULES: 已更新以支援多類型金鑰) ---
 class KeyRequest(BaseModel):
-    api_key: str = Field(..., title="Google API Key")
-    name: Optional[str] = Field(None, title="Key Alias")
+    api_key: str = Field(..., title="API 金鑰值")
+    key_type: str = Field("gemini", title="金鑰類型 (例如 'gemini', 'fred')")
+    name: Optional[str] = Field(None, title="金鑰別名")
 
 class TestKeyRequest(BaseModel):
     api_key: str
+    key_type: str = Field("gemini", title="金鑰類型")
 
 class LoadFromEnvRequest(BaseModel):
     count: int = Field(..., ge=0, le=20, title="要載入的金鑰數量")
@@ -35,7 +35,7 @@ class LoadFromEnvRequest(BaseModel):
 @router.get("", summary="獲取所有金鑰的狀態")
 async def get_keys_status():
     """
-    獲取所有已儲存金鑰的列表，包含其雜湊值和有效性狀態。
+    獲取所有已儲存金鑰的列表，包含其雜湊值、類型和有效性狀態。
     出於安全考量，此端點不會回傳原始金鑰。
     """
     return key_manager.get_all_keys()
@@ -46,8 +46,9 @@ async def add_new_key(payload: KeyRequest):
     將一個新的 API 金鑰新增到金鑰池，並立即對其進行驗證。
     """
     try:
-        result = key_manager.add_key(payload.api_key, payload.name)
-        return {"message": f"金鑰 '{result['name']}' 已新增。", **result}
+        # JULES: 已更新，傳入 key_type
+        result = key_manager.add_key(payload.api_key, payload.key_type, payload.name)
+        return {"message": f"金鑰 '{result['name']}' (類型: {result['key_type']}) 已新增。", **result}
     except ValueError as e:
         raise HTTPException(status_code=409, detail=str(e))
     except Exception as e:
@@ -98,9 +99,7 @@ async def get_available_models():
     這需要至少有一個有效的 API 金鑰。
     """
     try:
-        # JULES V6 啟動優化：延遲載入
         from tools.gemini_manager import GeminiManager
-        # 獲取有效的金鑰來初始化 Gemini Manager
         valid_keys = key_manager.get_all_valid_keys_for_manager()
         if not valid_keys:
             raise HTTPException(status_code=400, detail="沒有可用的有效 API 金鑰來查詢模型。")
@@ -109,10 +108,8 @@ async def get_available_models():
         models = gemini.list_available_models()
         return models
     except HTTPException:
-        # 確保 FastAPI 的 HTTP 例外能被直接拋出，而不是被下面的通用 Exception 捕捉
         raise
     except ValueError as e:
-        # 可能是金鑰池為空，或 GeminiManager 初始化失敗
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         log.error(f"查詢可用模型時發生未預期的錯誤: {e}", exc_info=True)
@@ -124,12 +121,27 @@ async def test_api_key(payload: TestKeyRequest):
     測試提供的 API 金鑰是否有效，但不會將其儲存到金鑰池。
     """
     try:
-        is_valid = key_manager.test_key(payload.api_key)
+        # JULES: 已更新，傳入 key_type
+        is_valid = key_manager.test_key(payload.api_key, payload.key_type)
         return {"is_valid": is_valid}
     except Exception as e:
         log.error(f"測試金鑰時發生錯誤: {e}", exc_info=True)
-        # 即使是測試，也回傳一個明確的失敗狀態，而不是 500 錯誤
         return {"is_valid": False, "error": str(e)}
+
+# JULES (2025-09-29): 為前端提供一個安全的、查詢特定類型金鑰是否可用的接口
+@router.get("/status/{key_type}", summary="查詢特定類型金鑰的可用狀態")
+async def get_key_availability(key_type: str):
+    """
+    檢查指定類型的金鑰是否有至少一個是有效的。
+    這是一個安全的操作，只會回傳布林值，不會洩漏任何金鑰資訊。
+    """
+    try:
+        key = key_manager.get_valid_key_by_type(key_type)
+        return {"available": key is not None}
+    except Exception as e:
+        log.error(f"查詢金鑰類型 '{key_type}' 的可用性時發生錯誤: {e}", exc_info=True)
+        # 在發生錯誤時，保守地回傳 false
+        return {"available": False}
 
 # --- JULES (2025-09-17): 重構為通用的設定管理 API ---
 
@@ -156,18 +168,15 @@ async def update_config_value_api(key: str, payload: ConfigUpdateRequest):
     更新設定檔中的指定鍵值對。
     """
     try:
-        # 在此處可以加入對特定 key 的值進行驗證的邏輯
         if key in ["api_timeout_seconds", "gemini_submission_delay", "gemini_rotation_delay"]:
             if not (0 <= payload.value <= 300):
                 raise HTTPException(status_code=400, detail="設定值必須介於 0 到 300 之間。")
 
         if key == "api_max_retries":
-            # 確保重試次數是整數且在合理範圍內
             if not (isinstance(payload.value, int) or payload.value.is_integer()):
                  raise HTTPException(status_code=400, detail="重試次數必須是整數。")
             if not (0 <= int(payload.value) <= 5):
                 raise HTTPException(status_code=400, detail="重試次數必須介於 0 到 5 之間。")
-            # 將浮點數轉為整數儲存
             payload.value = int(payload.value)
 
         success = config_manager.update_config_value(key, payload.value)
@@ -176,7 +185,7 @@ async def update_config_value_api(key: str, payload: ConfigUpdateRequest):
         else:
             raise HTTPException(status_code=500, detail="儲存設定檔時發生錯誤。")
     except HTTPException as e:
-        raise e # 重新拋出 HTTP 例外
+        raise e
     except Exception as e:
         log.error(f"更新設定 '{key}' 時發生錯誤: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"更新設定時發生伺服器內部錯誤: {key}")
