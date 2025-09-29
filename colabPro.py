@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
 # ╔══════════════════════════════════════════════════════════════════╗
 # ║                                                                      ║
-# ║   ✨🐺 善狼一鍵啟動器 (v34) 🐺                                   ✨🐺 ║
+# ║   ✨🐺 善狼一鍵啟動器 (v38) 🐺                                   ✨🐺 ║
 # ║                                                                      ║
 # ╠══════════════════════════════════════════════════════════════════╣
 # ║                                                                      ║
-# ║ - V32 更新日誌 (2025-09-27):                                         ║
+# ║ - V38 更新日誌 (2025-09-27):                                         ║
 # ║   - **新增功能**: 自動偵測並顯示 `localtunnel` 的通道密碼，無需     ║
 # ║     使用者手動查詢。                                               ║
 # ║ - V28.1 更新日誌 (2025-09-16):                                       ║
@@ -18,13 +18,13 @@
 # ║                                                                      ║
 # ╚══════════════════════════════════════════════════════════════════╝
 
-#@title ✨🐺 善狼一鍵啟動器 (v34) - 終極簡化版 🐺 { vertical-output: true, display-mode: "form" }
+#@title ✨🐺 善狼一鍵啟動器 (v38) - 終極簡化版 🐺 { vertical-output: true, display-mode: "form" }
 #@markdown ---
 #@markdown ### **核心設定**
 #@markdown > **請確認以下兩個核心設定。**
 #@markdown ---
 #@markdown **後端版本分支或標籤**
-TARGET_BRANCH_OR_TAG = "25.4" #@param {type:"string"}
+TARGET_BRANCH_OR_TAG = "86.6" #@param {type:"string"}
 #@markdown **自動從 Colab Secrets 載入的金鑰數量 (0-20)**
 #@markdown > 輸入 `2` 將載入 `GOOGLE_API_KEY`, `_1`, `_2` 共三組金鑰。
 KEY_LOAD_COUNT_LIMIT = 2 #@param {type:"number"}
@@ -49,7 +49,7 @@ ENABLE_CLOUDFLARE = True
 
 # Part 2: 儀表板與監控設定
 UI_REFRESH_SECONDS = 0.5
-LOG_DISPLAY_LINES = 10
+LOG_DISPLAY_LINES = 30
 TIMEZONE = "Asia/Taipei"
 
 # Part 3: 日誌等級可見性
@@ -141,7 +141,7 @@ class DisplayManager:
         self._thread = threading.Thread(target=self._run, daemon=True)
 
     def _build_output_buffer(self) -> list[str]:
-        output_buffer = ["✨🐺 善狼一鍵啟動器 (v34) 🐺", ""]
+        output_buffer = ["✨🐺 善狼一鍵啟動器 (v38) 🐺", ""]
         logs_to_display = self._log_manager.get_display_logs()
         for log in logs_to_display:
             ts = log['timestamp'].strftime('%H:%M:%S')
@@ -215,87 +215,60 @@ class ServerManager:
 
     def _inject_keys_background(self, project_path: Path):
         """
-        [背景執行] 負責從 Colab Secrets 獲取金鑰並透過 API 注入到 key_master_service。
-        (JULES'S FIX 2025-09-29): 重構此函式，直接呼叫 API，不再依賴外部腳本。
+        [背景執行] 負責從 Colab Secrets 獲取金鑰並透過腳本注入。
         """
-        self._log_manager.log("INFO", "[背景] 開始執行金鑰 API 注入流程...")
+        self._log_manager.log("INFO", "[背景] 開始執行金鑰注入...")
         try:
-            # 1. 等待並獲取 key_master_service 的埠號
-            registry_file = "/tmp/service_registry.json"
-            key_master_port = None
-            for attempt in range(15): # 等待最多 15 秒
-                if self._stop_event.is_set(): return
-                if Path(registry_file).exists():
-                    try:
-                        with open(registry_file, 'r') as f:
-                            registry = json.load(f)
-                        service_info = registry.get("key_master_service")
-                        if service_info and "port" in service_info:
-                            key_master_port = service_info["port"]
-                            self._log_manager.log("INFO", f"[背景] ✅ 成功發現 Key Master Service 於埠號: {key_master_port}")
-                            break
-                    except (json.JSONDecodeError, FileNotFoundError):
-                        pass # 檔案可能正在寫入，稍後重試
-                time.sleep(1)
-
-            if not key_master_port:
-                self._log_manager.log("ERROR", "[背景] ❌ 在 15 秒內未能發現 Key Master Service，金鑰注入失敗。")
+            # --- (中文註解) 核心金鑰注入邏輯（v2 修正版） ---
+            # 根本原因：在子程序中呼叫 google.colab.userdata.get() 會因缺少前端上下文而失敗。
+            # 解決方案：在擁有完整上下文的主程序中獲取所有金鑰，
+            # 然後將金鑰內容透過 `--mode manual` 安全地傳遞給子程序。
+            key_injector_script = project_path / "scripts" / "colab_key_injector.py"
+            if not key_injector_script.is_file():
+                self._log_manager.log("WARN", f"[背景] 未找到金鑰注入腳本 '{key_injector_script}'，跳過金鑰載入。")
                 return
 
-            base_url = f"http://127.0.0.1:{key_master_port}"
-
-            # JULES'S FINAL FIX (2025-09-29): 解決時序錯亂問題
-            # 在呼叫 API 前，先等待協調器發出的服務就緒信號檔案
-            self._log_manager.log("INFO", "[背景] 正在等待 Key Master Service 的最終就緒信號...")
-            signal_file = Path("/tmp/key_master_service.ready")
-            ready_wait_start = time.monotonic()
-            while not signal_file.exists():
-                if time.monotonic() - ready_wait_start > 20: # 等待最多 20 秒
-                    self._log_manager.log("ERROR", "[背景] ❌ 等待 Key Master Service 就緒信號超時。")
-                    return
-                if self._stop_event.is_set(): return
-                time.sleep(0.5)
-            self._log_manager.log("INFO", "[背景] ✅ 收到 Key Master Service 就緒信號，開始注入金鑰。")
-
-            # 2. 從 Colab Secrets 獲取金鑰
             from google.colab import userdata
             self._log_manager.log("INFO", "[背景] 正在從 Colab Secrets 獲取金鑰...")
+
             base_key_name = "GOOGLE_API_KEY"
             target_key_names = [base_key_name]
             if KEY_LOAD_COUNT_LIMIT > 0:
                 target_key_names.extend([f"{base_key_name}_{i}" for i in range(1, KEY_LOAD_COUNT_LIMIT + 1)])
 
-            # 3. 遍歷金鑰並透過 API 注入
-            added_count = 0
+            keys_to_inject = []
             for key_name in target_key_names:
-                if self._stop_event.is_set(): return
                 try:
                     key_value = userdata.get(key_name)
-                    if not key_value or not key_value.strip():
-                        self._log_manager.log("INFO", f"[背景] 🟡 未在 Colab Secrets 中找到或金鑰為空 '{key_name}'，跳過。")
-                        continue
-
-                    # 透過 API 注入金鑰
-                    api_url = f"{base_url}/api/v1/keys"
-                    payload = {"key_name": key_name, "key_value": key_value, "key_type": "GEMINI"}
-                    self._log_manager.log("INFO", f"[背景] 🔄  正在透過 API 新增金鑰 '{key_name}'...")
-                    response = requests.post(api_url, json=payload, timeout=10)
-
-                    if response.status_code in [200, 201]:
-                        result = response.json()
-                        self._log_manager.log("INFO", f"[背景] ✅ 成功注入金鑰 '{key_name}'。服務回應: {result.get('message')}")
-                        added_count += 1
-                    else:
-                        self._log_manager.log("WARN", f"[背景] 注入金鑰 '{key_name}' 失敗。狀態碼: {response.status_code}, 回應: {response.text}")
-
+                    if key_value and key_value.strip():
+                        keys_to_inject.append(key_value)
+                        self._log_manager.log("INFO", f"[背景] ✅ 已成功獲取金鑰 '{key_name}'。")
                 except userdata.SecretNotFoundError:
-                     self._log_manager.log("INFO", f"[背景] 🟡 未在 Colab Secrets 中找到金鑰 '{key_name}'，跳過。")
-                except requests.exceptions.RequestException as e:
-                    self._log_manager.log("WARN", f"[背景] 呼叫 Key Master API 時發生網路錯誤: {e}")
+                    self._log_manager.log("INFO", f"[背景] 🟡 未在 Colab Secrets 中找到金鑰 '{key_name}'，跳過。")
                 except Exception as e:
-                    self._log_manager.log("ERROR", f"[背景] 處理金鑰 '{key_name}' 時發生未預期錯誤: {e}")
+                    # 捕捉其他可能的錯誤，例如權限問題
+                    self._log_manager.log("WARN", f"[背景] 讀取金鑰 '{key_name}' 時發生錯誤: {e}，跳過。")
 
-            self._log_manager.log("SUCCESS", f"[背景] ✅ 金鑰注入流程完成！共成功注入 {added_count} 個金鑰。")
+            if not keys_to_inject:
+                 self._log_manager.log("WARN", "[背景] 未從 Colab Secrets 中獲取到任何金鑰，跳過注入。")
+                 return
+
+            keys_string = "\n".join(keys_to_inject)
+            command = [
+                sys.executable, str(key_injector_script.resolve()),
+                "--mode", "manual", "--manual-keys", keys_string
+            ]
+
+            # 使用 Popen 以非阻塞方式執行，並透過 stream_reader 處理日誌
+            process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8')
+            for line in iter(process.stdout.readline, ''):
+                self._log_manager.log("INFO", f"[背景] {line.strip()}", "KeyInjector")
+            process.wait()
+
+            if process.returncode == 0:
+                self._log_manager.log("SUCCESS", "[背景] ✅ 金鑰注入腳本執行完畢。")
+            else:
+                self._log_manager.log("WARN", f"[背景] 金鑰注入腳本執行結束，但返回碼為 {process.returncode}。")
 
         except ImportError:
             self._log_manager.log("WARN", "[背景] 無法匯入 google.colab.userdata，可能並非在 Colab 環境。跳過金鑰注入。")
