@@ -93,6 +93,8 @@ button:hover, .button:hover {
     background-color: var(--phoenix-primary-hover-color);
     transform: translateY(-2px);
     box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+    color: #fff; /* 確保懸停時文字顏色不變 */
+    text-decoration: none; /* 移除懸停時的底線 */
 }
 
 button.secondary, .button.secondary {
