@@ -249,7 +249,7 @@ async def add_server_port_to_state(request: Request, call_next):
 
 # --- 整合模組化路由 ---
 from core import config_manager
-from api.routes import ui, page1, page2_downloader, page3_processor, page4_analyzer, page5_backup, page6_keys, page7_prompts, page8_details, page9_dashboard, page10_test, system, bond_service_proxy, primary_dealer_keys
+from api.routes import ui, page1, page2_downloader, page3_processor, page4_analyzer, page5_backup, page6_keys, page7_prompts, page8_details, page9_dashboard, page10_test, system, bond_service_proxy, primary_dealer_keys, key_master_proxy
 
 # --- JULES (2025-09-15): 在應用程式啟動時載入設定 ---
 # 將設定載入到 app.state 中，使其在整個應用程式中可用。
@@ -279,6 +279,9 @@ app.include_router(bond_service_proxy.page_router, tags=["UI: Bond Service Pages
 
 # 一級交易商金鑰管理
 app.include_router(primary_dealer_keys.router, prefix="/api/dealer_keys", tags=["API: Dealer Keys"])
+
+# 金鑰大師服務反向代理
+app.include_router(key_master_proxy.router, tags=["API: Key Master Proxy"])
 
 # --- 路徑設定 ---
 # 新的上傳檔案儲存目錄

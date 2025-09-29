@@ -2,8 +2,8 @@
 
 document.addEventListener('DOMContentLoaded', () => {
     const keyListContainer = document.getElementById('key-list-container');
-    // 我們之前建立的 key_master_service 的位址
-    const apiKeyServiceUrl = 'http://127.0.0.1:8008/api/v1/keys';
+    // 修正：指向主應用程式提供的反向代理路徑，而不是直接呼叫微服務
+    const apiKeyServiceUrl = '/key-api/api/v1/keys';
 
     const renderKeys = (keys) => {
         // 如果沒有金鑰，顯示提示訊息
