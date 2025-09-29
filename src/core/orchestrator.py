@@ -71,9 +71,10 @@ def run_command(command, cwd=None, check=True, log_prefix=""):
         raise
 
 # --- V6.0 微服務啟動器 ---
-def launch_microservice(service_path: Path):
+def launch_microservice(service_path: Path, ready_signal="Uvicorn running on"):
     """
     為單個微服務建立環境、安裝依賴並啟動它。
+    (JULES'S FIX 2025-09-29): 新增服務就緒等待和信號檔案機制。
     """
     service_name = service_path.name
     log_prefix = f"Service:{service_name}"
@@ -90,11 +91,10 @@ def launch_microservice(service_path: Path):
     else:
         log.info(f"[{log_prefix}] 虛擬環境已存在，跳過建立。")
 
-    # 步驟 2: 安裝依賴 (優化後)
+    # 步驟 2: 安裝依賴
     lock_file = venv_dir / ".install_lock"
     should_install = True
     if lock_file.exists() and req_file.exists():
-        # 如果 lock 檔案的修改時間比 requirements.txt 新，則表示依賴未變更
         if lock_file.stat().st_mtime > req_file.stat().st_mtime:
             log.info(f"[{log_prefix}] 依賴未變更，跳過安裝。")
             should_install = False
@@ -102,11 +102,8 @@ def launch_microservice(service_path: Path):
     if should_install and req_file.exists():
         log.info(f"[{log_prefix}] 正在安裝或更新依賴...")
         run_command([
-            "uv", "pip", "install",
-            "-p", str(python_exec),
-            "-r", str(req_file)
+            "uv", "pip", "install", "-p", str(python_exec), "-r", str(req_file)
         ], log_prefix=log_prefix)
-        # 成功安裝後，建立或更新 lock 檔案
         lock_file.touch()
     elif not req_file.exists():
         log.warning(f"[{log_prefix}] 找不到 requirements.txt，跳過依賴安裝。")
@@ -115,39 +112,41 @@ def launch_microservice(service_path: Path):
     port = find_free_port()
     proc_env = os.environ.copy()
     proc_env["PORT"] = str(port)
-
-    # 修正：將主環境的 FRED_API_KEY 明確傳遞給子服務
     if "FRED_API_KEY" in os.environ:
         proc_env["FRED_API_KEY"] = os.environ["FRED_API_KEY"]
         log.info(f"[{log_prefix}] 已將 FRED_API_KEY 注入到服務環境中。")
 
-
     command = [
-        str(python_exec), "-m", "uvicorn",
-        f"{main_script.stem}:app",
-        "--host", "127.0.0.1",
-        "--port", str(port)
+        str(python_exec), "-m", "uvicorn", f"{main_script.stem}:app",
+        "--host", "127.0.0.1", "--port", str(port)
     ]
     process = subprocess.Popen(
-        command,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        encoding='utf-8',
-        env=proc_env,
-        cwd=service_path
+        command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        text=True, encoding='utf-8', env=proc_env, cwd=service_path
     )
 
-    # 為每個服務的日誌建立一個獨立的 reader thread
+    # 步驟 4: 等待服務就緒
+    ready_event = threading.Event()
     log_thread = threading.Thread(
         target=stream_reader,
-        args=(process.stdout, log_prefix),
+        args=(process.stdout, log_prefix, ready_event, ready_signal),
         daemon=True
     )
     log_thread.start()
     threads.append(log_thread)
 
-    log.info(f"✅ 微服務 '{service_name}' 已在埠號 {port} 上啟動，進程 PID: {process.pid}")
+    if not ready_event.wait(timeout=60):
+        process.kill()
+        raise RuntimeError(f"服務 {service_name} 在 60 秒內啟動超時。")
+
+    log.info(f"✅ 微服務 '{service_name}' 已在埠號 {port} 上就緒，進程 PID: {process.pid}")
+
+    # 步驟 5: 為 key_master_service 建立信號檔案
+    if service_name == "key_master_service":
+        signal_file = Path(f"/tmp/{service_name}.ready")
+        signal_file.touch()
+        log.info(f"✅ 已為 '{service_name}' 建立就緒信號檔案: {signal_file}")
+
     return service_name, port, process
 
 def start_all_microservices():

@@ -82,9 +82,35 @@ async def serve_report_viewer(request: Request, file_id: int):
 async def serve_page8(request: Request):
     return templates.TemplateResponse("page8_file_details.html", {"request": request})
 
+import json
+from fastapi.responses import JSONResponse
+
 @router.get("/page9", response_class=HTMLResponse)
 async def serve_page9(request: Request):
     return templates.TemplateResponse("page9_dashboard.html", {"request": request})
+
+@router.get("/api/v1/service-registry", response_class=JSONResponse)
+async def get_service_registry():
+    """
+    提供微服務註冊表的 API 端點。
+    讀取由協調器產生的檔案，讓前端可以動態發現服務位址。
+    """
+    registry_path = Path("/tmp/service_registry.json")
+    if not registry_path.exists():
+        raise HTTPException(status_code=404, detail="服務註冊表不存在，協調器可能尚未完全啟動。")
+    try:
+        with open(registry_path, 'r') as f:
+            data = json.load(f)
+        return JSONResponse(content=data)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"讀取服務註冊表時發生錯誤: {e}")
+
+@router.get("/key_master_dashboard", response_class=HTMLResponse)
+async def get_key_master_dashboard(request: Request):
+    """
+    提供金鑰大師儀表板頁面。
+    """
+    return templates.TemplateResponse("key_master_dashboard.html", {"request": request})
 
 @router.get("/page10_service_test.html", response_class=HTMLResponse)
 async def serve_page10(request: Request):
