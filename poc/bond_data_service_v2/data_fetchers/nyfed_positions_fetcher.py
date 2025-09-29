@@ -4,6 +4,7 @@ import requests
 import io
 import logging
 from typing import List, Literal, Optional
+
 # --- 常數 ---
 NY_FED_URLS = [
     "https://markets.newyorkfed.org/api/pd/get/SBN2024/timeseries/PDPOSGSC-L2_PDPOSGSC-G2L3_PDPOSGSC-G3L6_PDPOSGSC-G6L7_PDPOSGSC-G7L11_PDPOSGSC-G11L21_PDPOSGSC-G21.xlsx",
@@ -135,8 +136,8 @@ def _fetch_and_process_files(maturity: Literal['total', 'short', 'long'], start_
 
     full_series = pd.concat(all_positions_data).sort_index().groupby(level=0).last()
 
-    # 注意：儲存邏輯已移至倉儲層，此處不再儲存。
-    # 只需篩選日期範圍並返回。
+    save_series_to_db(full_series, db_ticker)
+
     filtered_series = full_series.loc[start_date:end_date].copy()
     filtered_series.name = series_name
 

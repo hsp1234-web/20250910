@@ -1,11 +1,15 @@
+# Web Framework
 fastapi
 uvicorn[standard]
+
+# Data Handling & APIs
 pandas==2.2.2
 fredapi==0.5.2
-plotly==5.22.0
-kaleido==0.2.1
-cachetools==5.3.3
-# 新增的相依套件
 yfinance
 openpyxl
 httpx
+plotly==5.22.0
+kaleido==0.2.1
+
+# Caching
+cachetools==6.2.0
