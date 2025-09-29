@@ -5,7 +5,7 @@ import numpy as np
 import logging
 from typing import Dict, Optional
 from cachetools import cached, TTLCache
-from data_manager import DataManager
+from .data_manager import DataManager
 
 logger = logging.getLogger(__name__)
 

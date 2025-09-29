@@ -122,9 +122,16 @@ def launch_microservice(service_path: Path):
         log.info(f"[{log_prefix}] 已將 FRED_API_KEY 注入到服務環境中。")
 
 
+    # V6.2 修正：將服務作為模組從專案根目錄啟動，以支援相對導入
+    # 1. 計算完整的 Python 模組路徑
+    module_path_parts = service_path.relative_to(ROOT_DIR).parts
+    module_name = ".".join(module_path_parts)
+    app_string = f"{module_name}.{main_script.stem}:app"
+    log.info(f"[{log_prefix}] 準備以模組 '{app_string}' 的形式啟動服務。")
+
     command = [
         str(python_exec), "-m", "uvicorn",
-        f"{main_script.stem}:app",
+        app_string,
         "--host", "127.0.0.1",
         "--port", str(port)
     ]
@@ -135,7 +142,7 @@ def launch_microservice(service_path: Path):
         text=True,
         encoding='utf-8',
         env=proc_env,
-        cwd=service_path
+        cwd=ROOT_DIR  # 2. 確保從專案根目錄執行
     )
 
     # 為每個服務的日誌建立一個獨立的 reader thread

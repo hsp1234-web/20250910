@@ -4,7 +4,7 @@ import requests
 import io
 import logging
 from typing import List, Literal, Optional
-from db_utils import save_series_to_db
+from ..db_utils import save_series_to_db
 
 # --- 常數 ---
 NY_FED_URLS = [

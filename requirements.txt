@@ -22,4 +22,5 @@ matplotlib
 # Report & File Handling Dependencies
 WeasyPrint
 python-docx
-lxml
+lxmlcachetools==6.2.0
+plotly==6.3.0

@@ -8,8 +8,8 @@ import json
 import os
 
 # 匯入我們新的資料庫工具和所有改造後的資料抓取器
-from db_utils import load_series_from_db
-from data_fetchers import (
+from .db_utils import load_series_from_db
+from .data_fetchers import (
     fred_sofr_fetcher,
     fred_dgs10_fetcher,
     fred_dgs2_fetcher,
