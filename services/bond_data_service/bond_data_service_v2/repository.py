@@ -4,24 +4,10 @@ import logging
 import os
 import sqlite3
 import inspect
-import sys
 from pathlib import Path
 from typing import Callable, Dict, Optional
 
 import pandas as pd
-
-# --- (金鑰大師) 修正路徑以匯入中央金鑰管理器 ---
-try:
-    # 為了讓此獨立服務能找到位於專案根目錄的 src，我們需要手動將其加入 sys.path
-    # 預期結構: /.../wolf_project/services/..., /.../wolf_project/src/...
-    SRC_PATH = Path(__file__).resolve().parent.parent.parent.parent / "src"
-    if str(SRC_PATH) not in sys.path:
-        sys.path.insert(0, str(SRC_PATH))
-    from core import key_manager
-except ImportError:
-    # 如果發生錯誤，設定為 None，讓後續的檢查可以優雅地失敗
-    key_manager = None
-# --- 結束 ---
 
 # 匯入所有資料抓取器
 from .data_fetchers import (
@@ -66,28 +52,20 @@ def initialize_database():
         logger.error(f"❌ 資料庫初始化失敗: {e}", exc_info=True)
         raise
 
-# --- API 金鑰管理 (已重構為使用中央金鑰管理器) ---
+# --- API 金鑰管理 ---
 
 def get_fred_api_key() -> Optional[str]:
     """
-    從中央金鑰管理器獲取一個有效的 FRED API 金鑰。
+    從環境變數獲取 FRED API 金鑰。這是重構後推薦的唯一方式。
+    移除了對 `/tmp/service_registry.json` 的脆弱依賴。
     """
-    if not key_manager:
-        logger.error("中央金鑰管理器 (key_manager) 模組未成功載入，無法獲取 FRED 金鑰。")
-        return None
+    api_key = os.getenv("FRED_API_KEY")
+    if api_key:
+        logger.info("從環境變數 FRED_API_KEY 中獲取了 API 金鑰。")
+        return api_key
 
-    try:
-        # 從 key_manager 獲取類型為 'fred' 的有效金鑰
-        api_key = key_manager.get_valid_key(key_type='fred')
-        if api_key:
-            logger.info("✅ 成功從中央金鑰管理器獲取一個有效的 FRED API 金鑰。")
-            return api_key
-        else:
-            logger.warning("🟡 在中央金鑰管理器中未找到類型為 'fred' 的有效金鑰。")
-            return None
-    except Exception as e:
-        logger.error(f"❌ 從金鑰管理器獲取 FRED 金鑰時發生錯誤: {e}", exc_info=True)
-        return None
+    logger.warning("未找到環境變數 FRED_API_KEY。FRED 資料抓取將會失敗。")
+    return None
 
 
 # --- 倉儲層核心類 ---
@@ -213,6 +191,6 @@ class FinancialDataRepository:
 
     def check_api_key_status(self) -> bool:
         """
-        檢查是否能從中央金鑰管理器成功獲取一個有效的 FRED API 金鑰。
+        檢查 FRED API 金鑰是否可透過環境變數獲取。
         """
         return get_fred_api_key() is not None

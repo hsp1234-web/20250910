@@ -21,9 +21,8 @@ router = APIRouter()
 
 # --- Pydantic 模型 ---
 class KeyRequest(BaseModel):
-    api_key: str = Field(..., title="API Key Value")
+    api_key: str = Field(..., title="Google API Key")
     name: Optional[str] = Field(None, title="Key Alias")
-    key_type: str = Field("gemini", title="Key Type (e.g., 'gemini', 'fred')")
 
 class TestKeyRequest(BaseModel):
     api_key: str
@@ -47,12 +46,7 @@ async def add_new_key(payload: KeyRequest):
     將一個新的 API 金鑰新增到金鑰池，並立即對其進行驗證。
     """
     try:
-        # 將前端傳來的 key_type 傳遞給 key_manager
-        result = key_manager.add_key(
-            key_value=payload.api_key,
-            key_name=payload.name,
-            key_type=payload.key_type
-        )
+        result = key_manager.add_key(payload.api_key, payload.name)
         return {"message": f"金鑰 '{result['name']}' 已新增。", **result}
     except ValueError as e:
         raise HTTPException(status_code=409, detail=str(e))
@@ -136,23 +130,6 @@ async def test_api_key(payload: TestKeyRequest):
         log.error(f"測試金鑰時發生錯誤: {e}", exc_info=True)
         # 即使是測試，也回傳一個明確的失敗狀態，而不是 500 錯誤
         return {"is_valid": False, "error": str(e)}
-
-@router.get("/status/{key_type}", summary="檢查特定類型的金鑰是否可用")
-async def get_key_status(key_type: str):
-    """
-    檢查指定類型的有效金鑰是否存在於金鑰管理器中。
-    :param key_type: 要檢查的金鑰類型 (例如 'gemini', 'fred')。
-    :return: {"available": True} 或 {"available": False}。
-    """
-    try:
-        # 利用 get_valid_key 函式來判斷。如果它回傳一個金鑰，就表示可用。
-        valid_key = key_manager.get_valid_key(key_type=key_type)
-        is_available = valid_key is not None
-        return {"available": is_available}
-    except Exception as e:
-        log.error(f"檢查金鑰類型 '{key_type}' 的狀態時發生錯誤: {e}", exc_info=True)
-        # 如果發生任何錯誤，都應安全地回傳 False
-        return {"available": False}
 
 # --- JULES (2025-09-17): 重構為通用的設定管理 API ---
 

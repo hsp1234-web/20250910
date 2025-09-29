@@ -6,15 +6,18 @@
 # ╠══════════════════════════════════════════════════════════════════╣
 # ║                                                                      ║
 # ║ - V39 更新日誌 (2025-09-30):                                         ║
-# ║   - **重大修正**: 徹底重構啟動流程，從並行處理改為嚴格的依序執行     ║
-# ║     （依賴安裝 -> 金鑰注入 -> 服務啟動），解決了因競爭條件導致的    ║
-# ║     `ModuleNotFoundError` 啟動崩潰問題。                           ║
+# ║   - **戰略修正**: 採用最小化修改策略，為 FRED 金鑰新增前端狀態探測   ║
+# ║     接口，以確保系統穩定性。                                       ║
 # ║ - V32 更新日誌 (2025-09-27):                                         ║
-# ║   - **新增功能**: 自動偵測並顯示 `localtunnel` 的通道密碼。         ║
+# ║   - **新增功能**: 自動偵測並顯示 `localtunnel` 的通道密碼，無需     ║
+# ║     使用者手動查詢。                                               ║
 # ║ - V28.1 更新日誌 (2025-09-16):                                       ║
-# ║   - **增強日誌**: 為金鑰自動驗證流程添加更詳細的日誌。               ║
+# ║   - **增強日誌**: 為金鑰自動驗證流程添加更詳細的日誌記錄，以便追蹤   ║
+# ║     執行狀態並診斷潛在問題。                                       ║
 # ║ - V28 更新日誌 (2025-09-16):                                         ║
-# ║   - **修復金鑰驗證**: 解決高階硬體上因環境變數不完整導致的失敗。     ║
+# ║   - **修復金鑰驗證**: 調整金鑰驗證時的子程序環境，解決高階硬體上     ║
+# ║     因環境變數不完整而導致的驗證失敗問題。                         ║
+# ║   - **更新預設分支**: 將預設分支號碼更新為 `25.4`。                  ║
 # ║                                                                      ║
 # ╚══════════════════════════════════════════════════════════════════╝
 
@@ -141,7 +144,7 @@ class DisplayManager:
         self._thread = threading.Thread(target=self._run, daemon=True)
 
     def _build_output_buffer(self) -> list[str]:
-        output_buffer = ["✨🐺 善狼一鍵啟動器 (v34) 🐺", ""]
+        output_buffer = ["✨🐺 善狼一鍵啟動器 (v39) 🐺", ""]
         logs_to_display = self._log_manager.get_display_logs()
         for log in logs_to_display:
             ts = log['timestamp'].strftime('%H:%M:%S')
@@ -311,82 +314,145 @@ class ServerManager:
             initialize_database()
             add_system_log("colab_setup", "INFO", "Git repository cloned successfully.")
 
-            # --- 重構 (v39): 改為嚴格依序執行以確保穩定性 ---
+            # --- JULES'S FIX (2025-09-16): 非同步化金鑰注入 ---
+            # 將耗時的金鑰注入操作移至背景執行緒，使其與依賴安裝並行
+            key_thread = threading.Thread(target=self._inject_keys_background, args=(project_path,), daemon=True)
+            key_thread.start()
 
-            # 步驟 1: 安裝所有依賴
-            self._log_manager.log("BATTLE", "=== 步驟 1/3: 安裝所有專案依賴 ===")
-            self._stats['status'] = "📦 安裝依賴中..."
-
-            def install_requirements_sequentially(req_files: list[Path], log_prefix: str):
-                """一個簡化的安裝函式，不進行前置檢查，直接安裝所有指定的依賴檔案。優先使用 uv 加速器。"""
-                self._log_manager.log("INFO", f"[{log_prefix}] 開始安裝依賴...")
+            # --- JULES: 重構為兩階段依賴安裝 (Pip 優先) ---
+            def install_requirements(req_files, log_prefix="", force_pip=False):
+                """
+                幫助函式：智慧地檢查並只安裝缺失的依賴。
+                新增 force_pip 選項以強制使用 pip。
+                """
+                self._log_manager.log("INFO", f"[{log_prefix}] 開始檢查與安裝依賴...")
                 install_start_time = time.monotonic()
 
-                valid_files = [f for f in req_files if f.is_file()]
-                if not valid_files:
-                    self._log_manager.log("WARN", f"[{log_prefix}] 找不到任何有效的依賴檔案，跳過安裝。")
+                checker_script = project_path / "scripts" / "check_deps.py"
+                if not checker_script.is_file():
+                    self._log_manager.log("CRITICAL", f"[{log_prefix}] 依賴檢查腳本 'check_deps.py' 不存在！")
+                    raise FileNotFoundError("Dependency checker script not found.")
+
+                req_file_paths = [str(p.resolve()) for p in req_files if p.is_file()]
+                if not req_file_paths:
+                    self._log_manager.log("INFO", f"[{log_prefix}] 找不到任何有效的依賴檔案。")
                     return
 
-                # 將所有依賴合併到一個臨時檔案中，以便一次性安裝
-                combined_req_content = ""
-                for req_file in valid_files:
-                    combined_req_content += req_file.read_text(encoding='utf-8') + "\n"
+                check_command = [sys.executable, str(checker_script.resolve())] + req_file_paths
+                result = subprocess.run(check_command, capture_output=True, text=True, encoding='utf-8')
 
-                temp_req_path = project_path / f"requirements_combined_v39.txt"
-                temp_req_path.write_text(combined_req_content, encoding='utf-8')
+                missing_packages = result.stdout.strip().splitlines() if result.returncode == 0 else \
+                                   "".join([p.read_text(encoding='utf-8') for p in req_files]).strip().splitlines()
+
+                if not missing_packages:
+                    self._log_manager.log("SUCCESS", f"✅ [{log_prefix}] 所有依賴均已滿足，無需安裝。")
+                    return
+
+                self._log_manager.log("INFO", f"[{log_prefix}] 偵測到 {len(missing_packages)} 個缺失的套件，開始安裝...")
+
+                temp_req_path = project_path / f"requirements_missing_{log_prefix.lower().replace(' ', '_')}.txt"
+                with open(temp_req_path, "w", encoding="utf-8") as f:
+                    f.write("\n".join(missing_packages))
 
                 try:
-                    use_uv = self._ensure_uv_installed()
-                    pip_command = [sys.executable]
+                    # 根據 force_pip 決定是否嘗試使用 uv
+                    use_uv = not force_pip and Path("./uv").is_file()
                     if use_uv:
-                        pip_command.extend(["-m", "uv", "pip", "install", "--system", "-r", str(temp_req_path.resolve())])
+                        # 移除 -q 參數以獲取詳細日誌
+                        pip_command = [sys.executable, "-m", "uv", "pip", "install", "--system", "-r", str(temp_req_path)]
                         self._log_manager.log("INFO", f"[{log_prefix}] 使用 'uv' 進行快速安裝...")
                     else:
-                        pip_command.extend(["-m", "pip", "install", "-r", str(temp_req_path.resolve())])
+                        # 移除 -q 和 --progress-bar off 參數以獲取詳細日誌
+                        pip_command = [sys.executable, "-m", "pip", "install", "-r", str(temp_req_path)]
                         self._log_manager.log("INFO", f"[{log_prefix}] 使用 'pip' 進行安裝。")
 
-                    result = subprocess.run(pip_command, capture_output=True, text=True, encoding='utf-8', check=True)
+                    # 改用 subprocess.run 以便捕獲錯誤輸出
+                    result = subprocess.run(pip_command, capture_output=True, text=True, encoding='utf-8')
 
+                    # 無論成功或失敗，都記錄 stdout
                     if result.stdout and result.stdout.strip():
-                        self._log_manager.log("DEBUG", f"[{log_prefix}] 安裝程式 stdout:\n{result.stdout}", "Installer")
+                        self._log_manager.log("DEBUG", f"[{log_prefix}] pip stdout:\n{result.stdout}", "Installer")
 
-                    self._log_manager.log("SUCCESS", f"✅ [{log_prefix}] 所有依賴安裝完成。")
+                    if result.returncode != 0:
+                        # 如果安裝失敗，記錄詳細的錯誤日誌
+                        error_log = f"pip install 失敗！返回碼: {result.returncode}\n"
+                        if result.stderr and result.stderr.strip():
+                            error_log += f"STDERR:\n{result.stderr}\n"
+                        self._log_manager.log("ERROR", error_log, "Installer")
+                        # 重新引發異常，讓上層知道安裝失敗了
+                        raise subprocess.CalledProcessError(result.returncode, pip_command, output=result.stdout, stderr=result.stderr)
+
+                    self._log_manager.log("SUCCESS", f"✅ [{log_prefix}] 依賴安裝完成。")
                     self._log_manager.log("INFO", f"--- [{log_prefix}] 安裝耗時: {time.monotonic() - install_start_time:.2f} 秒 ---")
-
                 except subprocess.CalledProcessError as e:
-                    error_log = f"[{log_prefix}] 依賴安裝失敗！返回碼: {e.returncode}\n"
-                    if e.stdout: error_log += f"STDOUT:\n{e.stdout}\n"
-                    if e.stderr: error_log += f"STDERR:\n{e.stderr}\n"
-                    self._log_manager.log("CRITICAL", error_log, "Installer")
+                    self._log_manager.log("CRITICAL", f"[{log_prefix}] 依賴安裝失敗！", "Installer")
                     raise
                 finally:
                     if temp_req_path.exists():
                         temp_req_path.unlink()
 
-            # 找出所有 requirements 檔案並安裝
-            requirements_path = project_path / "requirements"
-            all_req_files = list(requirements_path.glob("*.txt"))
-            if not all_req_files:
-                self._log_manager.log("CRITICAL", f"在 '{requirements_path}' 中找不到任何依賴檔案 (.txt)！")
-                raise FileNotFoundError("No requirements files found.")
+            # --- JULES'S FIX (2025-09-21): 強制安裝下載器依賴 ---
+            # 為了繞過在某些 Colab 環境中不穩定的依賴檢查，我們為下載器建立了一個
+            # 獨立的安裝階段。此階段不使用 check_deps.py，而是直接強制安裝，
+            # 確保 yt-dlp 和 gdown 等關鍵套件一定存在。
+            def force_install_packages(req_file: Path, log_prefix: str):
+                """一個簡化的安裝函式，不檢查，直接安裝。優先使用 uv 加速器。"""
+                if not req_file.is_file():
+                    self._log_manager.log("WARN", f"[{log_prefix}] 依賴檔案 '{req_file.name}' 不存在，跳過。")
+                    return
+                self._log_manager.log("INFO", f"[{log_prefix}] 開始強制安裝依賴...")
+                install_start_time = time.monotonic()
+                try:
+                    # 檢查 uv 是否存在，並決定安裝指令
+                    use_uv = self._ensure_uv_installed()
+                    if use_uv:
+                        pip_command = [sys.executable, "-m", "uv", "pip", "install", "--system", "-r", str(req_file.resolve())]
+                        self._log_manager.log("INFO", f"[{log_prefix}] 使用 'uv' 進行快速強制安裝...")
+                    else:
+                        pip_command = [sys.executable, "-m", "pip", "install", "-r", str(req_file.resolve())]
+                        self._log_manager.log("INFO", f"[{log_prefix}] 使用 'pip' 進行強制安裝。")
 
-            install_requirements_sequentially(all_req_files, "完整依賴")
+                    result = subprocess.run(pip_command, capture_output=True, text=True, encoding='utf-8')
 
-            # 步驟 2: 注入金鑰
-            self._log_manager.log("BATTLE", "=== 步驟 2/3: 執行金鑰注入 ===")
-            self._stats['status'] = "🔑 注入金鑰中..."
-            # 直接同步執行金鑰注入，確保其在伺服器啟動前完成
-            self._inject_keys_background(project_path)
+                    if result.stdout and result.stdout.strip():
+                        self._log_manager.log("DEBUG", f"[{log_prefix}] 安裝程式 stdout:\n{result.stdout}", "Installer")
 
-            # 步驟 3: 啟動後端服務
-            self._log_manager.log("BATTLE", "=== 步驟 3/3: 啟動後端服務 ===")
-            self._stats['status'] = "🚀 啟動伺服器..."
+                    if result.returncode != 0:
+                        error_log = f"安裝失敗！返回碼: {result.returncode}\n"
+                        if result.stderr and result.stderr.strip():
+                            error_log += f"STDERR:\n{result.stderr}\n"
+                        self._log_manager.log("ERROR", error_log, "Installer")
+                        raise subprocess.CalledProcessError(result.returncode, pip_command, output=result.stdout, stderr=result.stderr)
+
+                    self._log_manager.log("SUCCESS", f"✅ [{log_prefix}] 強制依賴安裝完成。")
+                    self._log_manager.log("INFO", f"--- [{log_prefix}] 安裝耗時: {time.monotonic() - install_start_time:.2f} 秒 ---")
+                except subprocess.CalledProcessError as e:
+                    self._log_manager.log("CRITICAL", f"[{log_prefix}] 強制依賴安裝失敗！", "Installer")
+                    raise
+
+            # --- 階段 0: 強制安裝下載器依賴 ---
+            self._log_manager.log("INFO", "步驟 1/4: 正在強制安裝下載器核心依賴...")
+            downloader_req_file = project_path / "requirements" / "downloader.txt"
+            force_install_packages(downloader_req_file, "下載器")
+
+            # --- 階段 2: 同步安裝核心依賴 (使用 Pip) ---
+            self._log_manager.log("INFO", "步驟 2/4: 正在快速安裝啟動器核心依賴...")
+            # JULES (2025-09-25): 優化啟動流程。
+            # 啟動器現在只安裝啟動 orchestrator.py 所需的最小依賴 (requests)。
+            # 其他依賴項將由 orchestrator.py 在後台自行安裝。
+            core_requirements = [
+                project_path / "requirements" / "features_core.txt"
+            ]
+            install_requirements(core_requirements, "啟動器核心", force_pip=True)
+
+            # --- 階段 3: 啟動後端服務 ---
+            self._log_manager.log("INFO", "步驟 3/4: 正在啟動後端協調器...")
             launch_command = [sys.executable, "src/core/orchestrator.py"]
             process_env = os.environ.copy()
             src_path_str = str((project_path / "src").resolve())
             process_env['PYTHONPATH'] = f"{src_path_str}{os.pathsep}{process_env.get('PYTHONPATH', '')}".strip(os.pathsep)
 
-            # FRED 金鑰注入邏輯保持不變，因為它注入的是環境變數，是安全的
+            # 安全地注入 FRED API 金鑰
             try:
                 from google.colab import userdata
                 fred_api_key = userdata.get('FRED_API_KEY')

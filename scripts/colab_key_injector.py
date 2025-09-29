@@ -152,32 +152,6 @@ def main():
             handle_auto_mode(args.count)
         elif args.mode == 'manual':
             handle_manual_mode(args.manual_keys)
-
-        # --- (金鑰大師) 新增 FRED 金鑰注入邏輯 ---
-        print("\n" + "="*50)
-        print("🚀 正在檢查並注入 FRED API 金鑰...")
-        print("="*50)
-        try:
-            fred_api_key = userdata.get('FRED_API_KEY')
-            if fred_api_key and fred_api_key.strip():
-                print("🔄  偵測到 FRED API 金鑰，正在新增至金鑰管理器...")
-                # 使用 key_manager 新增，類型為 'fred'
-                key_manager.add_key(
-                    key_value=fred_api_key,
-                    key_name='FRED_API_KEY', # 使用固定的名稱
-                    key_type='fred',
-                    validate=False # FRED 金鑰在此階段不進行線上驗證
-                )
-                print("✅  成功將 FRED API 金鑰注入中央管理器。")
-            else:
-                print("🟡  未在 Colab Secrets 中找到有效的 FRED_API_KEY。")
-        except ValueError as e:
-            print(f"🟡  跳過 FRED 金鑰：{e}") # 例如，金鑰已存在
-        except Exception as e:
-            print(f"💥  處理 FRED 金鑰時發生未預期錯誤：{e}")
-        print("="*50 + "\n")
-        # --- 結束 ---
-
     except Exception as e:
         print(f"\n💥 在執行過程中發生嚴重錯誤: {e}")
         print("請檢查您的 Colab 環境權限或祕密設定。")
