@@ -3,6 +3,7 @@
 import logging
 import os
 import sqlite3
+import inspect
 from pathlib import Path
 from typing import Callable, Dict, Optional
 
@@ -168,10 +169,13 @@ class FinancialDataRepository:
 
         try:
             fetcher_args = {"start_date": start_date, "end_date": end_date}
-            if "fred_" in fetcher.__module__ or "nyfed_" in fetcher.__module__:
+
+            # 動態檢查目標抓取器是否真的需要 'api_key' 參數
+            sig = inspect.signature(fetcher)
+            if 'api_key' in sig.parameters:
                 api_key = get_fred_api_key()
                 if not api_key:
-                    logger.error(f"抓取 '{indicator_name}' 需要 FRED API 金鑰但未提供。")
+                    logger.error(f"抓取 '{indicator_name}' 需要 FRED API 金鑰但未提供，操作中止。")
                     return None
                 fetcher_args["api_key"] = api_key
 
