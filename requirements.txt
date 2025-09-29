@@ -24,3 +24,4 @@ WeasyPrint
 python-docx
 lxml
 plotly
+httpx

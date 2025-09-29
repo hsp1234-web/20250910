@@ -11,8 +11,7 @@
 
 2.  **手動模式 (`manual`)**:
     - 直接解析由 `--manual-keys` 參數傳入的金鑰字串（以換行符分隔）。
-
-此腳本會呼叫核心的 key_manager 來安全地新增、驗證和儲存金鑰。
+    - JULES (2025-09-29): 新增 `--key-type` 參數，以支援注入如 FRED 等不同類型的金鑰。
 """
 
 import sys
@@ -22,8 +21,6 @@ from pathlib import Path
 import importlib.util
 
 # --- (WORKAROUND) Python 3.10+ Compatibility Shim for 'importlib.abc' ---
-# 在 Python 3.10+ 中, 'importlib.abc' 被移出頂層 'importlib' 模組.
-# 此補丁手動將其加回, 以支援可能使用舊路徑的較舊依賴項。
 if not hasattr(importlib, 'abc'):
     spec = importlib.util.find_spec('importlib.abc')
     if spec:
@@ -47,7 +44,6 @@ try:
     print("✅ 成功匯入 Colab userdata 和 key_manager 模組。")
 except ImportError:
     print("❌ 錯誤：此腳本似乎並非在 Google Colab 環境中執行，或專案結構不完整。")
-    # 在非 Colab 環境下，建立一個模擬的 userdata 物件以便本機測試
     class MockUserdata:
         def get(self, key): return os.environ.get(key)
         def get_all(self): return os.environ
@@ -60,9 +56,9 @@ except Exception as e:
 
 
 def handle_auto_mode(count: int):
-    """處理自動模式：從 Colab Secrets 讀取金鑰。"""
+    """處理自動模式：從 Colab Secrets 讀取 Gemini 金鑰。"""
     print("\n" + "="*50)
-    print(f"🚀 模式：自動 | 嘗試從 Colab Secrets 載入 {count + 1} 組金鑰...")
+    print(f"🚀 模式：自動 | 嘗試從 Colab Secrets 載入 {count + 1} 組 Gemini 金鑰...")
     print("="*50)
 
     base_key_name = "GOOGLE_API_KEY"
@@ -78,10 +74,9 @@ def handle_auto_mode(count: int):
                 print(f"🟡 未找到名為 '{key_name}' 的金鑰，跳過。")
                 continue
 
-            print(f"🔄  正在新增金鑰 '{key_name}' (稍後驗證)...")
-            # 解決競爭條件：在啟動時只新增金鑰，不立即驗證。
-            # 驗證將由使用者在 UI 介面或 API 觸發，此時依賴已全部安裝。
-            key_manager.add_key(key_value, key_name, validate=False)
+            print(f"🔄  正在新增金鑰 '{key_name}' (類型: gemini)...")
+            # JULES: 呼叫更新後的 add_key，明確傳入 'gemini' 類型
+            key_manager.add_key(key_value, 'gemini', key_name, validate=False)
             print(f"✅  成功新增金鑰 '{key_name}' 至設定檔。")
             added_count += 1
 
@@ -95,10 +90,10 @@ def handle_auto_mode(count: int):
     print("="*50 + "\n")
 
 
-def handle_manual_mode(keys_string: str):
-    """處理手動模式：解析並新增使用者貼上的金鑰。"""
+def handle_manual_mode(keys_string: str, key_type: str):
+    """處理手動模式：解析並新增使用者提供的指定類型的金鑰。"""
     print("\n" + "="*50)
-    print("🚀 模式：手動 | 正在處理使用者貼上的金鑰...")
+    print(f"🚀 模式：手動 | 正在處理類型為 '{key_type}' 的金鑰...")
     print("="*50)
 
     keys = [key.strip() for key in keys_string.split('\n') if key.strip()]
@@ -110,15 +105,24 @@ def handle_manual_mode(keys_string: str):
 
     added_count = 0
     for i, key_value in enumerate(keys):
-        key_name = f"Manual-Key-{i+1}"
-        print(f"🔄  正在新增第 {i+1} 把手動金鑰 (稍後驗證)...")
+        # JULES: 如果是 fred 類型，給予一個固定的預設名稱
+        if key_type == 'fred':
+            key_name = "FRED API Key"
+        else:
+            key_name = f"{key_type.capitalize()}-Key-{i+1}"
+
+        print(f"🔄  正在新增第 {i+1} 把手動金鑰 (類型: {key_type})...")
         try:
-            # 解決競爭條件：在啟動時只新增金鑰，不立即驗證。
-            key_manager.add_key(key_value, key_name, validate=False)
+            # JULES: 呼叫更新後的 add_key，傳入從參數中得到的 key_type
+            key_manager.add_key(key_value, key_type, key_name, validate=False)
             print(f"✅  成功新增金鑰 '{key_name}' 至設定檔。")
             added_count += 1
         except ValueError as e:
-            print(f"🟡  跳過第 {i+1} 把手動金鑰：{e}")
+            # 如果是 FRED 金鑰且已存在，顯示更友善的訊息
+            if key_type == 'fred' and "已存在" in str(e):
+                print(f"🟡  FRED 金鑰已存在，無需重複新增。")
+            else:
+                print(f"🟡  跳過第 {i+1} 把手動金鑰：{e}")
         except Exception as e:
             print(f"💥  處理第 {i+1} 把手動金鑰時發生未預期錯誤：{e}")
 
@@ -129,19 +133,17 @@ def handle_manual_mode(keys_string: str):
 
 def main():
     """主執行函式，解析參數並分派任務。"""
-    # JULES (2025-09-21): 在注入新金鑰前，先清除所有舊金鑰，確保環境乾淨。
     try:
         print("🧹 正在清除所有舊的金鑰記錄...")
         cleared_count = key_manager.clear_all_keys()
         print(f"✅ 成功清除了 {cleared_count} 筆舊記錄。")
     except Exception as e:
-        # 如果資料庫尚未建立或存在權限問題，這個步驟可能會失敗。
-        # 在這種情況下，我們只記錄一個警告，然後繼續嘗試新增金鑰，
-        # 因為後續的 key_manager 操作會提供更詳細的錯誤。
         print(f"⚠️ 清除舊金鑰時發生警告: {e}，將繼續執行。")
 
     parser = argparse.ArgumentParser(description="Colab 金鑰注入器，支援自動與手動模式。")
     parser.add_argument("--mode", type=str, choices=['auto', 'manual'], required=True, help="金鑰載入模式：'auto' 或 'manual'")
+    # JULES: 新增 key-type 參數
+    parser.add_argument("--key-type", type=str, default="gemini", help="在手動模式下，要注入的金鑰類型 (例如 'gemini', 'fred')。")
     parser.add_argument("--count", type=int, default=0, help="在自動模式下，要載入的金鑰數量 (0-20)。")
     parser.add_argument("--manual-keys", type=str, default="", help="在手動模式下，包含金鑰的字串（以換行符分隔）。")
 
@@ -151,7 +153,8 @@ def main():
         if args.mode == 'auto':
             handle_auto_mode(args.count)
         elif args.mode == 'manual':
-            handle_manual_mode(args.manual_keys)
+            # JULES: 將 key_type 參數傳遞給處理函式
+            handle_manual_mode(args.manual_keys, args.key_type)
     except Exception as e:
         print(f"\n💥 在執行過程中發生嚴重錯誤: {e}")
         print("請檢查您的 Colab 環境權限或祕密設定。")

@@ -11,7 +11,8 @@ import re
 import asyncio
 import os
 import time
-from fastapi import FastAPI, UploadFile, File, Form, Request, HTTPException, WebSocket, WebSocketDisconnect, Query
+import httpx
+from fastapi import FastAPI, UploadFile, File, Form, Request, HTTPException, WebSocket, WebSocketDisconnect, Query, Response
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -198,6 +199,10 @@ async def lifespan(app: FastAPI):
     prewarm_thread = threading.Thread(target=_prewarm_heavy_modules, daemon=True)
     prewarm_thread.start()
 
+    # JULES (2025-09-29): 為了反向代理，建立一個可重複使用的 httpx 客戶端實例。
+    app.state.httpx_client = httpx.AsyncClient()
+    log.info("全域 httpx 客戶端實例已建立。")
+
     yield # 應用程式在此處運行
 
     # --- 應用程式關閉時 ---
@@ -208,6 +213,10 @@ async def lifespan(app: FastAPI):
         await app.state.broadcaster_task
     except asyncio.CancelledError:
         log.info("訊息廣播員已成功關閉。")
+
+    # JULES (2025-09-29): 關閉 httpx 客戶端連線。
+    await app.state.httpx_client.aclose()
+    log.info("全域 httpx 客戶端實例已關閉。")
 
 # --- FastAPI 應用實例 ---
 app = FastAPI(title="鳳凰音訊轉錄儀 API (v3 - 重構)", version="3.0", lifespan=lifespan)
