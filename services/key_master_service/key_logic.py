@@ -4,8 +4,8 @@ from datetime import datetime
 from typing import List, Optional, Dict, Any
 
 # 從相鄰模組中匯入必要的函式和模型
-from .database import _execute_query
-from .models import KeyCreate, KeyInfo
+from database import _execute_query
+from models import KeyCreate, KeyInfo
 
 def _hash_key(key: str) -> str:
     """對金鑰進行 SHA256 雜湊，只取前 16 位以便於使用。"""
