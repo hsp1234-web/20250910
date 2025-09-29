@@ -14,8 +14,10 @@ yfinance
 # System & E2E Test Dependencies
 psutil
 playwright
+pytest-playwright
 requests
 pytest
+matplotlib
 
 # Report & File Handling Dependencies
 WeasyPrint
