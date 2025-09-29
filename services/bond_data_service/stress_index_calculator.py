@@ -65,12 +65,16 @@ def calculate_full_metrics(data_manager: DataManager, start_date: str, end_date:
     for indicator in indicator_list:
         # 優化：不再強制刷新，讓 DataManager 依其快取策略決定是否抓取新數據
         series = data_manager.get_series(indicator, start_date, end_date, force_refresh=False)
-        if series is not None:
+        if series is not None and not series.empty:
             all_series[indicator] = series
         else:
-            logger.warning(f"獲取 '{indicator}' 數據失敗，將影響後續計算。")
-            # 創建一個空的 Series 以避免錯誤
-            all_series[indicator] = pd.Series(dtype='float64', name=indicator)
+            logger.warning(f"獲取 '{indicator}' 數據失敗或返回空值，此指標將在本次計算中被忽略。")
+            # 修正：不要創建空的 Series，直接忽略即可
+
+    # 如果在獲取所有數據後，沒有任何一個指標成功，則直接返回
+    if not all_series:
+        logger.error("所有基礎指標均未能獲取數據，計算終止。")
+        return None
 
     # 合併所有 Series 成一個 DataFrame
     df = pd.concat(all_series.values(), axis=1, join='outer')

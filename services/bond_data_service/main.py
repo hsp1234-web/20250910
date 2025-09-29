@@ -31,70 +31,6 @@ sse_connections = []
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("main") # 命名 logger 以便追蹤
 
-def _get_key_service_url():
-    """從服務註冊檔案中讀取 key_service 的 URL。"""
-    try:
-        with open("/tmp/service_registry.json", "r") as f:
-            registry = json.load(f)
-        key_service_info = registry.get("key_service")
-        if key_service_info:
-            url = f"http://127.0.0.1:{key_service_info['port']}"
-            logger.info(f"從服務註冊中心找到 key_service URL: {url}")
-            return url
-    except (FileNotFoundError, json.JSONDecodeError, KeyError) as e:
-        logger.warning(f"無法從服務註冊中心讀取 key_service URL: {e}，將無法從服務獲取金鑰。")
-    return None
-
-def get_fred_api_key():
-    """
-    以更穩健的方式獲取 FRED API 金鑰，實現多源回退機制。
-    優先順序:
-    1. 從 key_service 微服務獲取 (由使用者在 UI 設定)。
-    2. 從 Colab Secrets 自動注入。
-    3. 從環境變數獲取 (用於本地開發或舊版部署)。
-    """
-    api_key = None
-
-    # 1. 嘗試從 key_service 獲取
-    key_service_url = _get_key_service_url()
-    if key_service_url:
-        try:
-            # 使用同步的 httpx Client，因為這是在應用程式啟動時執行
-            with httpx.Client(timeout=5.0) as client:
-                response = client.get(f"{key_service_url}/keys/generic/FRED_API_KEY")
-                if response.status_code == 200:
-                    key_data = response.json()
-                    api_key = key_data.get("key_value")
-                    if api_key:
-                        logger.info("成功從 key_service 獲取 FRED_API_KEY。")
-                        return api_key
-                elif response.status_code == 404:
-                    logger.info("key_service 中尚未設定 FRED_API_KEY，將嘗試其他來源。")
-                else:
-                    logger.warning(f"從 key_service 獲取金鑰時收到非預期狀態碼: {response.status_code}，將嘗試其他來源。")
-        except httpx.RequestError as e:
-            logger.warning(f"連接到 key_service 失敗: {e}，將嘗試其他來源。")
-
-    # 2. 如果 key_service 失敗或未設定，回退到 Colab Secrets
-    try:
-        from google.colab import userdata
-        api_key = userdata.get('FRED_API_KEY')
-        if api_key:
-            logger.info("成功從 Colab Secrets 讀取 FRED_API_KEY。")
-            return api_key
-    except (ImportError, KeyError):
-        logger.info("非 Colab 環境或 Colab Secrets 中無 FRED_API_KEY，將嘗試從環境變數讀取。")
-
-    # 3. 如果以上都失敗，回退到環境變數
-    api_key = os.getenv("FRED_API_KEY")
-    if api_key:
-        logger.info("成功從環境變數讀取 FRED_API_KEY。")
-    else:
-        logger.warning("在所有來源 (key_service, Colab Secrets, 環境變數) 中均未找到 FRED_API_KEY。")
-
-    return api_key
-
-
 # --- Background Task for Live Updates ---
 last_broadcasted_timestamp = None
 
@@ -156,15 +92,9 @@ async def lifespan(app: FastAPI):
     logger.info("債券資料服務啟動中...")
     database.initialize_database()
 
-    # 使用新的輔助函式獲取金鑰
-    api_key = get_fred_api_key()
-
-    # 如果最終沒有獲取到金鑰，則使用預設值並發出明確警告
-    if not api_key:
-        api_key = "YOUR_DEFAULT_API_KEY" # 保持一個預設值
-        logger.warning("最終未能獲取 FRED_API_KEY，將使用預設的假金鑰。資料抓取功能將無法運作。")
-
-    data_manager = DataManager(api_key=api_key)
+    # 修正：DataManager 現在內部會處理金鑰的即時獲取，
+    # 因此在服務啟動時不再需要傳遞金鑰。
+    data_manager = DataManager()
 
     # 啟動背景更新任務
     update_task = asyncio.create_task(periodic_data_updater())
