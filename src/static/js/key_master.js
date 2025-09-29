@@ -2,8 +2,8 @@
 
 document.addEventListener('DOMContentLoaded', () => {
     const keyListContainer = document.getElementById('key-list-container');
-    // 我們之前建立的 key_master_service 的位址
-    const apiKeyServiceUrl = 'http://127.0.0.1:8008/api/v1/keys';
+    // 使用相對路徑，透過主應用的反向代理來請求 key_master_service
+    const apiKeyServiceUrl = '/key-api/api/v1/keys';
 
     const renderKeys = (keys) => {
         // 如果沒有金鑰，顯示提示訊息
@@ -56,9 +56,9 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             const response = await fetch(apiKeyServiceUrl);
 
-            // 如果請求失敗 (例如服務未啟動)
+            // 如果請求失敗 (例如代理錯誤或後端服務未啟動)
             if (!response.ok) {
-                throw new Error(`無法連接到金鑰服務 (HTTP ${response.status})，請確認服務是否已在 http://127.0.0.1:8008 正常運行。`);
+                throw new Error(`無法透過代理獲取金鑰 (HTTP ${response.status})，請檢查主應用程式與 key_master_service 的日誌。`);
             }
 
             const keys = await response.json();

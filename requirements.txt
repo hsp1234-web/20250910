@@ -3,6 +3,7 @@ fastapi==0.116.1
 uvicorn==0.35.0
 Jinja2
 python-multipart
+httpx # 新增：用於實現反向代理，向後端微服務發送請求
 
 # Services Dependencies
 ollama
