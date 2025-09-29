@@ -38,17 +38,44 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    async function checkKeyAndLoadCharts() {
+        console.log("✅ 後端服務已就緒！正在檢查 API 金鑰...");
+
+        // 檢查 API 金鑰狀態
+        try {
+            const keyResponse = await fetch('/api/key_status');
+            if (keyResponse.ok) {
+                console.log("✅ API 金鑰已就緒，開始載入圖表。");
+                loadAllCharts();
+            } else {
+                const errorData = await keyResponse.json().catch(() => ({}));
+                const message = errorData.message || "尚未設定 FRED API 金鑰。";
+                console.warn("API 金鑰檢查失敗:", message);
+                indicators.forEach(id => {
+                    document.getElementById(`chart-container-${id}`).innerHTML = `<div class="placeholder" style="color: #d63031;">${message}</div>`;
+                });
+            }
+        } catch (error) {
+            console.error("檢查 API 金鑰狀態時發生網路錯誤:", error);
+            indicators.forEach(id => {
+                document.getElementById(`chart-container-${id}`).innerHTML = `<div class="placeholder" style="color: #d6f31;">網路錯誤，無法檢查金鑰</div>`;
+            });
+        }
+    }
+
     function waitForServiceReady() {
+        // 顯示載入提示
         indicators.forEach(id => {
             const container = document.getElementById(`chart-container-${id}`);
             if (container) container.innerHTML = '<div class="placeholder">正在等待後端服務啟動...</div>';
         });
+
+        // 使用輪詢來探測後端服務
         const intervalId = setInterval(async () => {
             console.log("正在探測後端服務狀態...");
             if (await checkServiceHealth()) {
-                console.log("✅ 後端服務已就緒！");
                 clearInterval(intervalId);
-                loadAllCharts();
+                checkKeyAndLoadCharts(); // 服務就緒後，交由下一步處理
             } else {
                 console.log("...後端服務尚未就緒，將在 2 秒後重試。");
             }

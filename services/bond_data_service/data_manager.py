@@ -162,3 +162,19 @@ class DataManager:
         except Exception as e:
             logger.error(f"為指標 '{indicator_name}' 執行資料抓取器時發生錯誤: {e}", exc_info=True)
             return None
+
+    def check_api_key_status(self) -> bool:
+        """
+        公開方法，用於檢查 FRED API 金鑰是否有效且可獲取。
+
+        Returns:
+            bool: 如果金鑰成功獲取，則為 True，否則為 False。
+        """
+        logger.info("正在執行 API 金鑰狀態檢查...")
+        key = _get_latest_fred_api_key()
+        if key:
+            logger.info("API 金鑰狀態檢查成功，金鑰已找到。")
+            return True
+        else:
+            logger.warning("API 金鑰狀態檢查失敗，找不到金鑰。")
+            return False

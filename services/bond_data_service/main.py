@@ -153,6 +153,23 @@ async def health_check():
     """
     return JSONResponse(content={"status": "ok", "message": "債券資料服務已就緒。"})
 
+@app.get("/api/key_status", summary="檢查 FRED API 金鑰的狀態")
+async def get_key_status():
+    """
+    檢查後端是否已成功載入 FRED API 金鑰。
+    前端應在載入時呼叫此端點，以決定是否需要提示用戶輸入金鑰。
+    """
+    if data_manager and data_manager.check_api_key_status():
+        return JSONResponse(
+            status_code=200,
+            content={"status": "ok", "message": "FRED API 金鑰已就緒。"}
+        )
+    else:
+        return JSONResponse(
+            status_code=404, # 使用 404 Not Found 來表示資源（金鑰）未找到
+            content={"status": "error", "message": "尚未設定或找不到 FRED API 金鑰。"}
+        )
+
 @app.get("/ping", summary="服務健康檢查")
 async def ping():
     """
@@ -229,17 +246,7 @@ async def get_dashboard_data(
         full_metrics_df = stress_index_calculator.calculate_full_metrics(data_manager, start_date, end_date)
 
         if full_metrics_df is None or full_metrics_df.empty:
-            logger.warning("整合數據計算結果為空，正在檢查原因...")
-            # 檢查是否因為缺少 API 金鑰導致的
-            if data_manager and data_manager.api_key == "YOUR_DEFAULT_API_KEY":
-                logger.error("錯誤：因為缺少有效的 FRED API 金鑰，無法生成數據。")
-                # 回傳一個明確的錯誤，而不是空的列表
-                raise HTTPException(
-                    status_code=404, # 使用 404 表示找不到資源
-                    detail="無法獲取外部經濟數據，因為伺服器缺少有效的 FRED API 金鑰。"
-                )
-
-            logger.warning("非金鑰問題，將為儀表板返回空數據列表。")
+            logger.warning("整合數據計算結果為空，將為儀表板返回空數據列表。")
             return JSONResponse(content=[])
 
         # 定義儀表板所有圖表需要的欄位
