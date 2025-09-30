@@ -21,8 +21,9 @@ router = APIRouter()
 
 # --- Pydantic 模型 ---
 class KeyRequest(BaseModel):
-    api_key: str = Field(..., title="Google API Key")
+    api_key: str = Field(..., title="API Key Value")
     name: Optional[str] = Field(None, title="Key Alias")
+    key_type: str = Field("gemini", title="Key Type", description="金鑰的類型，可以是 'gemini' 或 'fred'。")
 
 class TestKeyRequest(BaseModel):
     api_key: str
@@ -46,8 +47,12 @@ async def add_new_key(payload: KeyRequest):
     將一個新的 API 金鑰新增到金鑰池，並立即對其進行驗證。
     """
     try:
-        result = key_manager.add_key(payload.api_key, payload.name)
-        return {"message": f"金鑰 '{result['name']}' 已新增。", **result}
+        result = key_manager.add_key(
+            key_value=payload.api_key,
+            key_name=payload.name,
+            key_type=payload.key_type
+        )
+        return {"message": f"類型為 '{payload.key_type}' 的金鑰 '{result['name']}' 已新增。", **result}
     except ValueError as e:
         raise HTTPException(status_code=409, detail=str(e))
     except Exception as e:

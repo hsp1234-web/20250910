@@ -39,26 +39,32 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function checkKeyAndLoadCharts() {
-        console.log("✅ 後端服務已就緒！正在檢查 API 金鑰...");
+        console.log("✅ 後端服務已就緒！正在檢查 FRED API 金鑰...");
 
-        // 檢查 API 金鑰狀態
+        // 檢查 FRED API 金鑰狀態
         try {
-            const keyResponse = await fetch('/api/key_status');
-            if (keyResponse.ok) {
-                console.log("✅ API 金鑰已就緒，開始載入圖表。");
+            const keyResponse = await fetch('/api/key_status/fred');
+            if (!keyResponse.ok) {
+                throw new Error(`伺服器錯誤: ${keyResponse.status}`);
+            }
+
+            const keyStatus = await keyResponse.json();
+
+            if (keyStatus.available) {
+                console.log("✅ FRED API 金鑰已就緒，開始載入圖表。");
                 loadAllCharts();
             } else {
-                const errorData = await keyResponse.json().catch(() => ({}));
-                const message = errorData.message || "尚未設定 FRED API 金鑰。";
-                console.warn("API 金鑰檢查失敗:", message);
+                const message = "後端尚未設定 FRED API 金鑰，圖表功能無法使用。";
+                console.warn(message);
                 indicators.forEach(id => {
                     document.getElementById(`chart-container-${id}`).innerHTML = `<div class="placeholder" style="color: #d63031;">${message}</div>`;
                 });
             }
         } catch (error) {
-            console.error("檢查 API 金鑰狀態時發生網路錯誤:", error);
+            console.error("檢查 FRED API 金鑰狀態時發生網路錯誤:", error);
+            const message = "網路錯誤，無法檢查 FRED 金鑰狀態。";
             indicators.forEach(id => {
-                document.getElementById(`chart-container-${id}`).innerHTML = `<div class="placeholder" style="color: #d6f31;">網路錯誤，無法檢查金鑰</div>`;
+                document.getElementById(`chart-container-${id}`).innerHTML = `<div class="placeholder" style="color: #d63031;">${message}</div>`;
             });
         }
     }

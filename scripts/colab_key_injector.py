@@ -44,7 +44,8 @@ try:
 
     from google.colab import userdata
     from src.core import key_manager
-    print("✅ 成功匯入 Colab userdata 和 key_manager 模組。")
+    from src.db import initialize_database
+    print("✅ 成功匯入 Colab userdata, key_manager, 和 initialize_database 模組。")
 except ImportError:
     print("❌ 錯誤：此腳本似乎並非在 Google Colab 環境中執行，或專案結構不完整。")
     # 在非 Colab 環境下，建立一個模擬的 userdata 物件以便本機測試
@@ -129,7 +130,18 @@ def handle_manual_mode(keys_string: str):
 
 def main():
     """主執行函式，解析參數並分派任務。"""
-    # JULES (2025-09-21): 在注入新金鑰前，先清除所有舊金鑰，確保環境乾淨。
+    # 步驟 1: 強制執行資料庫結構更新，確保與最新程式碼同步
+    try:
+        print("🔄 正在確保資料庫結構為最新版本...")
+        # 靜默執行，因為 initialize_database 自己會印出日誌
+        initialize_database.initialize()
+        print("✅ 資料庫結構已是最新。")
+    except Exception as e:
+        print(f"💥 致命錯誤：資料庫初始化失敗: {e}")
+        print("腳本無法繼續執行。")
+        sys.exit(1)
+
+    # 步驟 2: 在注入新金鑰前，先清除所有舊金鑰，確保環境乾淨。
     try:
         print("🧹 正在清除所有舊的金鑰記錄...")
         cleared_count = key_manager.clear_all_keys()
