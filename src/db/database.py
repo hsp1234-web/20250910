@@ -180,6 +180,19 @@ def initialize_database(conn: sqlite3.Connection = None):
                 )
             """)
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_key_hash ON api_keys (key_hash)")
+
+            # --- JULES'S FIX (2025-09-30): 為 api_keys 表格新增 key_type 欄位 ---
+            # 解決因資料庫綱要未同步更新，導致查詢時缺少欄位的錯誤
+            try:
+                cursor.execute("ALTER TABLE api_keys ADD COLUMN key_type TEXT NOT NULL DEFAULT 'gemini'")
+                log.info("欄位 'key_type' 已成功新增至 'api_keys' 資料表。")
+            except sqlite3.OperationalError as e:
+                if "duplicate column name" in str(e):
+                    pass # 欄位已存在，是正常情況
+                else:
+                    raise # 其他錯誤則需拋出
+            # --- 結束 ---
+
             # --- 結束 ---
 
             # --- 為兩階段 AI 分析流程建立新資料表 ---
