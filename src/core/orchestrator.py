@@ -185,17 +185,25 @@ def start_all_microservices():
 
 
 # --- V5.5 舊有邏輯 (待移除) ---
-def _background_setup_and_validate(api_port: int, api_ready_event: threading.Event):
+def _background_setup_and_validate(api_port: int, api_ready_event: threading.Event, api_fully_ready_event: threading.Event):
     """
     [JULES 2025-09-30] 解決時序問題的整合式背景任務。
     此函式在一個獨立的執行緒中，按順序執行服務啟動後的關鍵任務。
     """
     try:
-        # --- 步驟 1: 等待主 API 伺服器就緒 ---
+        # --- 步驟 1: 等待主 API 伺服器就緒 (Uvicorn 啟動) ---
         log.info("[背景任務] 等待主 API 伺服器就緒...")
         if not api_ready_event.wait(timeout=60):
             log.error("[背景任務] 等待 API 伺服器就緒超時，後續任務取消。")
             return
+
+        # --- 步驟 1.5: 等待主 API 伺服器完全就緒 (內部模組預熱完成) ---
+        log.info("[背景任務] 等待 API 伺服器內部模組預熱...")
+        if not api_fully_ready_event.wait(timeout=120): # 等待更長時間，因為預熱耗時
+            log.warning("[背景任務] 等待 API 伺服器完全就緒超時，但將繼續嘗試執行驗證。")
+        else:
+            log.info("[背景任務] ✅ API 伺服器已完全就緒！")
+
 
         # --- 步驟 2: 安裝非必要的重量級依賴 ---
         # 這是觸發金鑰驗證前的必要步驟，確保驗證工具（如 google-generativeai）已安裝。
@@ -233,7 +241,11 @@ def _background_setup_and_validate(api_port: int, api_ready_event: threading.Eve
             READINESS_SIGNAL_FILE.touch()
 
 
-def stream_reader(stream, prefix, ready_event=None, ready_signal=None):
+def stream_reader(stream, prefix, ready_event=None, ready_signal=None, second_ready_event=None, second_ready_signal=None):
+    """
+    從流中讀取日誌，並可選地根據一或兩個信號來設定事件。
+    JULES (2025-09-30): 擴充此函式以支援第二個信號，用於更精準的「完全就緒」檢測。
+    """
     try:
         for line in iter(stream.readline, ''):
             if not line: break
@@ -243,6 +255,10 @@ def stream_reader(stream, prefix, ready_event=None, ready_signal=None):
             if ready_event and not ready_event.is_set() and ready_signal and ready_signal in stripped_line:
                 ready_event.set()
                 log.info(f"✅ 偵測到來自 '{prefix}' 的就緒信號 '{ready_signal}'！")
+
+            if second_ready_event and not second_ready_event.is_set() and second_ready_signal and second_ready_signal in stripped_line:
+                second_ready_event.set()
+                log.info(f"✅ 偵測到來自 '{prefix}' 的第二個就緒信號 '{second_ready_signal}'！")
 
     except Exception as e:
         log.error(f"讀取流 '{prefix}' 時發生錯誤: {e}", exc_info=True)
@@ -383,13 +399,15 @@ def main():
 
         log.info("🔧 正在啟動主 API 伺服器...")
         api_ready_event = threading.Event()
+        api_fully_ready_event = threading.Event()
         api_server_cmd = [sys.executable, "-m", "api.api_server", "--port", str(api_port)]
         if args.mock: api_server_cmd.append("--mock")
 
         api_proc = subprocess.Popen(api_server_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding='utf-8', env=proc_env)
         processes.append(api_proc)
         api_stdout_thread = threading.Thread(target=stream_reader, args=(api_proc.stdout, 'api_server', api_ready_event, "Uvicorn running on"))
-        api_stderr_thread = threading.Thread(target=stream_reader, args=(api_proc.stderr, 'api_server_stderr', api_ready_event, "Uvicorn running on"))
+        # JULES'S FIX (2025-09-30): 讓 stderr 的 reader 同時監聽新的 [SYSTEM_READY] 信號
+        api_stderr_thread = threading.Thread(target=stream_reader, args=(api_proc.stderr, 'api_server_stderr', api_ready_event, "Uvicorn running on", api_fully_ready_event, "[SYSTEM_READY]"))
         threads.extend([api_stdout_thread, api_stderr_thread])
         api_stdout_thread.daemon = True
         api_stderr_thread.daemon = True
@@ -401,7 +419,7 @@ def main():
 
         # 步驟 3: 啟動整合式的背景設定與驗證任務
         log.info("🚀 正在啟動背景任務 (依賴安裝與金鑰驗證)...")
-        background_thread = threading.Thread(target=_background_setup_and_validate, args=(api_port, api_ready_event), daemon=True)
+        background_thread = threading.Thread(target=_background_setup_and_validate, args=(api_port, api_ready_event, api_fully_ready_event), daemon=True)
         threads.append(background_thread)
         background_thread.start()
 

@@ -77,6 +77,8 @@ def main():
     parser.add_argument("--mode", type=str, choices=['auto', 'manual'], required=True, help="金鑰載入模式：'auto' 或 'manual'")
     parser.add_argument("--count", type=int, default=0, help="在自動模式下，要載入的金鑰數量 (0-20)。")
     parser.add_argument("--manual-keys", type=str, default="", help="在手動模式下，包含金鑰的字串（以換行符分隔）。")
+    # JULES'S FIX V3 (2025-09-30): 新增專門的命令列參數來接收 FRED 金鑰
+    parser.add_argument("--fred-key", type=str, default="", help="用於傳遞 FRED API 金鑰。")
     args = parser.parse_args()
 
     # --- 步驟 3: 從所有來源收集金鑰 ---
@@ -110,12 +112,11 @@ def main():
             keys_to_add.append({"value": key_value, "name": key_name, "type": "gemini"})
             print(f"     > 找到第 {i+1} 把手動金鑰")
 
-    # 來源 2: 環境變數 (FRED 金鑰)
-    print("   - 正在從環境變數讀取 FRED 金鑰...")
-    fred_key_value = os.environ.get("FRED_API_KEY")
-    if fred_key_value and fred_key_value.strip():
+    # 來源 2: 命令列參數 (FRED 金鑰)
+    print("   - 正在從命令列參數讀取 FRED 金鑰...")
+    if args.fred_key and args.fred_key.strip():
         keys_to_add.append({
-            "value": fred_key_value,
+            "value": args.fred_key,
             "name": "FRED 金鑰 (自動載入)",
             "type": "fred"
         })
