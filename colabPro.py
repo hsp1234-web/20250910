@@ -1,10 +1,13 @@
 # -*- coding: utf-8 -*-
 # ╔══════════════════════════════════════════════════════════════════╗
 # ║                                                                      ║
-# ║   ✨🐺 善狼一鍵啟動器 (v40) 🐺                                   ✨🐺 ║
+# ║   ✨🐺 善狼一鍵啟動器 (v41) 🐺                                   ✨🐺 ║
 # ║                                                                      ║
 # ╠══════════════════════════════════════════════════════════════════╣
 # ║                                                                      ║
+# ║ - V41 更新日誌 (2025-09-30):                                         ║
+# ║   - **緊急修復**: 新增 `fredapi` 至核心依賴項，解決因缺少該套件   ║
+# ║     而導致的啟動失敗問題。                                         ║
 # ║ - V40 更新日誌 (2025-09-30):                                         ║
 # ║   - **功能增強**: 新增在 Colab 環境中自動載入並驗證 FRED API 金鑰的   ║
 # ║     功能，使其與 Gemini 金鑰的處理流程一致。                       ║
@@ -24,7 +27,7 @@
 # ║                                                                      ║
 # ╚══════════════════════════════════════════════════════════════════╝
 
-#@title ✨🐺 善狼一鍵啟動器 (v40) - 終極簡化版 🐺 { vertical-output: true, display-mode: "form" }
+#@title ✨🐺 善狼一鍵啟動器 (v41) - 終極簡化版 🐺 { vertical-output: true, display-mode: "form" }
 #@markdown ---
 #@markdown ### **核心設定**
 #@markdown > **請確認以下兩個核心設定。**
@@ -147,7 +150,7 @@ class DisplayManager:
         self._thread = threading.Thread(target=self._run, daemon=True)
 
     def _build_output_buffer(self) -> list[str]:
-        output_buffer = ["✨🐺 善狼一鍵啟動器 (v40) 🐺", ""]
+        output_buffer = ["✨🐺 善狼一鍵啟動器 (v41) 🐺", ""]
         logs_to_display = self._log_manager.get_display_logs()
         for log in logs_to_display:
             ts = log['timestamp'].strftime('%H:%M:%S')

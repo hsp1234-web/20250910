@@ -1,2 +1,3 @@
 # JULES: 為了讓 orchestrator.py 能啟動，requests 是必需的
 requests==2.32.4
+fredapi
