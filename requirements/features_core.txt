@@ -2,3 +2,4 @@
 requests==2.32.4
 fredapi
 weasyprint
+python-docx
