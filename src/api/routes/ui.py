@@ -119,7 +119,3 @@ async def serve_primary_dealer_analysis(request: Request):
     """ 提供一級交易商分析儀表板頁面 """
     return templates.TemplateResponse("primary_dealer_analysis.html", {"request": request})
 
-@router.get("/primary_dealer_key_management", response_class=HTMLResponse)
-async def serve_primary_dealer_key_management(request: Request):
-    """ 提供一級交易商的金鑰管理頁面 """
-    return templates.TemplateResponse("primary_dealer_key_management.html", {"request": request})
