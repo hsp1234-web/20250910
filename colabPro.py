@@ -1,10 +1,22 @@
 # -*- coding: utf-8 -*-
 # ╔══════════════════════════════════════════════════════════════════╗
 # ║                                                                      ║
-# ║   ✨🐺 善狼一鍵啟動器 (v39) 🐺                                   ✨🐺 ║
+# ║   ✨🐺 善狼一鍵啟動器 (v43) 🐺                                   ✨🐺 ║
 # ║                                                                      ║
 # ╠══════════════════════════════════════════════════════════════════╣
 # ║                                                                      ║
+# ║ - V43 更新日誌 (2025-09-30):                                         ║
+# ║   - **緊急修復**: 新增 `weasyprint` 至核心依賴項，解決因缺少該套件  ║
+# ║     而導致的 API 伺服器啟動失敗問題。                              ║
+# ║ - V42 更新日誌 (2025-09-30):                                         ║
+# ║   - **穩定性修復**: 還原 FRED 金鑰的處理邏輯，修復因非同步處理與   ║
+# ║     依賴安裝之間的競爭條件所造成的啟動失敗問題。                   ║
+# ║ - V41 更新日誌 (2025-09-30):                                         ║
+# ║   - **緊急修復**: 新增 `fredapi` 至核心依賴項，解決因缺少該套件   ║
+# ║     而導致的啟動失敗問題。                                         ║
+# ║ - V40 更新日誌 (2025-09-30):                                         ║
+# ║   - **功能增強**: 新增在 Colab 環境中自動載入並驗證 FRED API 金鑰的   ║
+# ║     功能，使其與 Gemini 金鑰的處理流程一致。                       ║
 # ║ - V39 更新日誌 (2025-09-30):                                         ║
 # ║   - **戰略修正**: 採用最小化修改策略，為 FRED 金鑰新增前端狀態探測   ║
 # ║     接口，以確保系統穩定性。                                       ║
@@ -21,7 +33,7 @@
 # ║                                                                      ║
 # ╚══════════════════════════════════════════════════════════════════╝
 
-#@title ✨🐺 善狼一鍵啟動器 (v39) - 終極簡化版 🐺 { vertical-output: true, display-mode: "form" }
+#@title ✨🐺 善狼一鍵啟動器 (v43) - 終極簡化版 🐺 { vertical-output: true, display-mode: "form" }
 #@markdown ---
 #@markdown ### **核心設定**
 #@markdown > **請確認以下兩個核心設定。**
@@ -144,7 +156,7 @@ class DisplayManager:
         self._thread = threading.Thread(target=self._run, daemon=True)
 
     def _build_output_buffer(self) -> list[str]:
-        output_buffer = ["✨🐺 善狼一鍵啟動器 (v39) 🐺", ""]
+        output_buffer = ["✨🐺 善狼一鍵啟動器 (v43) 🐺", ""]
         logs_to_display = self._log_manager.get_display_logs()
         for log in logs_to_display:
             ts = log['timestamp'].strftime('%H:%M:%S')
@@ -252,26 +264,24 @@ class ServerManager:
                     # 捕捉其他可能的錯誤，例如權限問題
                     self._log_manager.log("WARN", f"[背景] 讀取金鑰 '{key_name}' 時發生錯誤: {e}，跳過。")
 
+            # --- Gemini 金鑰處理 ---
             if not keys_to_inject:
-                 self._log_manager.log("WARN", "[背景] 未從 Colab Secrets 中獲取到任何金鑰，跳過注入。")
-                 return
-
-            keys_string = "\n".join(keys_to_inject)
-            command = [
-                sys.executable, str(key_injector_script.resolve()),
-                "--mode", "manual", "--manual-keys", keys_string
-            ]
-
-            # 使用 Popen 以非阻塞方式執行，並透過 stream_reader 處理日誌
-            process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8')
-            for line in iter(process.stdout.readline, ''):
-                self._log_manager.log("INFO", f"[背景] {line.strip()}", "KeyInjector")
-            process.wait()
-
-            if process.returncode == 0:
-                self._log_manager.log("SUCCESS", "[背景] ✅ 金鑰注入腳本執行完畢。")
+                self._log_manager.log("INFO", "[背景] 🟡 未在 Colab Secrets 中找到任何 Gemini 金鑰，跳過注入。")
             else:
-                self._log_manager.log("WARN", f"[背景] 金鑰注入腳本執行結束，但返回碼為 {process.returncode}。")
+                keys_string = "\n".join(keys_to_inject)
+                command = [
+                    sys.executable, str(key_injector_script.resolve()),
+                    "--mode", "manual", "--manual-keys", keys_string
+                ]
+                process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8')
+                for line in iter(process.stdout.readline, ''):
+                    self._log_manager.log("INFO", f"[背景] {line.strip()}", "KeyInjector")
+                process.wait()
+
+                if process.returncode == 0:
+                    self._log_manager.log("SUCCESS", "[背景] ✅ Gemini 金鑰注入腳本執行完畢。")
+                else:
+                    self._log_manager.log("WARN", f"[背景] Gemini 金鑰注入腳本執行結束，但返回碼為 {process.returncode}。")
 
         except ImportError:
             self._log_manager.log("WARN", "[背景] 無法匯入 google.colab.userdata，可能並非在 Colab 環境。跳過金鑰注入。")
@@ -459,18 +469,7 @@ class ServerManager:
                 fred_api_key = userdata.get('FRED_API_KEY')
                 if fred_api_key:
                     process_env['FRED_API_KEY'] = fred_api_key
-                    self._log_manager.log("SUCCESS", "✅ 成功從 Colab Secrets 讀取 FRED_API_KEY 並注入到環境變數。")
-                    # 步驟 2: 將 FRED 金鑰也注入中央資料庫，並正確標記其類型
-                    try:
-                        self._log_manager.log("INFO", "正在將 FRED 金鑰寫入中央資料庫...")
-                        # (Jules @ 2025-09-30) 修正：明確指定 key_type='fred'，確保金鑰被正確分類。
-                        key_manager.add_key(fred_api_key, "FRED_API_KEY", key_type='fred', validate=False)
-                        self._log_manager.log("SUCCESS", "✅ FRED 金鑰已成功寫入中央資料庫。")
-                    except ValueError as e:
-                        # 如果金鑰已存在，這不是一個錯誤，只是確認它已經在那裡了
-                        self._log_manager.log("INFO", f"🟡 FRED 金鑰已存在於資料庫中，無需重複新增。 ({e})")
-                    except Exception as e:
-                        self._log_manager.log("ERROR", f"❌ 將 FRED 金鑰寫入資料庫時發生未預期錯誤: {e}")
+                    self._log_manager.log("SUCCESS", "✅ 成功從 Colab Secrets 讀取並注入 FRED_API_KEY。")
                 else:
                     self._log_manager.log("WARN", "🟡 在 Colab Secrets 中找到 FRED_API_KEY，但其值為空。")
             except (ImportError, userdata.SecretNotFoundError):
