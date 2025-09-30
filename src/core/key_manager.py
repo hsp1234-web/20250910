@@ -226,8 +226,11 @@ def get_valid_key() -> Optional[str]:
     return None
 
 def get_all_valid_keys_for_manager() -> List[Dict[str, str]]:
-    """獲取所有有效的金鑰，格式為 GeminiManager 所需的列表。"""
-    query = "SELECT key_name, key_value FROM api_keys WHERE is_valid = 1 AND status = 'active'"
+    """
+    獲取所有有效的 'gemini' 類型金鑰，格式為 GeminiManager 所需的列表。
+    (Jules @ 2025-09-30) 修正：限定只回傳 gemini 金鑰，避免傳遞不相容的金鑰。
+    """
+    query = "SELECT key_name, key_value FROM api_keys WHERE is_valid = 1 AND status = 'active' AND key_type = 'gemini'"
     rows = _execute_query(query, fetch='all')
     return [{"name": row["key_name"], "value": row["key_value"]} for row in rows]
 

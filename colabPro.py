@@ -2,10 +2,14 @@
 # -*- coding: utf-8 -*-
 # ╔══════════════════════════════════════════════════════════════════╗
 # ║                                                                      ║
-# ║   ✨🐺 善狼一鍵啟動器 (v45) 🐺                                   ✨🐺 ║
+# ║   ✨🐺 善狼一鍵啟動器 (v46) 🐺                                   ✨🐺 ║
 # ║                                                                      ║
 # ╠══════════════════════════════════════════════════════════════════╣
 # ║                                                                      ║
+# ║ - V46 更新日誌 (2025-09-30):                                         ║
+# ║   - **修復**: 修正 FRED 金鑰注入邏輯，確保其能被寫入資料庫並顯示     ║
+# ║     於管理頁面。                                                   ║
+# ║   - **增強**: 強化金鑰管理器，避免將非 Gemini 金鑰傳遞給 AI 服務。   ║
 # ║ - V45 更新日誌 (2025-09-30):                                         ║
 # ║   - **修復**: 修正 `colabPro.py` 執行異常問題。                      ║
 # ║   - **調整**: 更新預設分支號碼為 `90.1`，並同步版本號至 `v45`。      ║
@@ -25,7 +29,7 @@
 # ║                                                                      ║
 # ╚══════════════════════════════════════════════════════════════════╝
 
-#@title ✨🐺 善狼一鍵啟動器 (v45) - 終極簡化版 🐺 { vertical-output: true, display-mode: "form" }
+#@title ✨🐺 善狼一鍵啟動器 (v46) - 終極簡化版 🐺 { vertical-output: true, display-mode: "form" }
 #@markdown ---
 #@markdown ### **核心設定**
 #@markdown > **請確認以下兩個核心設定。**
@@ -148,7 +152,7 @@ class DisplayManager:
         self._thread = threading.Thread(target=self._run, daemon=True)
 
     def _build_output_buffer(self) -> list[str]:
-        output_buffer = ["✨🐺 善狼一鍵啟動器 (v45) 🐺", ""]
+        output_buffer = ["✨🐺 善狼一鍵啟動器 (v46) 🐺", ""]
         logs_to_display = self._log_manager.get_display_logs()
         for log in logs_to_display:
             ts = log['timestamp'].strftime('%H:%M:%S')
@@ -461,10 +465,26 @@ class ServerManager:
             # 安全地注入 FRED API 金鑰
             try:
                 from google.colab import userdata
+                from src.core import key_manager # 確保 key_manager 已匯入
                 fred_api_key = userdata.get('FRED_API_KEY')
                 if fred_api_key:
                     process_env['FRED_API_KEY'] = fred_api_key
                     self._log_manager.log("SUCCESS", "✅ 成功從 Colab Secrets 讀取並注入 FRED_API_KEY。")
+                    # --- JULES'S FIX (2025-09-30): 將 FRED 金鑰寫入資料庫 ---
+                    try:
+                        key_manager.add_key(
+                            key_value=fred_api_key,
+                            key_name='FRED_API_KEY',
+                            key_type='fred',
+                            validate=False # 在啟動時不立即驗證
+                        )
+                        self._log_manager.log("INFO", "✅ 已將 FRED_API_KEY 寫入金鑰資料庫。")
+                    except ValueError as e:
+                        # 如果金鑰已存在，僅記錄日誌，不中斷流程
+                        self._log_manager.log("INFO", f"FRED_API_KEY 已存在於資料庫中，無需重複新增。 ({e})")
+                    except Exception as e:
+                        self._log_manager.log("WARN", f"將 FRED_API_KEY 寫入資料庫時發生錯誤: {e}")
+                    # --- END OF FIX ---
                 else:
                     self._log_manager.log("WARN", "🟡 在 Colab Secrets 中找到 FRED_API_KEY，但其值為空。")
             except (ImportError, userdata.SecretNotFoundError):
