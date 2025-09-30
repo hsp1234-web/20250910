@@ -170,6 +170,9 @@ def _prewarm_heavy_modules():
         log.info("  -> ✅ 下載器模組預熱完畢。")
 
         log.info("✅✅✅ [預熱] 所有重量級模組預熱完畢！")
+        # JULES'S FIX (2025-09-30): 新增一個明確的就緒信號，供協調器監聽。
+        # 這個信號表示所有重量級的預熱任務都已完成，API 伺服器現在是真正意義上的「完全就緒」。
+        log.info("[SYSTEM_READY] All modules are fully initialized.")
     except Exception as e:
         log.error(f"❌ [預熱] 預熱背景任務發生錯誤: {e}", exc_info=True)
 

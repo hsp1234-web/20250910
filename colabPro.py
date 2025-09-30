@@ -2,10 +2,15 @@
 # -*- coding: utf-8 -*-
 # ╔══════════════════════════════════════════════════════════════════╗
 # ║                                                                      ║
-# ║   ✨🐺 善狼一鍵啟動器 (v46) 🐺                                   ✨🐺 ║
+# ║   ✨🐺 善狼一鍵啟動器 (v47) 🐺                                   ✨🐺 ║
 # ║                                                                      ║
 # ╠══════════════════════════════════════════════════════════════════╣
 # ║                                                                      ║
+# ║ - V47 更新日誌 (2025-09-30):                                         ║
+# ║   - **修復**: 修正 FRED 金鑰未被注入資料庫導致前端無法顯示的問題。   ║
+# ║   - **修復**: 調整啟動時序，解決因競爭條件導致的首次金鑰自動驗證失敗 ║
+# ║     問題。                                                         ║
+# ║   - **調整**: 將預設分支更新至 `91`。                                ║
 # ║ - V46 更新日誌 (2025-09-30):                                         ║
 # ║   - **重構**: 調整啟動時序，修復因競爭條件導致的金鑰載入與驗證失敗   ║
 # ║     問題，大幅提升啟動穩定性。                                     ║
@@ -28,16 +33,19 @@
 # ║                                                                      ║
 # ╚══════════════════════════════════════════════════════════════════╝
 
-#@title ✨🐺 善狼一鍵啟動器 (v46) - 終極簡化版 🐺 { vertical-output: true, display-mode: "form" }
+#@title ✨🐺 善狼一鍵啟動器 (v47) - 終極簡化版 🐺 { vertical-output: true, display-mode: "form" }
 #@markdown ---
 #@markdown ### **核心設定**
 #@markdown > **請確認以下兩個核心設定。**
 #@markdown ---
 #@markdown **後端版本分支或標籤**
-TARGET_BRANCH_OR_TAG = "90.1" #@param {type:"string"}
+TARGET_BRANCH_OR_TAG = "91" #@param {type:"string"}
 #@markdown **自動從 Colab Secrets 載入的金鑰數量 (0-20)**
 #@markdown > 輸入 `2` 將載入 `GOOGLE_API_KEY`, `_1`, `_2` 共三組金鑰。
 KEY_LOAD_COUNT_LIMIT = 2 #@param {type:"number"}
+#@markdown **日誌顯示行數 (2-5)**
+#@markdown > 設定單條日誌在儀表板中佔據的總行數，以優化行動裝置上的可讀性。
+LOG_SPLIT_LINES = 2 #@param {type:"slider", min:2, max:5, step:1}
 #@markdown ---
 #@markdown > **設定完成後，點擊「執行」按鈕。**
 #@markdown ---
@@ -151,12 +159,43 @@ class DisplayManager:
         self._thread = threading.Thread(target=self._run, daemon=True)
 
     def _build_output_buffer(self) -> list[str]:
-        output_buffer = ["✨🐺 善狼一鍵啟動器 (v46) 🐺", ""]
+        output_buffer = ["✨🐺 善狼一鍵啟動器 (v47) 🐺", ""]
         logs_to_display = self._log_manager.get_display_logs()
+
+        # JULES'S NEW FEATURE (2025-09-30): 日誌格式化邏輯
         for log in logs_to_display:
             ts = log['timestamp'].strftime('%H:%M:%S')
             level, msg = log['level'], log['message']
-            output_buffer.append(f"[{ts}] {colorize(f'[{level:^8}]', level)} {msg}")
+
+            # 第一行：永遠是時間戳和日誌等級
+            header = f"[{ts}] {colorize(f'[{level:^8}]', level)}"
+            output_buffer.append(header)
+
+            # 後續行：處理訊息本文
+            num_message_lines = max(1, LOG_SPLIT_LINES - 1)
+
+            if not msg: # 如果訊息為空，則不添加額外行
+                continue
+
+            # 計算每行應顯示的平均字元數
+            # 加 0.5 確保在不能整除時，前面的行能分到更多字元
+            avg_len = len(msg) / num_message_lines
+
+            start_index = 0
+            for i in range(num_message_lines):
+                # 如果訊息已經顯示完畢，則跳出迴圈
+                if start_index >= len(msg):
+                    break
+
+                # 計算當前行應結束的索引
+                # 對於最後一行，直接取到結尾
+                end_index = len(msg) if i == num_message_lines - 1 else int(start_index + avg_len + 0.5)
+
+                line_content = msg[start_index:end_index].strip()
+                if line_content:
+                    output_buffer.append(line_content)
+
+                start_index = end_index
 
         urls = self._stats.get('urls', {})
         if urls:
@@ -268,6 +307,18 @@ class ServerManager:
                 sys.executable, str(key_injector_script.resolve()),
                 "--mode", "manual", "--manual-keys", keys_string
             ]
+
+            # --- JULES'S FIX V3 (2025-09-30): 改用命令列參數傳遞 FRED 金鑰 ---
+            # 這是最穩健可靠的方式，徹底避免環境變數繼承問題。
+            fred_api_key = None
+            try:
+                fred_api_key = userdata.get('FRED_API_KEY')
+                if fred_api_key and fred_api_key.strip():
+                    # 如果找到了 FRED 金鑰，就將其附加到命令列參數中
+                    command.extend(["--fred-key", fred_api_key])
+                    self._log_manager.log("INFO", "[背景] 成功讀取 FRED_API_KEY 並準備透過參數傳遞。", "KeyInjector")
+            except Exception:
+                self._log_manager.log("WARN", "[背景] 未能在 Colab Secrets 中找到 FRED_API_KEY。", "KeyInjector")
 
             # 使用 Popen 以非阻塞方式執行，並透過 stream_reader 處理日誌
             process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8')
