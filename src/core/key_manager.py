@@ -248,6 +248,49 @@ def test_key(api_key: str, key_type: str = 'gemini') -> bool:
     # 對於未知的類型，可以預設返回 False 或拋出錯誤
     return False
 
+
+# --- JULES (2025-09-30): 新增函式以自動註冊 FRED 金鑰 ---
+def sync_fred_key_from_env():
+    """
+    自動從環境變數同步 FRED API 金鑰。
+
+    此函式會檢查 `FRED_API_KEY` 環境變數。如果該金鑰存在但尚未存入資料庫，
+    它會自動將其新增，確保系統啟動時 FRED 金鑰的可用性。
+    """
+    # 注意：此處使用 print 是為了與協調器的日誌輸出保持一致，因其會捕獲 stdout。
+    # 在理想情況下，應傳入一個日誌記錄器實例。
+    print("INFO: [金鑰管理器] 正在檢查並同步環境中的 FRED API 金鑰...")
+    fred_key_value = os.environ.get("FRED_API_KEY")
+
+    if not fred_key_value or not fred_key_value.strip():
+        print("INFO: [金鑰管理器] 未在環境變數中找到 FRED_API_KEY，跳過同步。")
+        return
+
+    key_hash = _hash_key(fred_key_value)
+
+    # 檢查資料庫中是否已存在此金鑰
+    if _execute_query("SELECT id FROM api_keys WHERE key_hash = ?", (key_hash,), fetch='one'):
+        print(f"INFO: [金鑰管理器] FRED 金鑰 (雜湊值: ...{key_hash[-6:]}) 已存在於資料庫中，無需同步。")
+        return
+
+    print(f"INFO: [金鑰管理器] 偵測到新的 FRED 金鑰，正在將其新增至資料庫...")
+    try:
+        # 呼叫現有的 add_key 函式來新增金鑰
+        add_key(
+            key_value=fred_key_value,
+            key_name="FRED 金鑰 (自動載入)",
+            key_type='fred',
+            validate=True  # 新增時立即驗證其有效性
+        )
+        print(f"SUCCESS: [金鑰管理器] 已成功新增並驗證 FRED 金鑰 (雜湊值: ...{key_hash[-6:]})。")
+    except ValueError as e:
+        # 這種情況理論上不應發生，因為我們已經檢查過雜湊值，但為了穩健性仍保留
+        print(f"WARN: [金鑰管理器] 新增 FRED 金鑰時發生預期的錯誤（可能為已存在）: {e}")
+    except Exception as e:
+        # 捕獲其他潛在的資料庫或驗證錯誤
+        print(f"ERROR: [金鑰管理器] 自動新增 FRED 金鑰時發生未預期的錯誤: {e}", file=sys.stderr)
+
+
 def add_keys_from_environment(count: int) -> Dict[str, Any]:
     """
     從環境變數中讀取 API 金鑰並將其新增到金鑰池。

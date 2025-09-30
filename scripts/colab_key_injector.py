@@ -130,16 +130,7 @@ def handle_manual_mode(keys_string: str):
 
 def main():
     """主執行函式，解析參數並分派任務。"""
-    # 步驟 1: 強制執行資料庫結構更新，確保與最新程式碼同步
-    try:
-        print("🔄 正在確保資料庫結構為最新版本...")
-        # 靜默執行，因為 initialize_database 自己會印出日誌
-        initialize_database.initialize()
-        print("✅ 資料庫結構已是最新。")
-    except Exception as e:
-        print(f"💥 致命錯誤：資料庫初始化失敗: {e}")
-        print("腳本無法繼續執行。")
-        sys.exit(1)
+    # JULES (2025-09-30) 步驟 1 已移除：資料庫初始化現在由主啟動器 colabPro.py 負責。
 
     # 步驟 2: 在注入新金鑰前，先清除所有舊金鑰，確保環境乾淨。
     try:
