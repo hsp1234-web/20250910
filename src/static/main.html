@@ -5,7 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>鳳凰主頁</title>
     <link rel="stylesheet" href="/static/css/main.css">
-    <link rel="stylesheet" href="/static/css/page6.css"> <!-- 新增 page6 的樣式 -->
 </head>
 <body>
     <div class="navbar">
@@ -28,68 +27,10 @@
             <a href="/primary_dealer_analysis" class="button">一級交易商分析</a>
             <a href="/page6" class="button">金鑰管理</a>
         </div>
-
-        <!-- 從 page6_keys.html 複製過來的金鑰池面板 -->
-        <div class="panel">
-            <div class="panel-header">
-                <h2>金鑰池</h2>
-                <a href="/page6" class="button" style="font-size: 0.8em; padding: 5px 10px;">管理金鑰</a>
-            </div>
-            <div id="key-list-container">
-                <p>正在載入金鑰列表...</p>
-            </div>
-        </div>
     </div>
 
     <!-- 根據使用者要求，用於切換漢堡選單的 JavaScript 已移除 -->
 
     <!-- V5.5 Readiness Overlay 已根據使用者要求移除 -->
-
-    <!-- 從 page6_keys.html 複製過來的 JavaScript -->
-    <script>
-    document.addEventListener('DOMContentLoaded', () => {
-        const keyListContainer = document.getElementById('key-list-container');
-
-        const renderKeyList = (keys) => {
-            if (keys.length === 0) {
-                keyListContainer.innerHTML = '<p>目前沒有已儲存的金鑰。</p>';
-                return;
-            }
-            let html = '<ul class="key-list">';
-            keys.forEach(key => {
-                const statusClass = key.is_valid === true ? 'status-valid' : (key.is_valid === false ? 'status-invalid' : 'status-untested');
-                const statusText = key.is_valid === true ? '有效' : (key.is_valid === false ? '無效' : '未驗證');
-                const lastValidated = key.last_validated ? new Date(key.last_validated).toLocaleString('zh-TW') : '從未';
-                const keyTypeDisplay = (key.key_type === 'fred') ? 'FRED' : 'Gemini';
-
-                html += `
-                    <li class="key-item">
-                        <span class="key-name">${key.name}</span>
-                        <span class="key-hash">雜湊值: ...${key.key_hash.slice(-8)}</span>
-                        <span class="key-type-tag">${keyTypeDisplay}</span>
-                        <span class="key-status ${statusClass}">${statusText}</span>
-                        <span class="key-validated">上次驗證: ${lastValidated}</span>
-                    </li>
-                `;
-            });
-            html += '</ul>';
-            keyListContainer.innerHTML = html;
-        };
-
-        const fetchKeys = async () => {
-            try {
-                const response = await fetch('/api/keys');
-                if (!response.ok) throw new Error('無法獲取金鑰列表');
-                const keys = await response.json();
-                renderKeyList(keys);
-            } catch (error) {
-                keyListContainer.innerHTML = \`<p style="color: red;">\${error.message}</p>\`;
-            }
-        };
-
-        // --- 初始載入 ---
-        fetchKeys();
-    });
-    </script>
 </body>
 </html>

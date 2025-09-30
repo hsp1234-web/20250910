@@ -375,11 +375,15 @@
                     throw new Error(result.detail || '查詢失敗');
                 }
 
-                if (result.length > 0) {
+                if (Array.isArray(result) && result.length > 0) {
                     let modelHtml = '<ul>';
-                    // 增加排序和格式化，使其與另一頁面一致
-                    result.sort().forEach(model => {
-                        modelHtml += `<li>${model.replace('models/', '')}</li>`;
+                    // (Jules @ 2025-09-30) 修正：API 回傳的是物件陣列，而非字串陣列。
+                    // 我們需要根據 'name' 屬性來排序，並從 'name' 屬性中擷取模型名稱。
+                    result.sort((a, b) => a.name.localeCompare(b.name));
+                    result.forEach(model => {
+                        if (model && model.name) { // 增加穩健性檢查
+                           modelHtml += `<li>${model.name.replace('models/', '')}</li>`;
+                        }
                     });
                     modelHtml += '</ul>';
                     modelListContainer.innerHTML = modelHtml;
