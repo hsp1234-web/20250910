@@ -2,10 +2,13 @@
 # -*- coding: utf-8 -*-
 # ╔══════════════════════════════════════════════════════════════════╗
 # ║                                                                      ║
-# ║   ✨🐺 善狼一鍵啟動器 (v39) 🐺                                   ✨🐺 ║
+# ║   ✨🐺 善狼一鍵啟動器 (v45) 🐺                                   ✨🐺 ║
 # ║                                                                      ║
 # ╠══════════════════════════════════════════════════════════════════╣
 # ║                                                                      ║
+# ║ - V45 更新日誌 (2025-09-30):                                         ║
+# ║   - **修復**: 修正 `colabPro.py` 執行異常問題。                      ║
+# ║   - **調整**: 更新預設分支號碼為 `90.1`，並同步版本號至 `v45`。      ║
 # ║ - V39 更新日誌 (2025-09-30):                                         ║
 # ║   - **戰略修正**: 採用最小化修改策略，為 FRED 金鑰新增前端狀態探測   ║
 # ║     接口，以確保系統穩定性。                                       ║
@@ -22,13 +25,13 @@
 # ║                                                                      ║
 # ╚══════════════════════════════════════════════════════════════════╝
 
-#@title ✨🐺 善狼一鍵啟動器 (v39) - 終極簡化版 🐺 { vertical-output: true, display-mode: "form" }
+#@title ✨🐺 善狼一鍵啟動器 (v45) - 終極簡化版 🐺 { vertical-output: true, display-mode: "form" }
 #@markdown ---
 #@markdown ### **核心設定**
 #@markdown > **請確認以下兩個核心設定。**
 #@markdown ---
 #@markdown **後端版本分支或標籤**
-TARGET_BRANCH_OR_TAG = "89.5" #@param {type:"string"}
+TARGET_BRANCH_OR_TAG = "90.1" #@param {type:"string"}
 #@markdown **自動從 Colab Secrets 載入的金鑰數量 (0-20)**
 #@markdown > 輸入 `2` 將載入 `GOOGLE_API_KEY`, `_1`, `_2` 共三組金鑰。
 KEY_LOAD_COUNT_LIMIT = 2 #@param {type:"number"}
@@ -145,7 +148,7 @@ class DisplayManager:
         self._thread = threading.Thread(target=self._run, daemon=True)
 
     def _build_output_buffer(self) -> list[str]:
-        output_buffer = ["✨🐺 善狼一鍵啟動器 (v39) 🐺", ""]
+        output_buffer = ["✨🐺 善狼一鍵啟動器 (v45) 🐺", ""]
         logs_to_display = self._log_manager.get_display_logs()
         for log in logs_to_display:
             ts = log['timestamp'].strftime('%H:%M:%S')
@@ -315,11 +318,6 @@ class ServerManager:
             initialize_database()
             add_system_log("colab_setup", "INFO", "Git repository cloned successfully.")
 
-            # --- JULES'S FIX (2025-09-16): 非同步化金鑰注入 ---
-            # 將耗時的金鑰注入操作移至背景執行緒，使其與依賴安裝並行
-            key_thread = threading.Thread(target=self._inject_keys_background, args=(project_path,), daemon=True)
-            key_thread.start()
-
             # --- JULES: 重構為兩階段依賴安裝 (Pip 優先) ---
             def install_requirements(req_files, log_prefix="", force_pip=False):
                 """
@@ -431,20 +429,27 @@ class ServerManager:
                     self._log_manager.log("CRITICAL", f"[{log_prefix}] 強制依賴安裝失敗！", "Installer")
                     raise
 
-            # --- 階段 0: 強制安裝下載器依賴 ---
-            self._log_manager.log("INFO", "步驟 1/4: 正在強制安裝下載器核心依賴...")
-            downloader_req_file = project_path / "requirements" / "downloader.txt"
-            force_install_packages(downloader_req_file, "下載器")
+            # --- JULES'S FIX (2025-09-30): 統一強制安裝所有核心依賴 ---
+            # 解決方案：將所有服務啟動前必需的依賴（下載器、核心、分析）都納入強制安裝階段，
+            # 確保在任何服務（包括 api_server 和背景腳本）啟動前，環境都已準備齊全。
+            self._log_manager.log("INFO", "步驟 1/4 & 2/4: 正在強制安裝所有核心服務依賴...")
 
-            # --- 階段 2: 同步安裝核心依賴 (使用 Pip) ---
-            self._log_manager.log("INFO", "步驟 2/4: 正在快速安裝啟動器核心依賴...")
-            # JULES (2025-09-25): 優化啟動流程。
-            # 啟動器現在只安裝啟動 orchestrator.py 所需的最小依賴 (requests)。
-            # 其他依賴項將由 orchestrator.py 在後台自行安裝。
-            core_requirements = [
-                project_path / "requirements" / "features_core.txt"
-            ]
-            install_requirements(core_requirements, "啟動器核心", force_pip=True)
+            essential_req_files = {
+                "下載器": project_path / "requirements" / "downloader.txt",
+                "核心服務": project_path / "requirements" / "core.txt",
+                "分析功能": project_path / "requirements" / "analysis.txt",
+                "啟動器核心": project_path / "requirements" / "features_core.txt",
+            }
+
+            for name, req_file in essential_req_files.items():
+                force_install_packages(req_file, name)
+
+            self._log_manager.log("SUCCESS", "✅ 所有核心依賴安裝完畢。")
+
+            # --- JULES'S FIX (2025-09-30): 修正金鑰注入時序 ---
+            # 將金鑰注入操作移至依賴安裝完成後，以解決 ModuleNotFoundError 的時序問題。
+            key_thread = threading.Thread(target=self._inject_keys_background, args=(project_path,), daemon=True)
+            key_thread.start()
 
             # --- 階段 3: 啟動後端服務 ---
             self._log_manager.log("INFO", "步驟 3/4: 正在啟動後端協調器...")
