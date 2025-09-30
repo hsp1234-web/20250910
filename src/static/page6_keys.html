@@ -44,7 +44,13 @@
         <div id="manual-input-panel" class="panel">
             <h2>新增金鑰 (手動)</h2>
             <div class="form-group">
-                <textarea id="new-keys-textarea" placeholder="在此貼上多個 API 金鑰（一行一個）" rows="5"></textarea>
+                <label for="key-type-select">金鑰類型</label>
+                <select id="key-type-select">
+                    <option value="gemini" selected>Gemini 金鑰 (用於 AI 分析)</option>
+                    <option value="fred">FRED 金鑰 (用於債券圖表)</option>
+                </select>
+
+                <textarea id="new-keys-textarea" placeholder="在此貼上一個或多個 API 金鑰（一行一個）" rows="5"></textarea>
                 <input type="text" id="new-key-name-input" placeholder="為金鑰設定一個別名 (可選)">
                 <small>說明：若貼上多個金鑰，別名只會套用於第一個金鑰。</small>
                 <button id="add-key-btn">新增金鑰</button>
@@ -144,6 +150,7 @@
         const newKeysTextarea = document.getElementById('new-keys-textarea');
         const newKeyNameInput = document.getElementById('new-key-name-input');
         const addKeyStatus = document.getElementById('add-key-status');
+        const keyTypeSelect = document.getElementById('key-type-select');
 
         // 授權模式元素
         const loadFromEnvBtn = document.getElementById('load-from-env-btn');
@@ -183,11 +190,13 @@
                 const statusClass = key.is_valid === true ? 'status-valid' : (key.is_valid === false ? 'status-invalid' : 'status-untested');
                 const statusText = key.is_valid === true ? '有效' : (key.is_valid === false ? '無效' : '未驗證');
                 const lastValidated = key.last_validated ? new Date(key.last_validated).toLocaleString('zh-TW') : '從未';
+                const keyTypeDisplay = (key.key_type === 'fred') ? 'FRED' : 'Gemini'; // 預設為 Gemini
 
                 html += `
                     <li class="key-item">
                         <span class="key-name">${key.name}</span>
                         <span class="key-hash">雜湊值: ...${key.key_hash.slice(-8)}</span>
+                        <span class="key-type-tag">${keyTypeDisplay}</span>
                         <span class="key-status ${statusClass}">${statusText}</span>
                         <span class="key-validated">上次驗證: ${lastValidated}</span>
                         <button class="delete-btn" data-hash="${key.key_hash}">刪除</button>
@@ -233,8 +242,9 @@
 
         // 手動模式邏輯
         addKeyBtn.addEventListener('click', async () => {
-            const keys = newKeysTextarea.value.trim().split('\\n').filter(k => k.trim() !== '');
+            const keys = newKeysTextarea.value.trim().split('\n').filter(k => k.trim() !== '');
             const name = newKeyNameInput.value.trim();
+            const keyType = keyTypeSelect.value;
 
             if (keys.length === 0) {
                 renderStatus(addKeyStatus, 'API 金鑰不可為空。', true);
@@ -249,13 +259,13 @@
                 const key = keys[i].trim();
                 // 別名只套用在第一個金鑰上
                 const keyName = (i === 0 && name) ? name : null;
-                renderStatus(addKeyStatus, `正在處理金鑰 #${i + 1}...`, false, true);
+                renderStatus(addKeyStatus, `正在處理類型為 '${keyType}' 的金鑰 #${i + 1}...`, false, true);
 
                 try {
                     const response = await fetch('/api/keys', {
                         method: 'POST',
                         headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({ api_key: key, name: keyName })
+                        body: JSON.stringify({ api_key: key, name: keyName, key_type: keyType })
                     });
                     const result = await response.json();
                     if (!response.ok) throw new Error(result.detail || '新增失敗');
