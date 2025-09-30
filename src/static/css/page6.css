@@ -146,6 +146,17 @@ button:disabled {
     background-color: #c82333;
 }
 
+.key-type-tag {
+    background-color: #e0e0e0;
+    color: #333;
+    padding: 3px 8px;
+    border-radius: 10px;
+    font-size: 0.8em;
+    font-weight: bold;
+    border: 1px solid #ccc;
+    margin-right: 5px;
+}
+
 /* 響應式設計：適用於手機等較窄的螢幕 */
 @media (max-width: 768px) {
     .form-group {

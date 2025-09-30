@@ -94,23 +94,26 @@ def _validate_single_key(api_key: str) -> bool:
 
 def get_all_keys() -> List[Dict[str, Any]]:
     """獲取所有金鑰的狀態，但不包含原始金鑰值。"""
-    query = "SELECT key_name, key_hash, is_valid, last_validated_at, total_tokens_used FROM api_keys ORDER BY id"
+    query = "SELECT key_name, key_hash, key_type, is_valid, last_validated_at, total_tokens_used FROM api_keys ORDER BY id"
     rows = _execute_query(query, fetch='all')
-    # 將 sqlite3.Row 物件轉換為標準字典，並符合舊版函式的輸出格式
+    # 將 sqlite3.Row 物件轉換為標準字典
     return [
         {
             "name": row["key_name"],
             "key_hash": row["key_hash"],
+            "key_type": row["key_type"],
             "is_valid": bool(row["is_valid"]),
             "last_validated": row["last_validated_at"],
             "total_tokens_used": row["total_tokens_used"]
         } for row in rows
     ]
 
-def add_key(key_value: str, key_name: Optional[str] = None, validate: bool = True) -> Dict[str, Any]:
+def add_key(key_value: str, key_name: Optional[str] = None, key_type: str = 'gemini', validate: bool = True) -> Dict[str, Any]:
     """新增一個金鑰到資料庫。"""
     if not key_value or not key_value.strip():
         raise ValueError("API 金鑰不可為空。")
+    if key_type not in ['gemini', 'fred']:
+        raise ValueError("無效的金鑰類型。必須是 'gemini' 或 'fred'。")
 
     key_hash = _hash_key(key_value)
 
@@ -120,21 +123,26 @@ def add_key(key_value: str, key_name: Optional[str] = None, validate: bool = Tru
 
     is_valid = False
     validation_time = None
-    if validate:
+    # 只對 gemini 類型的金鑰進行驗證
+    if validate and key_type == 'gemini':
         is_valid = _validate_single_key(key_value)
         validation_time = datetime.now().isoformat()
+    # FRED 金鑰在此處不進行驗證，預設為有效，由其服務自身處理
+    elif key_type == 'fred':
+        is_valid = True
+        validation_time = datetime.now().isoformat()
 
-    final_key_name = key_name or f"Key-{int(time.time())}" # 使用時間戳確保唯一性
+
+    final_key_name = key_name or f"{key_type.capitalize()}-Key-{int(time.time())}"
 
     query = """
-        INSERT INTO api_keys (key_name, key_hash, key_value, is_valid, last_validated_at, status)
-        VALUES (?, ?, ?, ?, ?, ?)
+        INSERT INTO api_keys (key_name, key_hash, key_value, key_type, is_valid, last_validated_at, status)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
     """
-    params = (final_key_name, key_hash, key_value, is_valid, validation_time, 'active')
+    params = (final_key_name, key_hash, key_value, key_type, is_valid, validation_time, 'active')
     _execute_query(query, params)
 
-    # 回傳與舊版函式相同的格式
-    return {"name": final_key_name, "key_hash": key_hash, "is_valid": is_valid}
+    return {"name": final_key_name, "key_hash": key_hash, "key_type": key_type, "is_valid": is_valid}
 
 def delete_key(key_hash: str) -> bool:
     """根據雜湊值從資料庫中刪除一個金鑰。"""
