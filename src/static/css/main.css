@@ -186,10 +186,10 @@ input[type="date"]:focus {
     background-color: var(--phoenix-primary-hover-color);
 }
 
-/* 確保次要按鈕保持灰色 */
+/* 修正：根據使用者要求，所有主頁按鈕均顯示為藍色 */
 #main-page-actions .button.secondary {
-    background-color: var(--phoenix-secondary-color);
+    background-color: var(--phoenix-primary-color);
 }
 #main-page-actions .button.secondary:hover {
-    background-color: var(--phoenix-secondary-hover-color);
+    background-color: var(--phoenix-primary-hover-color);
 }
