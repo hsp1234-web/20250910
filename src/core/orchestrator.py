@@ -20,6 +20,7 @@ ROOT_DIR = SRC_DIR.parent
 
 # --- 現在可以安全地導入專案內部模組了 ---
 from db.client import DBClient
+from core import key_manager
 
 logging.basicConfig(
     level=logging.INFO,
@@ -378,6 +379,10 @@ def main():
 
         db_client = DBClient()
         log.info("✅ DB 客戶端初始化完成。")
+
+        # JULES (2025-09-30): 在協調器啟動時，自動從環境變數同步 FRED 金鑰
+        log.info("🔑 正在同步 FRED 金鑰...")
+        key_manager.sync_fred_key_from_env()
 
         log.info("🔧 正在啟動主 API 伺服器...")
         api_ready_event = threading.Event()
