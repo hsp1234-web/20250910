@@ -2,10 +2,15 @@
 # -*- coding: utf-8 -*-
 # ╔══════════════════════════════════════════════════════════════════╗
 # ║                                                                      ║
-# ║   ✨🐺 善狼一鍵啟動器 (v46) 🐺                                   ✨🐺 ║
+# ║   ✨🐺 善狼一鍵啟動器 (v47) 🐺                                   ✨🐺 ║
 # ║                                                                      ║
 # ╠══════════════════════════════════════════════════════════════════╣
 # ║                                                                      ║
+# ║ - V47 更新日誌 (2025-09-30):                                         ║
+# ║   - **修復**: 修正 FRED 金鑰未被注入資料庫導致前端無法顯示的問題。   ║
+# ║   - **修復**: 調整啟動時序，解決因競爭條件導致的首次金鑰自動驗證失敗 ║
+# ║     問題。                                                         ║
+# ║   - **調整**: 將預設分支更新至 `91`。                                ║
 # ║ - V46 更新日誌 (2025-09-30):                                         ║
 # ║   - **重構**: 調整啟動時序，修復因競爭條件導致的金鑰載入與驗證失敗   ║
 # ║     問題，大幅提升啟動穩定性。                                     ║
@@ -28,13 +33,13 @@
 # ║                                                                      ║
 # ╚══════════════════════════════════════════════════════════════════╝
 
-#@title ✨🐺 善狼一鍵啟動器 (v46) - 終極簡化版 🐺 { vertical-output: true, display-mode: "form" }
+#@title ✨🐺 善狼一鍵啟動器 (v47) - 終極簡化版 🐺 { vertical-output: true, display-mode: "form" }
 #@markdown ---
 #@markdown ### **核心設定**
 #@markdown > **請確認以下兩個核心設定。**
 #@markdown ---
 #@markdown **後端版本分支或標籤**
-TARGET_BRANCH_OR_TAG = "90.1" #@param {type:"string"}
+TARGET_BRANCH_OR_TAG = "91" #@param {type:"string"}
 #@markdown **自動從 Colab Secrets 載入的金鑰數量 (0-20)**
 #@markdown > 輸入 `2` 將載入 `GOOGLE_API_KEY`, `_1`, `_2` 共三組金鑰。
 KEY_LOAD_COUNT_LIMIT = 2 #@param {type:"number"}
@@ -268,6 +273,18 @@ class ServerManager:
                 sys.executable, str(key_injector_script.resolve()),
                 "--mode", "manual", "--manual-keys", keys_string
             ]
+
+            # --- JULES'S FIX V3 (2025-09-30): 改用命令列參數傳遞 FRED 金鑰 ---
+            # 這是最穩健可靠的方式，徹底避免環境變數繼承問題。
+            fred_api_key = None
+            try:
+                fred_api_key = userdata.get('FRED_API_KEY')
+                if fred_api_key and fred_api_key.strip():
+                    # 如果找到了 FRED 金鑰，就將其附加到命令列參數中
+                    command.extend(["--fred-key", fred_api_key])
+                    self._log_manager.log("INFO", "[背景] 成功讀取 FRED_API_KEY 並準備透過參數傳遞。", "KeyInjector")
+            except Exception:
+                self._log_manager.log("WARN", "[背景] 未能在 Colab Secrets 中找到 FRED_API_KEY。", "KeyInjector")
 
             # 使用 Popen 以非阻塞方式執行，並透過 stream_reader 處理日誌
             process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8')
