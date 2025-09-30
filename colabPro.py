@@ -1,10 +1,13 @@
 # -*- coding: utf-8 -*-
 # ╔══════════════════════════════════════════════════════════════════╗
 # ║                                                                      ║
-# ║   ✨🐺 善狼一鍵啟動器 (v41) 🐺                                   ✨🐺 ║
+# ║   ✨🐺 善狼一鍵啟動器 (v42) 🐺                                   ✨🐺 ║
 # ║                                                                      ║
 # ╠══════════════════════════════════════════════════════════════════╣
 # ║                                                                      ║
+# ║ - V42 更新日誌 (2025-09-30):                                         ║
+# ║   - **穩定性修復**: 還原 FRED 金鑰的處理邏輯，修復因非同步處理與   ║
+# ║     依賴安裝之間的競爭條件所造成的啟動失敗問題。                   ║
 # ║ - V41 更新日誌 (2025-09-30):                                         ║
 # ║   - **緊急修復**: 新增 `fredapi` 至核心依賴項，解決因缺少該套件   ║
 # ║     而導致的啟動失敗問題。                                         ║
@@ -27,7 +30,7 @@
 # ║                                                                      ║
 # ╚══════════════════════════════════════════════════════════════════╝
 
-#@title ✨🐺 善狼一鍵啟動器 (v41) - 終極簡化版 🐺 { vertical-output: true, display-mode: "form" }
+#@title ✨🐺 善狼一鍵啟動器 (v42) - 終極簡化版 🐺 { vertical-output: true, display-mode: "form" }
 #@markdown ---
 #@markdown ### **核心設定**
 #@markdown > **請確認以下兩個核心設定。**
@@ -150,7 +153,7 @@ class DisplayManager:
         self._thread = threading.Thread(target=self._run, daemon=True)
 
     def _build_output_buffer(self) -> list[str]:
-        output_buffer = ["✨🐺 善狼一鍵啟動器 (v41) 🐺", ""]
+        output_buffer = ["✨🐺 善狼一鍵啟動器 (v42) 🐺", ""]
         logs_to_display = self._log_manager.get_display_logs()
         for log in logs_to_display:
             ts = log['timestamp'].strftime('%H:%M:%S')
@@ -276,27 +279,6 @@ class ServerManager:
                     self._log_manager.log("SUCCESS", "[背景] ✅ Gemini 金鑰注入腳本執行完畢。")
                 else:
                     self._log_manager.log("WARN", f"[背景] Gemini 金鑰注入腳本執行結束，但返回碼為 {process.returncode}。")
-
-            # --- FRED 金鑰處理 ---
-            self._log_manager.log("INFO", "[背景] 開始處理 FRED API 金鑰...")
-            try:
-                from core import key_manager
-                fred_api_key = userdata.get('FRED_API_KEY')
-                if fred_api_key and fred_api_key.strip():
-                    self._log_manager.log("INFO", "[背景] ✅ 已成功獲取 FRED_API_KEY，現正寫入資料庫並進行驗證...")
-                    result = key_manager.add_key(fred_api_key, "FRED_API_KEY_Auto", key_type='fred', validate=True)
-                    if result.get("is_valid"):
-                        self._log_manager.log("SUCCESS", f"[背景] ✅ FRED 金鑰已成功新增並驗證有效！")
-                    else:
-                        self._log_manager.log("WARN", f"[背景] 🟡 FRED 金鑰已新增，但驗證失敗。請檢查金鑰是否正確。")
-                else:
-                    self._log_manager.log("INFO", "[背景] 🟡 未在 Colab Secrets 中找到有效的 FRED_API_KEY 或其值為空。")
-            except userdata.SecretNotFoundError:
-                self._log_manager.log("INFO", "[背景] 🟡 未在 Colab Secrets 中找到名為 'FRED_API_KEY' 的金鑰，將跳過處理。")
-            except ValueError:
-                self._log_manager.log("INFO", f"[背景] 🟡 FRED 金鑰已存在於資料庫中，無需重複新增。")
-            except Exception as e:
-                self._log_manager.log("ERROR", f"[背景] 處理 FRED 金鑰時發生未預期錯誤: {e}")
 
         except ImportError:
             self._log_manager.log("WARN", "[背景] 無法匯入 google.colab.userdata，可能並非在 Colab 環境。跳過金鑰注入。")
@@ -477,6 +459,20 @@ class ServerManager:
             process_env = os.environ.copy()
             src_path_str = str((project_path / "src").resolve())
             process_env['PYTHONPATH'] = f"{src_path_str}{os.pathsep}{process_env.get('PYTHONPATH', '')}".strip(os.pathsep)
+
+            # 安全地注入 FRED API 金鑰
+            try:
+                from google.colab import userdata
+                fred_api_key = userdata.get('FRED_API_KEY')
+                if fred_api_key:
+                    process_env['FRED_API_KEY'] = fred_api_key
+                    self._log_manager.log("SUCCESS", "✅ 成功從 Colab Secrets 讀取並注入 FRED_API_KEY。")
+                else:
+                    self._log_manager.log("WARN", "🟡 在 Colab Secrets 中找到 FRED_API_KEY，但其值為空。")
+            except (ImportError, userdata.SecretNotFoundError):
+                self._log_manager.log("WARN", "🟡 未在 Colab Secrets 中找到 FRED_API_KEY，部分圖表可能無法顯示。")
+            except Exception as e:
+                self._log_manager.log("ERROR", f"讀取 FRED_API_KEY 時發生錯誤: {e}")
 
             self.server_process = subprocess.Popen(launch_command, cwd=str(project_path), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8', preexec_fn=os.setsid, env=process_env)
 
