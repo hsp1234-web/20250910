@@ -269,8 +269,15 @@ class ServerManager:
                 "--mode", "manual", "--manual-keys", keys_string
             ]
 
+            # --- JULES'S FIX (2025-09-30): 修正 FRED 金鑰注入遺漏問題 ---
+            # 建立一個新的環境變數字典，並將主程序環境中的 FRED_API_KEY (如果存在) 傳遞下去。
+            # 這是為了解決金鑰注入腳本無法讀取到由主程序設定的環境變數的問題。
+            injector_env = os.environ.copy()
+            if 'FRED_API_KEY' in injector_env:
+                self._log_manager.log("INFO", "[背景] 正在將 FRED_API_KEY 傳遞至注入腳本...", "KeyInjector")
+
             # 使用 Popen 以非阻塞方式執行，並透過 stream_reader 處理日誌
-            process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8')
+            process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8', env=injector_env)
             for line in iter(process.stdout.readline, ''):
                 self._log_manager.log("INFO", f"[背景] {line.strip()}", "KeyInjector")
             process.wait()
