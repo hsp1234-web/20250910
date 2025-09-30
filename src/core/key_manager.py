@@ -248,6 +248,7 @@ def test_key(api_key: str, key_type: str = 'gemini') -> bool:
     # 對於未知的類型，可以預設返回 False 或拋出錯誤
     return False
 
+
 def add_keys_from_environment(count: int) -> Dict[str, Any]:
     """
     從環境變數中讀取 API 金鑰並將其新增到金鑰池。

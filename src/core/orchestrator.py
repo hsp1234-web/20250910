@@ -20,6 +20,7 @@ ROOT_DIR = SRC_DIR.parent
 
 # --- 現在可以安全地導入專案內部模組了 ---
 from db.client import DBClient
+from core import key_manager
 
 logging.basicConfig(
     level=logging.INFO,
@@ -184,51 +185,52 @@ def start_all_microservices():
 
 
 # --- V5.5 舊有邏輯 (待移除) ---
-def prepare_core_services(api_port: int, api_ready_event: threading.Event):
+def _background_setup_and_validate(api_port: int, api_ready_event: threading.Event):
     """
-    V6.0 更新：此函式的依賴安裝部分已被移除。
-    它現在只負責觸發舊有的金鑰驗證流程。
+    [JULES 2025-09-30] 解決時序問題的整合式背景任務。
+    此函式在一個獨立的執行緒中，按順序執行服務啟動後的關鍵任務。
     """
     try:
-        log.info("[核心準備] 背景任務已啟動。")
-
-        # 步驟 1: 等待 API 伺服器就緒
-        log.info("[核心準備] 等待 API 伺服器就緒...")
+        # --- 步驟 1: 等待主 API 伺服器就緒 ---
+        log.info("[背景任務] 等待主 API 伺服器就緒...")
         if not api_ready_event.wait(timeout=60):
-            log.error("[核心準備] 等待 API 伺服器就緒超時。")
-            full_readiness_event.set()
-            READINESS_SIGNAL_FILE.touch()
+            log.error("[背景任務] 等待 API 伺服器就緒超時，後續任務取消。")
             return
 
-        # 步驟 2: 立即發送「完全就緒」信號
-        log.info("✅ [核心準備] 核心服務準備完畢！發送『完全就緒』信號。")
+        # --- 步驟 2: 安裝非必要的重量級依賴 ---
+        # 這是觸發金鑰驗證前的必要步驟，確保驗證工具（如 google-generativeai）已安裝。
+        log.info("[背景任務] 開始安裝重量級依賴...")
+        install_non_essential_dependencies_background()
+        log.info("[背景任務] ✅ 重量級依賴安裝流程結束。")
+
+        # --- 步驟 3: 觸發所有金鑰的自動驗證 ---
+        # 此時，所有依賴都已安裝完畢，可以安全地進行驗證。
+        log.info("[背景任務] 準備觸發所有金鑰的自動驗證...")
+        time.sleep(2)  # 短暫等待，確保所有服務都已穩定
+        validation_url = f"http://127.0.0.1:{api_port}/api/keys/validate"
+        log.info(f"[背景任務] 正在向 {validation_url} 發送 POST 請求以觸發驗證...")
+        try:
+            # 使用較長的超時時間，因為金鑰驗證可能耗時較長
+            response = requests.post(validation_url, timeout=300)
+            if response.status_code == 200:
+                log.info("[背景任務] ✅ 金鑰驗證請求已成功發送。")
+            else:
+                log.error(f"[背景任務] 觸發金鑰驗證失敗，伺服器回應: {response.status_code} {response.text}")
+        except Exception as req_e:
+            log.error(f"[背景任務] 發送金鑰驗證請求時發生錯誤: {req_e}")
+
+        # --- 步驟 4: 發送「完全就緒」信號 ---
+        # 所有背景任務完成後，才宣告系統完全就緒。
+        log.info("✅ [背景任務] 所有啟動後任務完成！發送『完全就緒』信號。")
         full_readiness_event.set()
         READINESS_SIGNAL_FILE.touch()
 
-        # JULES (2025-09-25): 在此處啟動非必要依賴的背景安裝
-        log.info("[核心準備] 準備在背景安裝重量級依賴...")
-        non_essential_install_thread = threading.Thread(target=install_non_essential_dependencies_background, daemon=True)
-        non_essential_install_thread.start()
-        threads.append(non_essential_install_thread)
-
-        # 步驟 3: 背景觸發金鑰驗證 (舊流程)
-        def _run_validation_in_background():
-            log.info("[金鑰驗證-背景] 等待2秒後開始...")
-            time.sleep(2)
-            validation_url = f"http://127.0.0.1:{api_port}/api/keys/validate"
-            log.info(f"[金鑰驗證-背景] 正在向 {validation_url} 發送 POST 請求...")
-            try:
-                requests.post(validation_url, timeout=180)
-            except Exception as req_e:
-                log.error(f"[金鑰驗證-背景] 發送驗證請求時發生錯誤: {req_e}")
-
-        log.info("[核心準備] 準備在背景啟動金鑰驗證...")
-        validation_thread = threading.Thread(target=_run_validation_in_background, daemon=True)
-        validation_thread.start()
-        threads.append(validation_thread)
-
     except Exception as e:
-        log.critical(f"❌ [核心準備] 背景任務發生致命錯誤: {e}", exc_info=True)
+        log.critical(f"❌ [背景任務] 執行緒發生致命錯誤: {e}", exc_info=True)
+        # 即使失敗，也應發送就緒信號，以避免前端無限期等待
+        if not full_readiness_event.is_set():
+            full_readiness_event.set()
+            READINESS_SIGNAL_FILE.touch()
 
 
 def stream_reader(stream, prefix, ready_event=None, ready_signal=None):
@@ -397,11 +399,11 @@ def main():
         # 步驟 2: 啟動所有微服務
         start_all_microservices()
 
-        # 步驟 3: 執行舊的核心準備任務 (發送就緒信號等)
-        log.info("🚀 正在啟動核心服務準備任務 (背景執行)...")
-        core_prep_thread = threading.Thread(target=prepare_core_services, args=(api_port, api_ready_event), daemon=True)
-        threads.append(core_prep_thread)
-        core_prep_thread.start()
+        # 步驟 3: 啟動整合式的背景設定與驗證任務
+        log.info("🚀 正在啟動背景任務 (依賴安裝與金鑰驗證)...")
+        background_thread = threading.Thread(target=_background_setup_and_validate, args=(api_port, api_ready_event), daemon=True)
+        threads.append(background_thread)
+        background_thread.start()
 
         log.info("--- [協調器進入監控模式] ---")
         while not stop_event.is_set():

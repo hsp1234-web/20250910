@@ -2,10 +2,13 @@
 # -*- coding: utf-8 -*-
 # ╔══════════════════════════════════════════════════════════════════╗
 # ║                                                                      ║
-# ║   ✨🐺 善狼一鍵啟動器 (v45) 🐺                                   ✨🐺 ║
+# ║   ✨🐺 善狼一鍵啟動器 (v46) 🐺                                   ✨🐺 ║
 # ║                                                                      ║
 # ╠══════════════════════════════════════════════════════════════════╣
 # ║                                                                      ║
+# ║ - V46 更新日誌 (2025-09-30):                                         ║
+# ║   - **重構**: 調整啟動時序，修復因競爭條件導致的金鑰載入與驗證失敗   ║
+# ║     問題，大幅提升啟動穩定性。                                     ║
 # ║ - V45 更新日誌 (2025-09-30):                                         ║
 # ║   - **修復**: 修正 `colabPro.py` 執行異常問題。                      ║
 # ║   - **調整**: 更新預設分支號碼為 `90.1`，並同步版本號至 `v45`。      ║
@@ -25,7 +28,7 @@
 # ║                                                                      ║
 # ╚══════════════════════════════════════════════════════════════════╝
 
-#@title ✨🐺 善狼一鍵啟動器 (v45) - 終極簡化版 🐺 { vertical-output: true, display-mode: "form" }
+#@title ✨🐺 善狼一鍵啟動器 (v46) - 終極簡化版 🐺 { vertical-output: true, display-mode: "form" }
 #@markdown ---
 #@markdown ### **核心設定**
 #@markdown > **請確認以下兩個核心設定。**
@@ -148,7 +151,7 @@ class DisplayManager:
         self._thread = threading.Thread(target=self._run, daemon=True)
 
     def _build_output_buffer(self) -> list[str]:
-        output_buffer = ["✨🐺 善狼一鍵啟動器 (v45) 🐺", ""]
+        output_buffer = ["✨🐺 善狼一鍵啟動器 (v46) 🐺", ""]
         logs_to_display = self._log_manager.get_display_logs()
         for log in logs_to_display:
             ts = log['timestamp'].strftime('%H:%M:%S')
@@ -314,9 +317,36 @@ class ServerManager:
             if project_src_path_str not in sys.path:
                 sys.path.insert(0, project_src_path_str)
 
-            from db.database import initialize_database, add_system_log
-            initialize_database()
-            add_system_log("colab_setup", "INFO", "Git repository cloned successfully.")
+            # --- JULES (2025-09-30): 重構啟動流程，將資料庫初始化提升至最高優先級 ---
+            self._log_manager.log("INFO", "🔩 步驟 1/5: 正在初始化資料庫結構...")
+            try:
+                # 動態匯入最新的金鑰資料庫初始化模組
+                from db import initialize_database as key_db_init
+                # 使用一個假的 stream 來捕獲其 print 輸出, 以便整合到主日誌
+                from io import StringIO
+                import contextlib
+
+                init_log_stream = StringIO()
+                with contextlib.redirect_stdout(init_log_stream):
+                    key_db_init.initialize()
+
+                init_logs = init_log_stream.getvalue().strip()
+                if init_logs:
+                    for line in init_logs.split('\n'):
+                        # 將子腳本的日誌轉發到主日誌管理器
+                        self._log_manager.log("INFO", f"[DB_Init] {line}", "Database")
+                self._log_manager.log("SUCCESS", "✅ 金鑰資料庫結構已是最新版本。")
+
+                # 保留舊的任務資料庫初始化流程 (如果仍然需要)
+                from db.database import initialize_database as task_db_init, add_system_log
+                task_db_init()
+                add_system_log("colab_setup", "INFO", "Git repository cloned and DB schema updated.")
+                self._log_manager.log("INFO", "✅ 舊版任務資料庫初始化成功。")
+
+            except Exception as e:
+                self._log_manager.log("CRITICAL", f"資料庫初始化失敗，這是一個致命錯誤，啟動中止。 {e}", "Database")
+                # 終止執行緒
+                return
 
             # --- JULES: 重構為兩階段依賴安裝 (Pip 優先) ---
             def install_requirements(req_files, log_prefix="", force_pip=False):
