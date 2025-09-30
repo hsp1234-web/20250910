@@ -2,10 +2,13 @@
 # -*- coding: utf-8 -*-
 # ╔══════════════════════════════════════════════════════════════════╗
 # ║                                                                      ║
-# ║   ✨🐺 善狼一鍵啟動器 (v45) 🐺                                   ✨🐺 ║
+# ║   ✨🐺 善狼一鍵啟動器 (v46) 🐺                                   ✨🐺 ║
 # ║                                                                      ║
 # ╠══════════════════════════════════════════════════════════════════╣
 # ║                                                                      ║
+# ║ - V46 更新日誌 (2025-09-30):                                         ║
+# ║   - **重構**: 調整啟動時序，修復因競爭條件導致的金鑰載入與驗證失敗   ║
+# ║     問題，大幅提升啟動穩定性。                                     ║
 # ║ - V45 更新日誌 (2025-09-30):                                         ║
 # ║   - **修復**: 修正 `colabPro.py` 執行異常問題。                      ║
 # ║   - **調整**: 更新預設分支號碼為 `90.1`，並同步版本號至 `v45`。      ║
@@ -25,7 +28,7 @@
 # ║                                                                      ║
 # ╚══════════════════════════════════════════════════════════════════╝
 
-#@title ✨🐺 善狼一鍵啟動器 (v45) - 終極簡化版 🐺 { vertical-output: true, display-mode: "form" }
+#@title ✨🐺 善狼一鍵啟動器 (v46) - 終極簡化版 🐺 { vertical-output: true, display-mode: "form" }
 #@markdown ---
 #@markdown ### **核心設定**
 #@markdown > **請確認以下兩個核心設定。**
@@ -148,7 +151,7 @@ class DisplayManager:
         self._thread = threading.Thread(target=self._run, daemon=True)
 
     def _build_output_buffer(self) -> list[str]:
-        output_buffer = ["✨🐺 善狼一鍵啟動器 (v45) 🐺", ""]
+        output_buffer = ["✨🐺 善狼一鍵啟動器 (v46) 🐺", ""]
         logs_to_display = self._log_manager.get_display_logs()
         for log in logs_to_display:
             ts = log['timestamp'].strftime('%H:%M:%S')
