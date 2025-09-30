@@ -6,9 +6,10 @@ import sys
 import subprocess
 import time
 from pathlib import Path
-from typing import List, Dict, Optional, Any, Tuple
+from typing import List, Dict, Optional, Any, Tuple, Callable
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import fredapi
 
 # --- 路徑修正與設定 ---
 SRC_DIR = Path(__file__).resolve().parent.parent
@@ -63,7 +64,7 @@ def _hash_key(key: str) -> str:
 
 def _validate_single_key(api_key: str) -> bool:
     """
-    呼叫 gemini_processor.py 工具來驗證單一金鑰的有效性。
+    (Gemini) 呼叫 gemini_processor.py 工具來驗證單一 Gemini 金鑰的有效性。
     此版本已移除內部重試迴圈，僅執行單次驗證。
     """
     tool_script_path = ROOT_DIR / "src" / "tools" / "gemini_processor.py"
@@ -79,15 +80,24 @@ def _validate_single_key(api_key: str) -> bool:
         if result.returncode == 0:
             return True
         else:
-            # 在背景執行緒中，只記錄簡短的錯誤訊息
-            error_msg = (result.stderr or result.stdout or "未知錯誤").strip()
-            # print(f"金鑰驗證失敗: {error_msg}", file=sys.stderr)
             return False
-    except subprocess.TimeoutExpired:
-        # print(f"金鑰驗證超時。", file=sys.stderr)
+    except (subprocess.TimeoutExpired, Exception):
         return False
+
+def _validate_fred_key(api_key: str) -> bool:
+    """
+    (FRED) 驗證 FRED API 金鑰的有效性。
+    透過一個簡單的 API 請求來測試金鑰是否能成功驗證。
+    """
+    if not api_key:
+        return False
+    try:
+        fred = fredapi.Fred(api_key=api_key)
+        # 嘗試獲取一個常見但數據量小的序列的資訊，以測試金鑰
+        fred.get_series_info('GNP')
+        return True
     except Exception:
-        # print(f"金鑰驗證發生例外: {e}", file=sys.stderr)
+        # 任何例外都表示金鑰無效或 API 無法訪問
         return False
 
 # --- 公開 API (介面維持不變) ---
@@ -109,7 +119,7 @@ def get_all_keys() -> List[Dict[str, Any]]:
     ]
 
 def add_key(key_value: str, key_name: Optional[str] = None, key_type: str = 'gemini', validate: bool = True) -> Dict[str, Any]:
-    """新增一個金鑰到資料庫。"""
+    """新增一個金鑰到資料庫，並可選擇是否進行驗證。"""
     if not key_value or not key_value.strip():
         raise ValueError("API 金鑰不可為空。")
     if key_type not in ['gemini', 'fred']:
@@ -117,21 +127,19 @@ def add_key(key_value: str, key_name: Optional[str] = None, key_type: str = 'gem
 
     key_hash = _hash_key(key_value)
 
-    # 檢查金鑰是否已存在
     if _execute_query("SELECT id FROM api_keys WHERE key_hash = ?", (key_hash,), fetch='one'):
         raise ValueError("此 API 金鑰已存在。")
 
     is_valid = False
     validation_time = None
-    # 只對 gemini 類型的金鑰進行驗證
-    if validate and key_type == 'gemini':
-        is_valid = _validate_single_key(key_value)
-        validation_time = datetime.now().isoformat()
-    # FRED 金鑰在此處不進行驗證，預設為有效，由其服務自身處理
-    elif key_type == 'fred':
-        is_valid = True
-        validation_time = datetime.now().isoformat()
 
+    if validate:
+        validation_time = datetime.now().isoformat()
+        if key_type == 'gemini':
+            is_valid = _validate_single_key(key_value)
+        elif key_type == 'fred':
+            is_valid = _validate_fred_key(key_value)
+        # 未來可在此處擴充其他金鑰類型的驗證
 
     final_key_name = key_name or f"{key_type.capitalize()}-Key-{int(time.time())}"
 
@@ -160,16 +168,29 @@ def clear_all_keys() -> int:
 
 def validate_all_keys() -> List[Dict[str, Any]]:
     """
-    並行重新驗證所有已儲存的金鑰，以提升效率。
+    並行重新驗證所有已儲存的金鑰，根據其類型選擇合適的驗證器。
     """
-    keys_to_validate = _execute_query("SELECT id, key_value FROM api_keys", fetch='all')
+    keys_to_validate = _execute_query("SELECT id, key_value, key_type FROM api_keys", fetch='all')
     if not keys_to_validate:
         return []
 
-    # 使用執行緒池並行處理所有金鑰的驗證
+    # 建立一個金鑰類型到其對應驗證函式的映射
+    validator_map: Dict[str, Callable[[str], bool]] = {
+        'gemini': _validate_single_key,
+        'fred': _validate_fred_key
+    }
+
     with ThreadPoolExecutor(max_workers=10) as executor:
-        # 建立 future 到 key_id 的映射
-        future_to_key_id = {executor.submit(_validate_single_key, key["key_value"]): key["id"] for key in keys_to_validate}
+        future_to_key_id = {}
+        for key in keys_to_validate:
+            validator = validator_map.get(key["key_type"])
+            if validator:
+                # 如果找到對應的驗證器，則提交任務
+                future = executor.submit(validator, key["key_value"])
+                future_to_key_id[future] = key["id"]
+            else:
+                # 如果沒有驗證器，可以選擇跳過或標記為未驗證
+                print(f"警告：金鑰 ID {key['id']} 的類型 '{key['key_type']}' 沒有對應的驗證器，已跳過。", file=sys.stderr)
 
         for future in as_completed(future_to_key_id):
             key_id = future_to_key_id[future]
@@ -210,11 +231,22 @@ def get_all_valid_keys_for_manager() -> List[Dict[str, str]]:
     rows = _execute_query(query, fetch='all')
     return [{"name": row["key_name"], "value": row["key_value"]} for row in rows]
 
-def test_key(api_key: str) -> bool:
-    """公開的函式，用於測試單一 API 金鑰的有效性，而不將其儲存。"""
+def test_key(api_key: str, key_type: str = 'gemini') -> bool:
+    """
+    公開的函式，用於測試單一 API 金鑰的有效性，而不將其儲存。
+    :param api_key: 要測試的金鑰值。
+    :param key_type: 金鑰的類型 ('gemini', 'fred', 等)。
+    """
     if not api_key:
         return False
-    return _validate_single_key(api_key)
+
+    if key_type == 'gemini':
+        return _validate_single_key(api_key)
+    elif key_type == 'fred':
+        return _validate_fred_key(api_key)
+
+    # 對於未知的類型，可以預設返回 False 或拋出錯誤
+    return False
 
 def add_keys_from_environment(count: int) -> Dict[str, Any]:
     """

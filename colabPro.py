@@ -460,9 +460,10 @@ class ServerManager:
                 if fred_api_key:
                     process_env['FRED_API_KEY'] = fred_api_key
                     self._log_manager.log("SUCCESS", "✅ 成功從 Colab Secrets 讀取 FRED_API_KEY 並注入到環境變數。")
-                    # 步驟 2: 將 FRED 金鑰也注入中央資料庫
+                    # 步驟 2: 將 FRED 金鑰也注入中央資料庫，並正確標記其類型
                     try:
                         self._log_manager.log("INFO", "正在將 FRED 金鑰寫入中央資料庫...")
+                        # (Jules @ 2025-09-30) 修正：明確指定 key_type='fred'，確保金鑰被正確分類。
                         key_manager.add_key(fred_api_key, "FRED_API_KEY", key_type='fred', validate=False)
                         self._log_manager.log("SUCCESS", "✅ FRED 金鑰已成功寫入中央資料庫。")
                     except ValueError as e:

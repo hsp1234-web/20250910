@@ -6,6 +6,7 @@ from typing import Dict, Callable, Optional
 import httpx
 import json
 import os
+import inspect
 
 # 匯入我們新的資料庫工具和所有改造後的資料抓取器
 from db_utils import load_series_from_db
@@ -140,12 +141,13 @@ class DataManager:
             # 準備傳遞給抓取器的參數
             fetcher_args = {"start_date": start_date, "end_date": end_date}
 
-            # 判斷是否需要 API 金鑰
-            # 修正：不再從 self.api_key 讀取，而是在需要時即時獲取
-            if "fred_" in fetcher.__module__ or "nyfed_" in fetcher.__module__:
+            # (Jules @ 2025-09-30) 修正：使用 inspect 動態檢查抓取器是否真的需要 api_key,
+            # 避免因傳遞多餘參數導致 TypeError。
+            fetcher_params = inspect.signature(fetcher).parameters
+            if 'api_key' in fetcher_params:
                 latest_api_key = _get_latest_fred_api_key()
                 if not latest_api_key:
-                    logger.error(f"無法為指標 '{indicator_name}' 獲取有效的 API 金鑰，抓取中止。")
+                    logger.error(f"抓取器 '{fetcher.__name__}' 需要 API 金鑰，但無法獲取。抓取中止。")
                     return None
                 fetcher_args["api_key"] = latest_api_key
 
