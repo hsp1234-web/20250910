@@ -58,14 +58,21 @@ def get_fred_api_key() -> Optional[str]:
     """
     從環境變數獲取 FRED API 金鑰。這是重構後推薦的唯一方式。
     移除了對 `/tmp/service_registry.json` 的脆弱依賴。
+    [臨時修復]：暫時硬編碼 API 金鑰以恢復服務。
     """
-    api_key = os.getenv("FRED_API_KEY")
-    if api_key:
-        logger.info("從環境變數 FRED_API_KEY 中獲取了 API 金鑰。")
-        return api_key
+    # 原始邏輯: 從環境變數獲取
+    # api_key = os.getenv("FRED_API_KEY")
+    # if api_key:
+    #     logger.info("從環境變數 FRED_API_KEY 中獲取了 API 金鑰。")
+    #     return api_key
+    #
+    # logger.warning("未找到環境變數 FRED_API_KEY。FRED 資料抓取將會失敗。")
+    # return None
 
-    logger.warning("未找到環境變數 FRED_API_KEY。FRED 資料抓取將會失敗。")
-    return None
+    # 暫時硬編碼的 API 金鑰
+    hardcoded_key = "77b0a570c6a17007e4f5af229c2aecc9"
+    logger.info(f"正在使用臨時硬編碼的 FRED API 金鑰。")
+    return hardcoded_key
 
 
 # --- 倉儲層核心類 ---
