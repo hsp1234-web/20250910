@@ -119,13 +119,18 @@ def launch_microservice(service_path: Path):
     proc_env["PORT"] = str(port)
 
     # 修正：使用更安全的方式將主環境的 API 金鑰傳遞給子服務
-    # FRED 金鑰
-    fred_api_key = os.environ.get("FRED_API_KEY")
-    if fred_api_key:
-        proc_env["FRED_API_KEY"] = fred_api_key
-        log.info(f"[{log_prefix}] 已將 FRED_API_KEY 注入到服務環境中。")
-    else:
-        log.warning(f"[{log_prefix}] 在主協調器環境中未找到 FRED_API_KEY，部分服務功能可能受限。")
+    # FRED 金鑰 (Jules 修正 @ 2025-10-01: 主動從資料庫注入，而非被動依賴環境)
+    try:
+        # 使用 key_manager 直接從資料庫讀取金鑰
+        # 確保金鑰是經過驗證的，且類型為 'fred'
+        fred_api_key = key_manager.get_validated_key_by_type('fred')
+        if fred_api_key:
+            proc_env["FRED_API_KEY"] = fred_api_key
+            log.info(f"[{log_prefix}] 已成功從資料庫獲取已驗證的 FRED API 金鑰並注入到服務環境中。")
+        else:
+            log.warning(f"[{log_prefix}] 在資料庫中未找到已驗證的 FRED API 金鑰，部分服務功能可能受限。")
+    except Exception as e:
+        log.error(f"[{log_prefix}] 從資料庫讀取 FRED API 金鑰時發生錯誤: {e}，服務可能無法正常抓取數據。")
 
     # Gemini/Google 金鑰 (處理 'GEMINI_API_KEY' 錯誤的根源)
     google_api_key = os.environ.get("GOOGLE_API_KEY")

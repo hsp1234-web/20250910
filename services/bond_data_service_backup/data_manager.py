@@ -3,8 +3,6 @@
 import pandas as pd
 import logging
 from typing import Dict, Callable, Optional
-import httpx
-import json
 import os
 import inspect
 
@@ -23,40 +21,18 @@ from data_fetchers import (
 
 logger = logging.getLogger(__name__)
 
-def _get_key_service_url() -> Optional[str]:
-    """從服務註冊檔案中讀取 key_service 的 URL。"""
-    try:
-        with open("/tmp/service_registry.json", "r") as f:
-            registry = json.load(f)
-        key_service_info = registry.get("key_service")
-        if key_service_info and "port" in key_service_info:
-            return f"http://127.0.0.1:{key_service_info['port']}"
-    except (FileNotFoundError, json.JSONDecodeError, KeyError):
-        pass # 找不到或解析失敗時，靜默處理，返回 None
-    return None
-
 def _get_latest_fred_api_key() -> Optional[str]:
     """
-    即時獲取 FRED API 金鑰，實現多源回退。
-    優先順序: 1. key_service -> 2. 環境變數
+    (Jules 修正 @ 2025-10-01: 簡化邏輯，僅從環境變數讀取金鑰)
+    直接從環境變數獲取由協調器注入的 FRED API 金鑰。
+    這是獲取金鑰的唯一且可靠的來源。
     """
-    key_service_url = _get_key_service_url()
-    if key_service_url:
-        try:
-            with httpx.Client(timeout=5.0) as client:
-                response = client.get(f"{key_service_url}/api/keys/FRED_API_KEY/value")
-                if response.status_code == 200:
-                    api_key = response.json().get("key_value")
-                    if api_key:
-                        logger.info("即時從 key_service 獲取了 FRED API 金鑰。")
-                        return api_key
-        except httpx.RequestError:
-            logger.warning("即時連接 key_service 失敗，將回退到環境變數。")
-
-    # 如果 key_service 失敗或未設定，回退到環境變數
     api_key = os.getenv("FRED_API_KEY")
     if api_key:
-        logger.info("從環境變數中獲取了 FRED API 金鑰。")
+        logger.info("成功從環境變數中獲取 FRED API 金鑰。")
+    else:
+        # 增加一個更明確的警告，幫助未來除錯
+        logger.warning("在環境變數中找不到 'FRED_API_KEY'。所有依賴 FRED 的數據抓取將會失敗。")
     return api_key
 
 
