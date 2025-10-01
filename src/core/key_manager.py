@@ -9,7 +9,8 @@ from pathlib import Path
 from typing import List, Dict, Optional, Any, Tuple, Callable
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
-import fredapi
+
+# 'fredapi' 的導入已移至 _validate_fred_key 內部以解決啟動依賴問題
 
 # --- 路徑修正與設定 ---
 SRC_DIR = Path(__file__).resolve().parent.parent
@@ -89,6 +90,7 @@ def _validate_fred_key(api_key: str) -> bool:
     (FRED) 驗證 FRED API 金鑰的有效性。
     透過一個簡單的 API 請求來測試金鑰是否能成功驗證。
     """
+    import fredapi
     if not api_key:
         return False
     try:

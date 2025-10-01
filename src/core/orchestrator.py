@@ -11,7 +11,8 @@ import threading
 import time
 import json
 from pathlib import Path
-import requests # V5.5 新增導入
+
+# V5.5 導入 'requests' 已被移至 _background_setup_and_validate 函式內部，以解決啟動時的依賴問題
 
 # --- 路徑修正 (必須在所有專案內部模組導入之前) ---
 SRC_DIR = Path(__file__).resolve().parent.parent
@@ -117,10 +118,22 @@ def launch_microservice(service_path: Path):
     proc_env = os.environ.copy()
     proc_env["PORT"] = str(port)
 
-    # 修正：將主環境的 FRED_API_KEY 明確傳遞給子服務
-    if "FRED_API_KEY" in os.environ:
-        proc_env["FRED_API_KEY"] = os.environ["FRED_API_KEY"]
+    # 修正：使用更安全的方式將主環境的 API 金鑰傳遞給子服務
+    # FRED 金鑰
+    fred_api_key = os.environ.get("FRED_API_KEY")
+    if fred_api_key:
+        proc_env["FRED_API_KEY"] = fred_api_key
         log.info(f"[{log_prefix}] 已將 FRED_API_KEY 注入到服務環境中。")
+    else:
+        log.warning(f"[{log_prefix}] 在主協調器環境中未找到 FRED_API_KEY，部分服務功能可能受限。")
+
+    # Gemini/Google 金鑰 (處理 'GEMINI_API_KEY' 錯誤的根源)
+    google_api_key = os.environ.get("GOOGLE_API_KEY")
+    if google_api_key:
+        proc_env["GOOGLE_API_KEY"] = google_api_key
+        log.info(f"[{log_prefix}] 已將 GOOGLE_API_KEY 注入到服務環境中。")
+    else:
+        log.warning(f"[{log_prefix}] 在主協調器環境中未找到 GOOGLE_API_KEY，AI 分析功能可能受限。")
 
 
     command = [
@@ -191,6 +204,7 @@ def _background_setup_and_validate(api_port: int, api_ready_event: threading.Eve
     此函式在一個獨立的執行緒中，按順序執行服務啟動後的關鍵任務。
     """
     try:
+        import requests # V5.5 新增導入，移至此處以解決啟動依賴問題
         # --- 步驟 1: 等待主 API 伺服器就緒 (Uvicorn 啟動) ---
         log.info("[背景任務] 等待主 API 伺服器就緒...")
         if not api_ready_event.wait(timeout=60):
@@ -292,20 +306,9 @@ def install_core_dependencies():
         "gemini.txt",
     ]
 
-    # 效能優化：新增一個簡單的 lock 機制，避免每次啟動都重新安裝
+    # 效能優化：為解決臨時環境中套件不保留的問題，暫時強制每次都安裝依賴。
     lock_file = requirements_dir / ".install_lock"
     should_install = True
-
-    if lock_file.exists():
-        # 檢查 requirements/ 目錄下是否有任何 .txt 檔案比 lock 檔案新
-        try:
-            latest_req_time = max(f.stat().st_mtime for f in requirements_dir.glob("*.txt") if f.is_file())
-            if lock_file.stat().st_mtime >= latest_req_time:
-                log.info("核心依賴未變更，跳過安裝。")
-                should_install = False
-        except ValueError:
-            # 如果 requirements/ 目錄下沒有任何 .txt 檔案，也無需安裝
-            should_install = False
 
     if should_install:
         for req_file_name in core_req_files:
