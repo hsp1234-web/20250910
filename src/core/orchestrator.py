@@ -179,7 +179,11 @@ def start_all_microservices():
         log.info("`services` 目錄不存在，跳過微服務啟動。")
         return
 
-    service_paths = [d for d in services_dir.iterdir() if d.is_dir() and (d / "main.py").exists()]
+    # V6.2 修正：使用 rglob 遞迴搜尋所有 'main.py'，以支援巢狀服務目錄結構
+    log.info(f"正在從 {services_dir} 遞迴搜尋微服務...")
+    main_py_files = list(services_dir.rglob("main.py"))
+    # 排除位於 .venv 目錄中的 main.py (若有)
+    service_paths = [p.parent for p in main_py_files if ".venv" not in p.parts]
     if not service_paths:
         log.info("在 `services` 目錄中未找到任何有效的微服務。")
         return
