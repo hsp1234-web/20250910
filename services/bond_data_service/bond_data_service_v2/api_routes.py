@@ -125,3 +125,72 @@ async def get_primary_dealer_analysis_page():
 @router.get("/interactive_chart", response_class=FileResponse, include_in_schema=False)
 async def get_interactive_chart_page():
     return "src/static/interactive_chart.html"
+
+
+@router.get("/data/{chart_id}", summary="獲取用於動態渲染的圖表數據")
+async def get_chart_data_for_dynamic_render(
+    chart_id: str,
+    start_date: Optional[str] = Query(None, description="數據開始日期 (YYYY-MM-DD)"),
+    end_date: Optional[str] = Query(None, description="數據結束日期 (YYYY-MM-DD)")
+):
+    """
+    為所有圖表提供統一的 JSON 數據源，以便在客戶端進行動態渲染。
+    這是 V2 服務中恢復儀表板功能的關鍵端點。
+    """
+    svc = _ensure_service()
+    try:
+        if not end_date:
+            end_date = datetime.now().strftime('%Y-%m-%d')
+        if not start_date:
+            start_date = (datetime.now() - pd.DateOffset(years=5)).strftime('%Y-%m-%d')
+
+        logger.info(f"API 層：為動態圖表 '{chart_id}' 請求數據，範圍: {start_date} 至 {end_date}...")
+        full_metrics_df = svc.calculate_full_metrics(start_date, end_date)
+
+        if full_metrics_df is None or full_metrics_df.empty:
+            logger.warning(f"為 '{chart_id}' 計算指標時未返回數據。")
+            return JSONResponse(content={"error": "No data available for the selected range."}, status_code=404)
+
+        # 根據 chart_id 決定需要哪些數據列
+        required_cols = {
+            "sofr": ['sofr', 'sofr_ma60'],
+            "ofr_fci": ['dealer_stress_index'],
+            "vix": ['vix'],
+            "us_bond_2y_10y_spread": ['spread_10y2y'],
+            "us_high_yield_spread": ['us_high_yield_spread'],
+            "stress_index": ['dealer_stress_index'],
+            "stress_index_macd": ['dealer_stress_index', 'macd_line', 'macd_signal_line', 'macd_hist'],
+            "dealer_net_positions": ['dealer_net_positions'],
+            "dealer_long_term_positions": ['dealer_long_term_positions'],
+            "dealer_short_term_positions": ['dealer_short_term_positions'],
+            "dealer_net_position_ranking": ['dealer_net_positions', 'dealer_long_term_positions', 'dealer_short_term_positions'],
+            "dealer_position_change_ranking": ['dealer_net_positions', 'dealer_long_term_positions', 'dealer_short_term_positions'],
+        }.get(chart_id, [chart_id])
+
+        # 篩選出實際存在的欄位
+        cols_to_use = [col for col in required_cols if col in full_metrics_df.columns]
+        if not cols_to_use:
+            logger.warning(f"請求的圖表 '{chart_id}' 所需的欄位在數據中不存在。")
+            return JSONResponse(content={"error": f"Data columns for chart '{chart_id}' not found."}, status_code=404)
+
+        # 將日期索引也加入，以便後續轉換
+        cols_to_use_with_date = list(set(cols_to_use + ['date']))
+
+        # 重置索引，讓 'date' 成為一欄
+        df_serializable = full_metrics_df.reset_index()
+        df_serializable = df_serializable.rename(columns={'index': 'date'})
+        df_serializable['date'] = pd.to_datetime(df_serializable['date']).dt.strftime('%Y-%m-%d')
+
+        # 篩選最終需要的欄位
+        final_cols = [col for col in cols_to_use_with_date if col in df_serializable.columns]
+        chart_df = df_serializable[final_cols]
+
+        # 轉換為 JSON
+        json_payload = chart_df.replace({pd.NaT: None, np.nan: None}).to_dict(orient='records')
+
+        logger.info(f"成功為 '{chart_id}' 生成 {len(json_payload)} 筆數據。")
+        return JSONResponse(content=json_payload)
+
+    except Exception as e:
+        logger.error(f"為動態圖表 '{chart_id}' 生成數據時發生錯誤: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"為圖表 '{chart_id}' 處理請求時發生內部錯誤: {str(e)}")
