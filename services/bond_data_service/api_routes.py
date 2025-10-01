@@ -13,7 +13,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import Response, JSONResponse, StreamingResponse, FileResponse
 
 # 匯入新的服務層
-from .service import StressIndexService
+from service import StressIndexService
 
 # --- 依賴注入 ---
 # 這個 service 實例將在 main.py 的 lifespan 中被賦值。

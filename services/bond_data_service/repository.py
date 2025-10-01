@@ -10,7 +10,7 @@ from typing import Callable, Dict, Optional
 import pandas as pd
 
 # 匯入所有資料抓取器
-from .data_fetchers import (
+from data_fetchers import (
     fred_sofr_fetcher,
     fred_dgs10_fetcher,
     fred_dgs2_fetcher,
