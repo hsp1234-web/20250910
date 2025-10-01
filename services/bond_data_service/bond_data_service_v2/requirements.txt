@@ -3,13 +3,11 @@ fastapi
 uvicorn[standard]
 
 # Data Handling & APIs
-pandas==2.2.2
-fredapi==0.5.2
+pandas
+fredapi
 yfinance
 openpyxl
 httpx
-plotly==5.22.0
-kaleido==0.2.1
-
-# Caching
-cachetools==6.2.0
+plotly
+kaleido
+cachetools
