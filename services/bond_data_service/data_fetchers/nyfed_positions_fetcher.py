@@ -136,7 +136,9 @@ def _fetch_and_process_files(maturity: Literal['total', 'short', 'long'], start_
 
     full_series = pd.concat(all_positions_data).sort_index().groupby(level=0).last()
 
-    save_series_to_db(full_series, db_ticker)
+    # 在 v2 架構中，抓取器不負責儲存，只負責回傳。
+    # 儲存操作由 Repository 層統一處理。
+    # 因此，移除對 save_series_to_db 的呼叫。
 
     filtered_series = full_series.loc[start_date:end_date].copy()
     filtered_series.name = series_name
