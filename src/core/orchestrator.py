@@ -117,6 +117,8 @@ def launch_microservice(service_path: Path):
     port = find_free_port()
     proc_env = os.environ.copy()
     proc_env["PORT"] = str(port)
+    # V6.3 修正：為子進程設定 PYTHONPATH，使其能夠將 'services' 視為一個套件
+    proc_env["PYTHONPATH"] = str(ROOT_DIR) + os.pathsep + proc_env.get("PYTHONPATH", "")
 
     # 修正：使用更安全的方式將主環境的 API 金鑰傳遞給子服務
     # FRED 金鑰 (Jules 修正 @ 2025-10-01: 主動從資料庫注入，而非被動依賴環境)
@@ -142,9 +144,12 @@ def launch_microservice(service_path: Path):
         log.warning(f"[{log_prefix}] 在主協調器環境中未找到 GOOGLE_API_KEY，AI 分析功能可能受限。")
 
 
+    # V6.3 修正：使用模組路徑啟動，並將 cwd 設定為專案根目錄
+    # 這使得 Python 的相對導入可以正常運作
+    module_path = ".".join(service_path.relative_to(ROOT_DIR).parts) + ".main"
     command = [
         str(python_exec), "-m", "uvicorn",
-        f"{main_script.stem}:app",
+        f"{module_path}:app",
         "--host", "127.0.0.1",
         "--port", str(port)
     ]
@@ -155,7 +160,7 @@ def launch_microservice(service_path: Path):
         text=True,
         encoding='utf-8',
         env=proc_env,
-        cwd=service_path
+        cwd=ROOT_DIR # 將工作目錄設定為根目錄
     )
 
     # 為每個服務的日誌建立一個獨立的 reader thread
