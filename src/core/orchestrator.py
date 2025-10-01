@@ -123,7 +123,8 @@ def launch_microservice(service_path: Path):
     try:
         # 使用 key_manager 直接從資料庫讀取金鑰
         # 確保金鑰是經過驗證的，且類型為 'fred'
-        fred_api_key = key_manager.get_validated_key_by_type('fred')
+        # (Jules @ 2025-10-01) 修復 #92.3：改為呼叫新的 get_key_by_type 函式
+        fred_api_key = key_manager.get_key_by_type('fred')
         if fred_api_key:
             proc_env["FRED_API_KEY"] = fred_api_key
             log.info(f"[{log_prefix}] 已成功從資料庫獲取已驗證的 FRED API 金鑰並注入到服務環境中。")

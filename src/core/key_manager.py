@@ -227,6 +227,34 @@ def get_valid_key() -> Optional[str]:
 
     return None
 
+
+def get_key_by_type(key_type: str) -> Optional[str]:
+    """
+    (Jules @ 2025-10-01) 從池中獲取指定類型的第一個有效金鑰。
+    此函式為修復 #92.3 儀表板啟動失敗問題而新增。
+    :param key_type: 金鑰的類型 (例如 'gemini', 'fred')
+    :return: 金鑰值 (str) 或 None (如果找不到)。
+    """
+    if not key_type:
+        return None
+
+    query = """
+        SELECT id, key_value FROM api_keys
+        WHERE status = 'active' AND is_valid = 1 AND key_type = ?
+        ORDER BY last_used_at ASC NULLS FIRST
+        LIMIT 1
+    """
+    key_row = _execute_query(query, (key_type,), fetch='one')
+
+    if key_row:
+        # 標記此金鑰為已使用
+        update_query = "UPDATE api_keys SET last_used_at = ? WHERE id = ?"
+        _execute_query(update_query, (datetime.now().isoformat(), key_row["id"]))
+        return key_row["key_value"]
+
+    return None
+
+
 def get_all_valid_keys_for_manager() -> List[Dict[str, str]]:
     """獲取所有有效的金鑰，格式為 GeminiManager 所需的列表。"""
     query = "SELECT key_name, key_value FROM api_keys WHERE is_valid = 1 AND status = 'active'"
