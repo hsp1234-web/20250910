@@ -96,6 +96,34 @@ def _run_stage1_blocking_task(task_id: int, file_id: int, model_name: str, queue
         from tools.taiwan_stock_suffix_helper import SUFFIX_HELPER
 
         # 1. 初始化 Gemini Manager
+        try:
+            valid_keys = key_manager.get_all_valid_keys_for_manager()
+            gemini = GeminiManager(api_keys=valid_keys)
+        except ValueError as e:
+            # 捕獲因缺少金鑰或模組問題導致的初始化失敗
+            error_message = f"AI用戶端初始化失敗，無法執行分析: {e}"
+            log.error(f"第一階段任務 task_id={task_id} 因無法初始化 Gemini 用戶端而終止。", exc_info=True)
+            db_client.update_analysis_task(task_id=task_id, updates={"stage1_status": "failed", "stage1_error_log": error_message})
+            return  # 提前終止函式執行
+
+        try:
+            valid_keys = key_manager.get_all_valid_keys_for_manager()
+            gemini = GeminiManager(api_keys=valid_keys)
+        except ValueError as e:
+            error_message = f"AI用戶端初始化失敗，無法生成報告: {e}"
+            log.error(f"第二階段任務 task_id={task_id} 因無法初始化 Gemini 用戶端而終止。", exc_info=True)
+            db_client.update_analysis_task(task_id=task_id, updates={"stage2_status": "failed", "stage2_error_log": error_message})
+            return
+
+        try:
+            valid_keys = key_manager.get_all_valid_keys_for_manager()
+            gemini = GeminiManager(api_keys=valid_keys)
+        except ValueError as e:
+            error_message = f"AI用戶端初始化失敗，無法生成摘要: {e}"
+            log.error(f"重點摘要任務 task_id={task_id} 因無法初始化 Gemini 用戶端而終止。", exc_info=True)
+            db_client.update_analysis_task(task_id=task_id, updates={"summary_status": "failed", "summary_error_log": error_message})
+            return
+
         from core.config_manager import get_config_value
         api_timeout = get_config_value("api_timeout_seconds", 35)
 
@@ -103,11 +131,6 @@ def _run_stage1_blocking_task(task_id: int, file_id: int, model_name: str, queue
         prompt_template = all_prompts.get("stage_1_extraction_prompt")
         if not prompt_template:
             raise ValueError("在提示詞庫中找不到 'stage_1_extraction_prompt'。")
-
-        valid_keys = key_manager.get_all_valid_keys_for_manager()
-        if not valid_keys:
-            raise ValueError("在金鑰池中找不到任何有效的 API 金鑰。")
-        gemini = GeminiManager(api_keys=valid_keys)
 
         # 2. 從資料庫獲取檔案內容
         analysis_task_data = db_client.get_analysis_task(task_id=task_id)
@@ -219,13 +242,17 @@ def _run_date_inference_blocking_task(task_id: int, model_name: str, queue: asyn
             raise ValueError("在提示詞庫中找不到 'stage_1_5_date_inference_prompt'。")
 
 
+        try:
+            valid_keys = key_manager.get_all_valid_keys_for_manager()
+            gemini = GeminiManager(api_keys=valid_keys)
+        except ValueError as e:
+            error_message = f"AI用戶端初始化失敗，無法推斷日期: {e}"
+            log.error(f"日期推斷任務 task_id={task_id} 因無法初始化 Gemini 用戶端而終止。", exc_info=True)
+            db_client.update_analysis_task(task_id=task_id, updates={"date_inference_status": "failed", "performance_error_log": error_message})
+            return
+
         from core.config_manager import get_config_value
         api_timeout = get_config_value("api_timeout_seconds", 35)
-
-        valid_keys = key_manager.get_all_valid_keys_for_manager()
-        if not valid_keys:
-            raise ValueError("在金鑰池中找不到任何有效的 API 金鑰。")
-        gemini = GeminiManager(api_keys=valid_keys)
 
         text_content = task_data['file_content_for_analysis']
 
@@ -353,10 +380,6 @@ def _run_stage2_blocking_task(task_id: int, model_name: str, queue: asyncio.Queu
         prompt_template = all_prompts.get("stage_2_generation_prompt")
         if not prompt_template:
             raise ValueError("在提示詞庫中找不到 'stage_2_generation_prompt'。")
-        valid_keys = key_manager.get_all_valid_keys_for_manager()
-        if not valid_keys:
-            raise ValueError("在金鑰池中找不到任何有效的 API 金鑰。")
-        gemini = GeminiManager(api_keys=valid_keys)
 
         prompt = prompt_template.format(data_package=json.dumps(structured_data, ensure_ascii=False, indent=2))
 
@@ -418,12 +441,6 @@ def _run_summary_generation_blocking_task(task_id: int, model_name: str, queue: 
             # 如果找不到專用提示詞，則使用一個通用的後備提示詞
             log.warning("在提示詞庫中找不到 'summary_generation_prompt'，將使用通用摘要提示詞。")
             prompt_template = "請為以下文件生成一段約 200-300 字的簡潔中文摘要：\n\n{document_text}"
-
-
-        valid_keys = key_manager.get_all_valid_keys_for_manager()
-        if not valid_keys:
-            raise ValueError("在金鑰池中找不到任何有效的 API 金鑰。")
-        gemini = GeminiManager(api_keys=valid_keys)
 
         prompt = prompt_template.format(document_text=text_content)
 
