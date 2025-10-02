@@ -41,10 +41,6 @@ def fetch_hys_data(start_date: str, end_date: str) -> pd.Series:
 
         logger.info(f"成功從 Yahoo Finance 抓取 {len(hys_series)} 筆 '{ticker}' 數據。")
 
-        # 抓取成功後，將數據儲存到資料庫
-        # 儲存到資料庫時，我們使用 'HYG' 作為 ticker
-        save_series_to_db(hys_series, ticker)
-
         # 返回的 Series 應使用內部名稱 'us_high_yield_spread'
         hys_series.name = series_name
         return hys_series

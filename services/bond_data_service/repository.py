@@ -10,14 +10,14 @@ from typing import Callable, Dict, Optional
 import pandas as pd
 
 # 匯入所有資料抓取器
-from .data_fetchers import (
+from data_fetchers import (
     fred_sofr_fetcher,
     fred_dgs10_fetcher,
     fred_dgs2_fetcher,
     fred_rrp_fetcher,
     fred_vix_fetcher,
     fred_wresbal_fetcher,
-    fred_hys_fetcher,
+    yahoo_hys_fetcher,
     nyfed_positions_fetcher,
 )
 
@@ -86,7 +86,7 @@ class FinancialDataRepository:
             "vix": fred_vix_fetcher.fetch_vix_data,
             "dgs10": fred_dgs10_fetcher.fetch_dgs10_data,
             "dgs2": fred_dgs2_fetcher.fetch_dgs2_data,
-            "us_high_yield_spread": fred_hys_fetcher.fetch_hys_data,
+            "us_high_yield_spread": yahoo_hys_fetcher.fetch_hys_data,
             "dealer_net_positions": nyfed_positions_fetcher.fetch_nyfed_total_positions_data,
             "dealer_long_term_positions": nyfed_positions_fetcher.fetch_nyfed_long_term_positions_data,
             "dealer_short_term_positions": nyfed_positions_fetcher.fetch_nyfed_short_term_positions_data,
