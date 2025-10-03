@@ -21,7 +21,6 @@ ROOT_DIR = SRC_DIR.parent
 
 # --- 現在可以安全地導入專案內部模組了 ---
 from db.client import DBClient
-from core import key_manager
 
 logging.basicConfig(
     level=logging.INFO,
@@ -118,28 +117,35 @@ def launch_microservice(service_path: Path):
     proc_env = os.environ.copy()
     proc_env["PORT"] = str(port)
 
-    # 修正：使用更安全的方式將主環境的 API 金鑰傳遞給子服務
-    # FRED 金鑰 (Jules 修正 @ 2025-10-01: 主動從資料庫注入，而非被動依賴環境)
-    try:
-        # 使用 key_manager 直接從資料庫讀取金鑰
-        # 確保金鑰是經過驗證的，且類型為 'fred'
-        # (Jules @ 2025-10-01) 修復 #92.3：改為呼叫新的 get_key_by_type 函式
-        fred_api_key = key_manager.get_key_by_type('fred')
-        if fred_api_key:
-            proc_env["FRED_API_KEY"] = fred_api_key
-            log.info(f"[{log_prefix}] 已成功從資料庫獲取已驗證的 FRED API 金鑰並注入到服務環境中。")
-        else:
-            log.warning(f"[{log_prefix}] 在資料庫中未找到已驗證的 FRED API 金鑰，部分服務功能可能受限。")
-    except Exception as e:
-        log.error(f"[{log_prefix}] 從資料庫讀取 FRED API 金鑰時發生錯誤: {e}，服務可能無法正常抓取數據。")
+    # 方案 G-1 & G-4: 直接從 RAW_API_KEYS 環境變數解析並注入金鑰
+    raw_keys_json = os.environ.get('RAW_API_KEYS')
+    if raw_keys_json:
+        try:
+            keys_payload = json.loads(raw_keys_json)
 
-    # Gemini/Google 金鑰 (處理 'GEMINI_API_KEY' 錯誤的根源)
-    google_api_key = os.environ.get("GOOGLE_API_KEY")
-    if google_api_key:
-        proc_env["GOOGLE_API_KEY"] = google_api_key
-        log.info(f"[{log_prefix}] 已將 GOOGLE_API_KEY 注入到服務環境中。")
+            # 注入 FRED 金鑰
+            fred_key = keys_payload.get("fred")
+            if fred_key:
+                proc_env["FRED_API_KEY"] = fred_key
+                log.info(f"[{log_prefix}] 已將 FRED API 金鑰注入到服務環境中。")
+            else:
+                log.warning(f"[{log_prefix}] 在 RAW_API_KEYS 中未找到 FRED 金鑰。")
+
+            # 注入 Gemini 金鑰 (通常服務只需要一個主金鑰)
+            gemini_keys = keys_payload.get("gemini", [])
+            if gemini_keys:
+                # 將第一個金鑰作為 GOOGLE_API_KEY，這是許多服務的慣例
+                proc_env["GOOGLE_API_KEY"] = gemini_keys[0]
+                # 將完整的 JSON 傳遞下去，供需要完整金鑰池的服務使用
+                proc_env['RAW_API_KEYS'] = raw_keys_json
+                log.info(f"[{log_prefix}] 已將 {len(gemini_keys)} 個 Gemini 金鑰注入到服務環境中。")
+            else:
+                log.warning(f"[{log_prefix}] 在 RAW_API_KEYS 中未找到任何 Gemini 金鑰。")
+
+        except json.JSONDecodeError:
+            log.error(f"[{log_prefix}] 解析 RAW_API_KEYS 環境變數失敗。")
     else:
-        log.warning(f"[{log_prefix}] 在主協調器環境中未找到 GOOGLE_API_KEY，AI 分析功能可能受限。")
+        log.warning(f"[{log_prefix}] 未找到 RAW_API_KEYS 環境變數，服務可能無法獲取金鑰。")
 
 
     command = [
@@ -231,8 +237,14 @@ def _background_setup_and_validate(api_port: int, api_ready_event: threading.Eve
         install_non_essential_dependencies_background()
         log.info("[背景任務] ✅ 重量級依賴安裝流程結束。")
 
-        # --- 步驟 3: 觸發所有金鑰的自動驗證 (新增重試機制) ---
-        log.info("[背景任務] 準備觸發所有金鑰的自動驗證...")
+        # --- 步驟 3: 發送「完全就緒」信號 (提前發送) ---
+        # 為了改善冷啟動體驗，我們先宣告系統就緒，讓前端可以訪問。
+        log.info("✅ [背景任務] 核心服務已啟動！提前發送『完全就緒』信號。")
+        full_readiness_event.set()
+        READINESS_SIGNAL_FILE.touch()
+
+        # --- 步驟 4: 在背景中非阻塞地觸發所有金鑰的自動驗證 ---
+        log.info("[背景任務] 準備在背景中觸發所有金鑰的自動驗證...")
         validation_url = f"http://127.0.0.1:{api_port}/api/keys/validate"
         max_attempts = 3
         base_delay = 5  # 秒
@@ -243,7 +255,6 @@ def _background_setup_and_validate(api_port: int, api_ready_event: threading.Eve
                 response = requests.post(validation_url, timeout=300) # 使用較長的超時
                 if response.status_code == 200:
                     log.info("[背景任務] ✅ 金鑰驗證請求已成功發送。")
-                    validation_successful = True
                     break  # 成功，跳出迴圈
                 else:
                     log.warning(f"[背景任務] 第 {attempt + 1} 次驗證失敗，伺服器回應: {response.status_code} {response.text}")
@@ -258,11 +269,7 @@ def _background_setup_and_validate(api_port: int, api_ready_event: threading.Eve
         else: # for-else 迴圈，只有在迴圈正常結束（未被 break）時執行
             log.error("[背景任務] ❌ 所有金鑰驗證嘗試均告失敗。請檢查 API 伺服器狀態或手動觸發驗證。")
 
-        # --- 步驟 4: 發送「完全就緒」信號 ---
-        # 所有背景任務完成後，才宣告系統完全就緒。
-        log.info("✅ [背景任務] 所有啟動後任務完成！發送『完全就緒』信號。")
-        full_readiness_event.set()
-        READINESS_SIGNAL_FILE.touch()
+        log.info("✅ [背景任務] 所有啟動後任務 (包括金鑰驗證) 已執行完畢。")
 
     except Exception as e:
         log.critical(f"❌ [背景任務] 執行緒發生致命錯誤: {e}", exc_info=True)
@@ -422,6 +429,14 @@ def main():
         api_fully_ready_event = threading.Event()
         api_server_cmd = [sys.executable, "-m", "api.api_server", "--port", str(api_port)]
         if args.mock: api_server_cmd.append("--mock")
+
+        # 方案 G-1: 從環境變數中讀取原始金鑰，並將其傳遞給 API 伺服器
+        raw_api_keys_json = os.environ.get('RAW_API_KEYS')
+        if raw_api_keys_json:
+            proc_env['RAW_API_KEYS'] = raw_api_keys_json
+            log.info("已成功將 RAW_API_KEYS 環境變數傳遞給 API 伺服器。")
+        else:
+            log.warning("在協調器中未找到 RAW_API_KEYS 環境變數，API 伺服器可能無法獲取金鑰。")
 
         api_proc = subprocess.Popen(api_server_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding='utf-8', env=proc_env)
         processes.append(api_proc)
