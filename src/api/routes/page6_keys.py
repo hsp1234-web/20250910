@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 SRC_DIR = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(SRC_DIR))
 
-from core import key_manager, config_manager
+from core import config_manager
 from core.key_lifecycle_manager import key_lifecycle_manager
 # JULES V6 啟動優化：延遲載入
 # from tools.gemini_manager import GeminiManager
