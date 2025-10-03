@@ -21,7 +21,6 @@ ROOT_DIR = SRC_DIR.parent
 
 # --- 現在可以安全地導入專案內部模組了 ---
 from db.client import DBClient
-from core import key_manager
 
 logging.basicConfig(
     level=logging.INFO,
@@ -118,28 +117,35 @@ def launch_microservice(service_path: Path):
     proc_env = os.environ.copy()
     proc_env["PORT"] = str(port)
 
-    # 修正：使用更安全的方式將主環境的 API 金鑰傳遞給子服務
-    # FRED 金鑰 (Jules 修正 @ 2025-10-01: 主動從資料庫注入，而非被動依賴環境)
-    try:
-        # 使用 key_manager 直接從資料庫讀取金鑰
-        # 確保金鑰是經過驗證的，且類型為 'fred'
-        # (Jules @ 2025-10-01) 修復 #92.3：改為呼叫新的 get_key_by_type 函式
-        fred_api_key = key_manager.get_key_by_type('fred')
-        if fred_api_key:
-            proc_env["FRED_API_KEY"] = fred_api_key
-            log.info(f"[{log_prefix}] 已成功從資料庫獲取已驗證的 FRED API 金鑰並注入到服務環境中。")
-        else:
-            log.warning(f"[{log_prefix}] 在資料庫中未找到已驗證的 FRED API 金鑰，部分服務功能可能受限。")
-    except Exception as e:
-        log.error(f"[{log_prefix}] 從資料庫讀取 FRED API 金鑰時發生錯誤: {e}，服務可能無法正常抓取數據。")
+    # 方案 G-1 & G-4: 直接從 RAW_API_KEYS 環境變數解析並注入金鑰
+    raw_keys_json = os.environ.get('RAW_API_KEYS')
+    if raw_keys_json:
+        try:
+            keys_payload = json.loads(raw_keys_json)
 
-    # Gemini/Google 金鑰 (處理 'GEMINI_API_KEY' 錯誤的根源)
-    google_api_key = os.environ.get("GOOGLE_API_KEY")
-    if google_api_key:
-        proc_env["GOOGLE_API_KEY"] = google_api_key
-        log.info(f"[{log_prefix}] 已將 GOOGLE_API_KEY 注入到服務環境中。")
+            # 注入 FRED 金鑰
+            fred_key = keys_payload.get("fred")
+            if fred_key:
+                proc_env["FRED_API_KEY"] = fred_key
+                log.info(f"[{log_prefix}] 已將 FRED API 金鑰注入到服務環境中。")
+            else:
+                log.warning(f"[{log_prefix}] 在 RAW_API_KEYS 中未找到 FRED 金鑰。")
+
+            # 注入 Gemini 金鑰 (通常服務只需要一個主金鑰)
+            gemini_keys = keys_payload.get("gemini", [])
+            if gemini_keys:
+                # 將第一個金鑰作為 GOOGLE_API_KEY，這是許多服務的慣例
+                proc_env["GOOGLE_API_KEY"] = gemini_keys[0]
+                # 將完整的 JSON 傳遞下去，供需要完整金鑰池的服務使用
+                proc_env['RAW_API_KEYS'] = raw_keys_json
+                log.info(f"[{log_prefix}] 已將 {len(gemini_keys)} 個 Gemini 金鑰注入到服務環境中。")
+            else:
+                log.warning(f"[{log_prefix}] 在 RAW_API_KEYS 中未找到任何 Gemini 金鑰。")
+
+        except json.JSONDecodeError:
+            log.error(f"[{log_prefix}] 解析 RAW_API_KEYS 環境變數失敗。")
     else:
-        log.warning(f"[{log_prefix}] 在主協調器環境中未找到 GOOGLE_API_KEY，AI 分析功能可能受限。")
+        log.warning(f"[{log_prefix}] 未找到 RAW_API_KEYS 環境變數，服務可能無法獲取金鑰。")
 
 
     command = [
@@ -201,75 +207,6 @@ def start_all_microservices():
     with open(SERVICE_REGISTRY_FILE, 'w', encoding='utf-8') as f:
         json.dump(service_registry, f, indent=2)
     log.info(f"✅ 服務註冊資訊已寫入: {SERVICE_REGISTRY_FILE}")
-
-
-# --- V5.5 舊有邏輯 (待移除) ---
-def _background_setup_and_validate(api_port: int, api_ready_event: threading.Event, api_fully_ready_event: threading.Event):
-    """
-    [JULES 2025-09-30] 解決時序問題的整合式背景任務。
-    此函式在一個獨立的執行緒中，按順序執行服務啟動後的關鍵任務。
-    """
-    try:
-        import requests # V5.5 新增導入，移至此處以解決啟動依賴問題
-        # --- 步驟 1: 等待主 API 伺服器就緒 (Uvicorn 啟動) ---
-        log.info("[背景任務] 等待主 API 伺服器就緒...")
-        if not api_ready_event.wait(timeout=60):
-            log.error("[背景任務] 等待 API 伺服器就緒超時，後續任務取消。")
-            return
-
-        # --- 步驟 1.5: 等待主 API 伺服器完全就緒 (內部模組預熱完成) ---
-        log.info("[背景任務] 等待 API 伺服器內部模組預熱...")
-        if not api_fully_ready_event.wait(timeout=120): # 等待更長時間，因為預熱耗時
-            log.warning("[背景任務] 等待 API 伺服器完全就緒超時，但將繼續嘗試執行驗證。")
-        else:
-            log.info("[背景任務] ✅ API 伺服器已完全就緒！")
-
-
-        # --- 步驟 2: 安裝非必要的重量級依賴 ---
-        # 這是觸發金鑰驗證前的必要步驟，確保驗證工具（如 google-generativeai）已安裝。
-        log.info("[背景任務] 開始安裝重量級依賴...")
-        install_non_essential_dependencies_background()
-        log.info("[背景任務] ✅ 重量級依賴安裝流程結束。")
-
-        # --- 步驟 3: 觸發所有金鑰的自動驗證 (新增重試機制) ---
-        log.info("[背景任務] 準備觸發所有金鑰的自動驗證...")
-        validation_url = f"http://127.0.0.1:{api_port}/api/keys/validate"
-        max_attempts = 3
-        base_delay = 5  # 秒
-
-        for attempt in range(max_attempts):
-            try:
-                log.info(f"[背景任務] 正在向 {validation_url} 發送驗證請求 (第 {attempt + 1}/{max_attempts} 次)...")
-                response = requests.post(validation_url, timeout=300) # 使用較長的超時
-                if response.status_code == 200:
-                    log.info("[背景任務] ✅ 金鑰驗證請求已成功發送。")
-                    validation_successful = True
-                    break  # 成功，跳出迴圈
-                else:
-                    log.warning(f"[背景任務] 第 {attempt + 1} 次驗證失敗，伺服器回應: {response.status_code} {response.text}")
-            except Exception as req_e:
-                log.warning(f"[背景任務] 第 {attempt + 1} 次驗證請求時發生錯誤: {req_e}")
-
-            # 如果這不是最後一次嘗試，則等待後重試
-            if attempt < max_attempts - 1:
-                delay = base_delay * (2 ** attempt)
-                log.info(f"[背景任務] 將在 {delay} 秒後重試...")
-                time.sleep(delay)
-        else: # for-else 迴圈，只有在迴圈正常結束（未被 break）時執行
-            log.error("[背景任務] ❌ 所有金鑰驗證嘗試均告失敗。請檢查 API 伺服器狀態或手動觸發驗證。")
-
-        # --- 步驟 4: 發送「完全就緒」信號 ---
-        # 所有背景任務完成後，才宣告系統完全就緒。
-        log.info("✅ [背景任務] 所有啟動後任務完成！發送『完全就緒』信號。")
-        full_readiness_event.set()
-        READINESS_SIGNAL_FILE.touch()
-
-    except Exception as e:
-        log.critical(f"❌ [背景任務] 執行緒發生致命錯誤: {e}", exc_info=True)
-        # 即使失敗，也應發送就緒信號，以避免前端無限期等待
-        if not full_readiness_event.is_set():
-            full_readiness_event.set()
-            READINESS_SIGNAL_FILE.touch()
 
 
 def stream_reader(stream, prefix, ready_event=None, ready_signal=None, second_ready_event=None, second_ready_signal=None):
@@ -423,6 +360,14 @@ def main():
         api_server_cmd = [sys.executable, "-m", "api.api_server", "--port", str(api_port)]
         if args.mock: api_server_cmd.append("--mock")
 
+        # 方案 G-1: 從環境變數中讀取原始金鑰，並將其傳遞給 API 伺服器
+        raw_api_keys_json = os.environ.get('RAW_API_KEYS')
+        if raw_api_keys_json:
+            proc_env['RAW_API_KEYS'] = raw_api_keys_json
+            log.info("已成功將 RAW_API_KEYS 環境變數傳遞給 API 伺服器。")
+        else:
+            log.warning("在協調器中未找到 RAW_API_KEYS 環境變數，API 伺服器可能無法獲取金鑰。")
+
         api_proc = subprocess.Popen(api_server_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding='utf-8', env=proc_env)
         processes.append(api_proc)
         api_stdout_thread = threading.Thread(target=stream_reader, args=(api_proc.stdout, 'api_server', api_ready_event, "Uvicorn running on"))
@@ -437,11 +382,7 @@ def main():
         # 步驟 2: 啟動所有微服務
         start_all_microservices()
 
-        # 步驟 3: 啟動整合式的背景設定與驗證任務
-        log.info("🚀 正在啟動背景任務 (依賴安裝與金鑰驗證)...")
-        background_thread = threading.Thread(target=_background_setup_and_validate, args=(api_port, api_ready_event, api_fully_ready_event), daemon=True)
-        threads.append(background_thread)
-        background_thread.start()
+        # 步驟 3: (已移除) 舊的背景驗證任務已被新的 KeyLifecycleManager 取代。
 
         log.info("--- [協調器進入監控模式] ---")
         while not stop_event.is_set():

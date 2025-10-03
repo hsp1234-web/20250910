@@ -69,15 +69,18 @@ def _run_stage1_blocking_task(task_id: int, file_id: int, model_name: str, queue
     """
     log.info(f"第一階段任務實際執行開始：task_id={task_id}, file_id={file_id}, model={model_name}")
     try:
-        from core import key_manager, prompt_manager
+        from core.key_lifecycle_manager import key_lifecycle_manager
+        from core import prompt_manager
         from tools.gemini_manager import GeminiManager
         from tools.quantitative_analyzer import find_valid_yfinance_symbol
         from tools.taiwan_stock_suffix_helper import SUFFIX_HELPER
 
         gemini = None
         try:
-            valid_keys = key_manager.get_all_valid_keys_for_manager()
-            gemini = GeminiManager(api_keys=valid_keys)
+            valid_key = key_lifecycle_manager.get_valid_gemini_key()
+            if not valid_key:
+                raise ValueError("沒有可用的有效 Gemini 金鑰。")
+            gemini = GeminiManager(api_keys=[valid_key])
         except ValueError as e:
             error_message = f"AI用戶端初始化失敗，無法執行分析: {e}"
             log.error(f"第一階段任務 task_id={task_id} 因無法初始化 Gemini 用戶端而終止。", exc_info=True)
@@ -102,8 +105,9 @@ def _run_stage1_blocking_task(task_id: int, file_id: int, model_name: str, queue
         structured_data, error, used_key, token_usage = gemini.prompt_for_json(prompt=prompt, model_name=model_name)
         if error:
             raise error
-        if used_key and token_usage > 0:
-            key_manager.record_token_usage(key_name=used_key, tokens_used=token_usage)
+        # 方案 G-4: 移除對舊 key_manager 的 token 紀錄呼叫
+        # if used_key and token_usage > 0:
+        #     key_manager.record_token_usage(key_name=used_key, tokens_used=token_usage)
 
         raw_symbol = structured_data.get("symbol")
         corrected_for_tw_symbol = SUFFIX_HELPER.get_corrected_symbol(raw_symbol)
@@ -140,7 +144,8 @@ def _run_date_inference_blocking_task(task_id: int, model_name: str, queue: asyn
     """
     log.info(f"AI 日期推斷任務實際執行開始：task_id={task_id}")
     try:
-        from core import key_manager, prompt_manager
+        from core.key_lifecycle_manager import key_lifecycle_manager
+        from core import prompt_manager
         from tools.gemini_manager import GeminiManager
 
         task_data = db_client.get_analysis_task(task_id=task_id)
@@ -165,8 +170,10 @@ def _run_date_inference_blocking_task(task_id: int, model_name: str, queue: asyn
 
         gemini = None
         try:
-            valid_keys = key_manager.get_all_valid_keys_for_manager()
-            gemini = GeminiManager(api_keys=valid_keys)
+            valid_key = key_lifecycle_manager.get_valid_gemini_key()
+            if not valid_key:
+                raise ValueError("沒有可用的有效 Gemini 金鑰。")
+            gemini = GeminiManager(api_keys=[valid_key])
         except ValueError as e:
             error_message = f"AI用戶端初始化失敗，無法推斷日期: {e}"
             log.error(f"日期推斷任務 task_id={task_id} 因無法初始化 Gemini 用戶端而終止。", exc_info=True)
@@ -180,8 +187,9 @@ def _run_date_inference_blocking_task(task_id: int, model_name: str, queue: asyn
         inferred_date_str, error, used_key, token_usage = gemini.prompt_for_text(prompt=date_prompt, model_name=model_name)
         if error:
             raise error
-        if used_key and token_usage > 0:
-            key_manager.record_token_usage(key_name=used_key, tokens_used=token_usage)
+        # 方案 G-4: 移除對舊 key_manager 的 token 紀錄呼叫
+        # if used_key and token_usage > 0:
+        #     key_manager.record_token_usage(key_name=used_key, tokens_used=token_usage)
 
         try:
             datetime.datetime.strptime(inferred_date_str.strip(), '%Y-%m-%d')
@@ -246,7 +254,8 @@ def _run_stage2_blocking_task(task_id: int, model_name: str, queue: asyncio.Queu
     """
     log.info(f"第二階段任務實際執行開始：task_id={task_id}, model={model_name}")
     try:
-        from core import key_manager, prompt_manager
+        from core.key_lifecycle_manager import key_lifecycle_manager
+        from core import prompt_manager
         from tools.gemini_manager import GeminiManager
 
         task_data = db_client.get_analysis_task(task_id=task_id)
@@ -260,8 +269,10 @@ def _run_stage2_blocking_task(task_id: int, model_name: str, queue: asyncio.Queu
 
         gemini = None
         try:
-            valid_keys = key_manager.get_all_valid_keys_for_manager()
-            gemini = GeminiManager(api_keys=valid_keys)
+            valid_key = key_lifecycle_manager.get_valid_gemini_key()
+            if not valid_key:
+                raise ValueError("沒有可用的有效 Gemini 金鑰。")
+            gemini = GeminiManager(api_keys=[valid_key])
         except ValueError as e:
             error_message = f"AI用戶端初始化失敗，無法生成報告: {e}"
             log.error(f"第二階段任務 task_id={task_id} 因無法初始化 Gemini 用戶端而終止。", exc_info=True)
@@ -281,8 +292,9 @@ def _run_stage2_blocking_task(task_id: int, model_name: str, queue: asyncio.Queu
         report_html, error, used_key, token_usage = gemini.prompt_for_text(prompt=prompt, model_name=model_name)
         if error:
             raise error
-        if used_key and token_usage > 0:
-            key_manager.record_token_usage(key_name=used_key, tokens_used=token_usage)
+        # 方案 G-4: 移除對舊 key_manager 的 token 紀錄呼叫
+        # if used_key and token_usage > 0:
+        #     key_manager.record_token_usage(key_name=used_key, tokens_used=token_usage)
 
         report_filename = f"report_{task_id}_{uuid.uuid4().hex[:8]}.html"
         report_path = REPORTS_DIR / report_filename
@@ -301,7 +313,8 @@ def _run_summary_generation_blocking_task(task_id: int, model_name: str, queue: 
     """
     log.info(f"重點摘要任務實際執行開始：task_id={task_id}, model={model_name}")
     try:
-        from core import key_manager, prompt_manager
+        from core.key_lifecycle_manager import key_lifecycle_manager
+        from core import prompt_manager
         from tools.gemini_manager import GeminiManager
 
         task_data = db_client.get_analysis_task(task_id=task_id)
@@ -311,8 +324,10 @@ def _run_summary_generation_blocking_task(task_id: int, model_name: str, queue: 
 
         gemini = None
         try:
-            valid_keys = key_manager.get_all_valid_keys_for_manager()
-            gemini = GeminiManager(api_keys=valid_keys)
+            valid_key = key_lifecycle_manager.get_valid_gemini_key()
+            if not valid_key:
+                raise ValueError("沒有可用的有效 Gemini 金鑰。")
+            gemini = GeminiManager(api_keys=[valid_key])
         except ValueError as e:
             error_message = f"AI用戶端初始化失敗，無法生成摘要: {e}"
             log.error(f"重點摘要任務 task_id={task_id} 因無法初始化 Gemini 用戶端而終止。", exc_info=True)
@@ -333,8 +348,9 @@ def _run_summary_generation_blocking_task(task_id: int, model_name: str, queue: 
         summary_content, error, used_key, token_usage = gemini.prompt_for_text(prompt=prompt, model_name=model_name)
         if error:
             raise error
-        if used_key and token_usage > 0:
-            key_manager.record_token_usage(key_name=used_key, tokens_used=token_usage)
+        # 方案 G-4: 移除對舊 key_manager 的 token 紀錄呼叫
+        # if used_key and token_usage > 0:
+        #     key_manager.record_token_usage(key_name=used_key, tokens_used=token_usage)
 
         db_client.update_analysis_task(task_id=task_id, updates={"summary_status": "completed", "summary_content": summary_content, "summary_token_usage": token_usage, "summary_model": model_name})
         log.info(f"重點摘要任務成功：task_id={task_id}")
