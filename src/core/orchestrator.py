@@ -231,8 +231,14 @@ def _background_setup_and_validate(api_port: int, api_ready_event: threading.Eve
         install_non_essential_dependencies_background()
         log.info("[背景任務] ✅ 重量級依賴安裝流程結束。")
 
-        # --- 步驟 3: 觸發所有金鑰的自動驗證 (新增重試機制) ---
-        log.info("[背景任務] 準備觸發所有金鑰的自動驗證...")
+        # --- 步驟 3: 發送「完全就緒」信號 (提前發送) ---
+        # 為了改善冷啟動體驗，我們先宣告系統就緒，讓前端可以訪問。
+        log.info("✅ [背景任務] 核心服務已啟動！提前發送『完全就緒』信號。")
+        full_readiness_event.set()
+        READINESS_SIGNAL_FILE.touch()
+
+        # --- 步驟 4: 在背景中非阻塞地觸發所有金鑰的自動驗證 ---
+        log.info("[背景任務] 準備在背景中觸發所有金鑰的自動驗證...")
         validation_url = f"http://127.0.0.1:{api_port}/api/keys/validate"
         max_attempts = 3
         base_delay = 5  # 秒
@@ -243,7 +249,6 @@ def _background_setup_and_validate(api_port: int, api_ready_event: threading.Eve
                 response = requests.post(validation_url, timeout=300) # 使用較長的超時
                 if response.status_code == 200:
                     log.info("[背景任務] ✅ 金鑰驗證請求已成功發送。")
-                    validation_successful = True
                     break  # 成功，跳出迴圈
                 else:
                     log.warning(f"[背景任務] 第 {attempt + 1} 次驗證失敗，伺服器回應: {response.status_code} {response.text}")
@@ -258,11 +263,7 @@ def _background_setup_and_validate(api_port: int, api_ready_event: threading.Eve
         else: # for-else 迴圈，只有在迴圈正常結束（未被 break）時執行
             log.error("[背景任務] ❌ 所有金鑰驗證嘗試均告失敗。請檢查 API 伺服器狀態或手動觸發驗證。")
 
-        # --- 步驟 4: 發送「完全就緒」信號 ---
-        # 所有背景任務完成後，才宣告系統完全就緒。
-        log.info("✅ [背景任務] 所有啟動後任務完成！發送『完全就緒』信號。")
-        full_readiness_event.set()
-        READINESS_SIGNAL_FILE.touch()
+        log.info("✅ [背景任務] 所有啟動後任務 (包括金鑰驗證) 已執行完畢。")
 
     except Exception as e:
         log.critical(f"❌ [背景任務] 執行緒發生致命錯誤: {e}", exc_info=True)

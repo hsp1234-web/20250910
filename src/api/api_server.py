@@ -144,39 +144,6 @@ async def notification_broadcaster(app: FastAPI):
 # 由於此功能在當前部署環境中並非必要，直接移除是最高效的優化手段。
 # 這將直接縮短從啟動到服務完全就緒的時間。
 
-def _prewarm_heavy_modules():
-    """
-    在背景執行緒中「預熱」重量級模組，將它們載入記憶體。
-    這能避免使用者首次點擊相關功能時的延遲。
-    """
-    log.info("🔥 [預熱] 背景預熱任務已啟動...")
-    # 稍微延遲，避免在伺服器啟動的最尖峰時刻競爭資源
-    time.sleep(10)
-    try:
-        log.info("🔥 [預熱] 正在預熱 AI 分析模組...")
-        from tools import gemini_manager
-        from tools import quantitative_analyzer
-        log.info("  -> ✅ AI 分析模組預熱完畢。")
-
-        log.info("🔥 [預熱] 正在預熱檔案處理模組...")
-        from tools import image_compressor
-        from tools import file_hasher
-        from tools import content_extractor
-        log.info("  -> ✅ 檔案處理模組預熱完畢。")
-
-        log.info("🔥 [預熱] 正在預熱下載器模組...")
-        from tools import drive_downloader
-        from tools import youtube_downloader
-        log.info("  -> ✅ 下載器模組預熱完畢。")
-
-        log.info("✅✅✅ [預熱] 所有重量級模組預熱完畢！")
-        # JULES'S FIX (2025-09-30): 新增一個明確的就緒信號，供協調器監聽。
-        # 這個信號表示所有重量級的預熱任務都已完成，API 伺服器現在是真正意義上的「完全就緒」。
-        log.info("[SYSTEM_READY] All modules are fully initialized.")
-    except Exception as e:
-        log.error(f"❌ [預熱] 預熱背景任務發生錯誤: {e}", exc_info=True)
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
@@ -197,9 +164,9 @@ async def lifespan(app: FastAPI):
     broadcaster_task = asyncio.create_task(notification_broadcaster(app))
     app.state.broadcaster_task = broadcaster_task
 
-    # 4. JULES V6: 啟動背景預熱執行緒
-    prewarm_thread = threading.Thread(target=_prewarm_heavy_modules, daemon=True)
-    prewarm_thread.start()
+    # 4. 方案D優化：移除預熱流程，立即發送就緒信號
+    # 實現真正的延遲載入 (Lazy Loading)，讓重型模組在首次使用時才被導入。
+    log.info("[SYSTEM_READY] All modules are fully initialized.")
 
     yield # 應用程式在此處運行
 
