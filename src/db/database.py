@@ -176,7 +176,8 @@ def initialize_database(conn: sqlite3.Connection = None):
                     total_tokens_used INTEGER DEFAULT 0,
                     request_count INTEGER DEFAULT 0,
                     last_used_at TEXT,
-                    status TEXT DEFAULT 'active'
+                    status TEXT DEFAULT 'active',
+                    key_type TEXT NOT NULL DEFAULT 'gemini'
                 )
             """)
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_key_hash ON api_keys (key_hash)")

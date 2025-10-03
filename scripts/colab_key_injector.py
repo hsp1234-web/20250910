@@ -44,7 +44,8 @@ try:
 
     from google.colab import userdata
     from src.core import key_manager
-    print("✅ 成功匯入 Colab userdata 和 key_manager 模組。")
+    from src.db import initialize_database
+    print("✅ 成功匯入 Colab userdata, key_manager, 和 initialize_database 模組。")
 except ImportError:
     print("❌ 錯誤：此腳本似乎並非在 Google Colab 環境中執行，或專案結構不完整。")
     # 在非 Colab 環境下，建立一個模擬的 userdata 物件以便本機測試
@@ -59,103 +60,106 @@ except Exception as e:
     sys.exit(1)
 
 
-def handle_auto_mode(count: int):
-    """處理自動模式：從 Colab Secrets 讀取金鑰。"""
-    print("\n" + "="*50)
-    print(f"🚀 模式：自動 | 嘗試從 Colab Secrets 載入 {count + 1} 組金鑰...")
-    print("="*50)
-
-    base_key_name = "GOOGLE_API_KEY"
-    target_key_names = [base_key_name]
-    if count > 0:
-        target_key_names.extend([f"{base_key_name}_{i}" for i in range(1, count + 1)])
-
-    added_count = 0
-    for key_name in target_key_names:
-        try:
-            key_value = userdata.get(key_name)
-            if not key_value or not key_value.strip():
-                print(f"🟡 未找到名為 '{key_name}' 的金鑰，跳過。")
-                continue
-
-            print(f"🔄  正在新增金鑰 '{key_name}' (稍後驗證)...")
-            # 解決競爭條件：在啟動時只新增金鑰，不立即驗證。
-            # 驗證將由使用者在 UI 介面或 API 觸發，此時依賴已全部安裝。
-            key_manager.add_key(key_value, key_name, validate=False)
-            print(f"✅  成功新增金鑰 '{key_name}' 至設定檔。")
-            added_count += 1
-
-        except ValueError as e:
-            print(f"🟡  跳過金鑰 '{key_name}'：{e}")
-        except Exception as e:
-            print(f"💥  處理金鑰 '{key_name}' 時發生未預期錯誤：{e}")
-
-    print("-" * 50)
-    print(f"🏁 自動模式處理完成！成功新增 {added_count} 個新金鑰。")
-    print("="*50 + "\n")
-
-
-def handle_manual_mode(keys_string: str):
-    """處理手動模式：解析並新增使用者貼上的金鑰。"""
-    print("\n" + "="*50)
-    print("🚀 模式：手動 | 正在處理使用者貼上的金鑰...")
-    print("="*50)
-
-    keys = [key.strip() for key in keys_string.split('\n') if key.strip()]
-
-    if not keys:
-        print("🟡 未提供任何手動輸入的金鑰。")
-        print("="*50)
-        return
-
-    added_count = 0
-    for i, key_value in enumerate(keys):
-        key_name = f"Manual-Key-{i+1}"
-        print(f"🔄  正在新增第 {i+1} 把手動金鑰 (稍後驗證)...")
-        try:
-            # 解決競爭條件：在啟動時只新增金鑰，不立即驗證。
-            key_manager.add_key(key_value, key_name, validate=False)
-            print(f"✅  成功新增金鑰 '{key_name}' 至設定檔。")
-            added_count += 1
-        except ValueError as e:
-            print(f"🟡  跳過第 {i+1} 把手動金鑰：{e}")
-        except Exception as e:
-            print(f"💥  處理第 {i+1} 把手動金鑰時發生未預期錯誤：{e}")
-
-    print("-" * 50)
-    print(f"🏁 手動模式處理完成！成功新增 {added_count} 個新金鑰。")
-    print("="*50 + "\n")
-
-
 def main():
-    """主執行函式，解析參數並分派任務。"""
-    # JULES (2025-09-21): 在注入新金鑰前，先清除所有舊金鑰，確保環境乾淨。
+    """主執行函式，解析參數、整合所有來源的金鑰，並一次性注入。"""
+    # JULES (2025-09-30) 步驟 1 已移除：資料庫初始化現在由主啟動器 colabPro.py 負責。
+
+    # --- 步驟 1: 清除所有舊金鑰，確保環境乾淨 ---
     try:
         print("🧹 正在清除所有舊的金鑰記錄...")
         cleared_count = key_manager.clear_all_keys()
         print(f"✅ 成功清除了 {cleared_count} 筆舊記錄。")
     except Exception as e:
-        # 如果資料庫尚未建立或存在權限問題，這個步驟可能會失敗。
-        # 在這種情況下，我們只記錄一個警告，然後繼續嘗試新增金鑰，
-        # 因為後續的 key_manager 操作會提供更詳細的錯誤。
         print(f"⚠️ 清除舊金鑰時發生警告: {e}，將繼續執行。")
 
+    # --- 步驟 2: 解析命令列參數 ---
     parser = argparse.ArgumentParser(description="Colab 金鑰注入器，支援自動與手動模式。")
     parser.add_argument("--mode", type=str, choices=['auto', 'manual'], required=True, help="金鑰載入模式：'auto' 或 'manual'")
     parser.add_argument("--count", type=int, default=0, help="在自動模式下，要載入的金鑰數量 (0-20)。")
     parser.add_argument("--manual-keys", type=str, default="", help="在手動模式下，包含金鑰的字串（以換行符分隔）。")
-
+    # JULES'S FIX V3 (2025-09-30): 新增專門的命令列參數來接收 FRED 金鑰
+    parser.add_argument("--fred-key", type=str, default="", help="用於傳遞 FRED API 金鑰。")
     args = parser.parse_args()
 
+    # --- 步驟 3: 從所有來源收集金鑰 ---
+    print("\n" + "="*50)
+    print("🔑 開始從所有指定來源收集金鑰...")
+
+    keys_to_add = []
+
+    # 來源 1: Colab Secrets (自動模式) 或手動貼上 (手動模式)
+    if args.mode == 'auto':
+        print("   - 模式：自動 | 正在從 Colab Secrets 讀取 Gemini 金鑰...")
+        base_key_name = "GOOGLE_API_KEY"
+        target_key_names = [base_key_name]
+        if args.count > 0:
+            target_key_names.extend([f"{base_key_name}_{i}" for i in range(1, args.count + 1)])
+
+        for key_name in target_key_names:
+            try:
+                key_value = userdata.get(key_name)
+                if key_value and key_value.strip():
+                    keys_to_add.append({"value": key_value, "name": key_name, "type": "gemini"})
+                    print(f"     > 找到金鑰: {key_name}")
+            except Exception:
+                print(f"     > 未找到或讀取 '{key_name}' 失敗，跳過。")
+
+    elif args.mode == 'manual':
+        print("   - 模式：手動 | 正在解析貼上的 Gemini 金鑰...")
+        raw_keys = [key.strip() for key in args.manual_keys.split('\n') if key.strip()]
+        for i, key_value in enumerate(raw_keys):
+            key_name = f"Manual-Key-{i+1}"
+            keys_to_add.append({"value": key_value, "name": key_name, "type": "gemini"})
+            print(f"     > 找到第 {i+1} 把手動金鑰")
+
+    # 來源 2: 命令列參數 (FRED 金鑰)
+    print("   - 正在從命令列參數讀取 FRED 金鑰...")
+    if args.fred_key and args.fred_key.strip():
+        keys_to_add.append({
+            "value": args.fred_key,
+            "name": "FRED 金鑰 (自動載入)",
+            "type": "fred"
+        })
+        print("     > 找到 FRED 金鑰。")
+    else:
+        print("     > 未找到 FRED 金鑰。")
+
+    print(f"🔑 金鑰收集完畢，共找到 {len(keys_to_add)} 個金鑰準備注入。")
+    print("="*50)
+
+    # --- 步驟 4: 將所有收集到的金鑰注入資料庫 ---
+    if not keys_to_add:
+        print("\n🟡 未找到任何金鑰，無需注入。")
+        return
+
+    print("\n🚀 開始將金鑰注入資料庫...")
+    added_count = 0
+    for key_info in keys_to_add:
+        try:
+            # 啟動時不進行驗證，以避免依賴尚未安裝的競爭條件
+            key_manager.add_key(
+                key_value=key_info["value"],
+                key_name=key_info["name"],
+                key_type=key_info["type"],
+                validate=False
+            )
+            print(f"   - ✅ 成功注入金鑰: '{key_info['name']}' (類型: {key_info['type']})")
+            added_count += 1
+        except ValueError as e:
+            # 主要處理 "金鑰已存在" 的情況
+            print(f"   - 🟡 跳過金鑰 '{key_info['name']}'：{e}")
+        except Exception as e:
+            print(f"   - 💥 處理金鑰 '{key_info['name']}' 時發生未預期錯誤：{e}")
+
+    print("\n" + "="*50)
+    print(f"🏁 金鑰注入流程結束！成功注入 {added_count} 個新金鑰。")
+    print("="*50 + "\n")
+
+
+if __name__ == "__main__":
     try:
-        if args.mode == 'auto':
-            handle_auto_mode(args.count)
-        elif args.mode == 'manual':
-            handle_manual_mode(args.manual_keys)
+        main()
     except Exception as e:
         print(f"\n💥 在執行過程中發生嚴重錯誤: {e}")
         print("請檢查您的 Colab 環境權限或祕密設定。")
         sys.exit(1)
-
-if __name__ == "__main__":
-    main()

@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>一級交易商分析儀表板</title>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <link rel="stylesheet" href="/static/css/main.css">
+    <style>
+        /* --- 此頁面專用樣式 --- */
+        .dashboard-grid {
+            display: grid;
+            /* 預設（大螢幕）：自動適應欄位，最小寬度 500px */
+            grid-template-columns: repeat(auto-fit, minmax(500px, 1fr));
+            gap: 20px; /* 網格項目間距 */
+        }
+        .chart-container {
+            width: 100%;
+            background-color: #f9f9f9; /* 圖表區域的淺色背景 */
+            min-height: 300px; /* 避免圖片載入前容器塌陷 */
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .chart-container img {
+            width: 100%;
+            height: auto;
+            border: 1px solid #ddd;
+        }
+        .chart-container .placeholder {
+            color: #888;
+            font-size: 1rem;
+        }
+        .navbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 1rem 2rem;
+            background-color: #fff;
+            border-bottom: 1px solid #ddd;
+        }
+        .navbar-brand {
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: #333;
+            text-decoration: none;
+        }
+        .navbar-links {
+            list-style: none;
+            margin: 0;
+            padding: 0;
+            display: flex;
+        }
+        .navbar-links li {
+            margin-left: 20px;
+        }
+        .navbar-links a {
+            text-decoration: none;
+            color: #555;
+            font-size: 1rem;
+        }
+        .navbar-links a.active {
+            font-weight: bold;
+            color: #007bff;
+        }
+        /* --- 手機版響應式媒體查詢 --- */
+        @media (max-width: 600px) {
+            .dashboard-grid {
+                /* 在較小螢幕上切換為單欄佈局 */
+                grid-template-columns: 1fr;
+            }
+        }
+        /* --- 新增：互動圖表彈出視窗樣式 --- */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.7); /* 半透明黑色背景 */
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000; /* 確保在最上層 */
+        }
+        .modal-content {
+            background-color: #fff;
+            padding: 20px;
+            border-radius: 8px;
+            width: 90%;
+            max-width: 1200px; /* 限制最大寬度 */
+            height: 85%;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+        }
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid #eee;
+            padding-bottom: 10px;
+            margin-bottom: 10px;
+        }
+        .modal-header h2 {
+            margin: 0;
+            font-size: 1.5rem;
+        }
+        .modal-close-btn {
+            border: none;
+            background: transparent;
+            font-size: 2.5rem;
+            cursor: pointer;
+            line-height: 1;
+            padding: 0;
+        }
+        .modal-chart-container {
+            flex-grow: 1;
+            position: relative;
+        }
+    </style>
+</head>
+<body>
+    <div class="content">
+        <!-- 返回主頁的連結和子導覽列 -->
+        <div class="breadcrumb" style="margin-bottom: 1rem;">
+            <a href="/" class="button secondary">‹ 返回主頁</a>
+            <a href="/primary_dealer_analysis" class="button">分析儀表板</a>
+            <a href="/page6" class="button secondary">金鑰管理</a>
+        </div>
+        <nav class="sub-nav">
+        </nav>
+        <h1>一級交易商壓力指數儀表板</h1>
+
+        <div class="panel date-filter-panel">
+            <label for="start-date">開始日期:</label>
+            <input type="date" id="start-date">
+            <label for="end-date">結束日期:</label>
+            <input type="date" id="end-date">
+            <button id="update-charts-btn">開始分析</button>
+        </div>
+
+        <div class="dashboard-grid">
+            <!-- 12 張圖表卡片，現在全部使用 div 容器 -->
+            <div class="panel" data-indicator-id="sofr">
+                <h2>SOFR (擔保隔夜融資利率)</h2>
+                <div id="chart-container-sofr" class="chart-container">
+                    <div class="placeholder">圖表載入中...</div>
+                </div>
+            </div>
+            <div class="panel" data-indicator-id="stress_index">
+                <h2>綜合壓力指數</h2>
+                <div id="chart-container-stress_index" class="chart-container">
+                    <div class="placeholder">圖表載入中...</div>
+                </div>
+            </div>
+            <div class="panel" data-indicator-id="vix">
+                <h2>VIX (恐慌指數)</h2>
+                <div id="chart-container-vix" class="chart-container">
+                    <div class="placeholder">圖表載入中...</div>
+                </div>
+            </div>
+            <div class="panel" data-indicator-id="us_bond_2y_10y_spread">
+                <h2>美債2年與10年利差</h2>
+                <div id="chart-container-us_bond_2y_10y_spread" class="chart-container">
+                    <div class="placeholder">圖表載入中...</div>
+                </div>
+            </div>
+            <div class="panel" data-indicator-id="us_high_yield_spread">
+                <h2>高收益債利差</h2>
+                <div id="chart-container-us_high_yield_spread" class="chart-container">
+                    <div class="placeholder">圖表載入中...</div>
+                </div>
+            </div>
+            <div class="panel" data-indicator-id="stress_index_macd">
+                <h2>壓力指數 MACD</h2>
+                <div id="chart-container-stress_index_macd" class="chart-container">
+                    <div class="placeholder">圖表載入中...</div>
+                </div>
+            </div>
+            <div class="panel" data-indicator-id="dealer_net_positions">
+                <h2>一級交易商淨部位</h2>
+                <div id="chart-container-dealer_net_positions" class="chart-container">
+                    <div class="placeholder">圖表載入中...</div>
+                </div>
+            </div>
+            <div class="panel" data-indicator-id="dealer_long_term_positions">
+                <h2>一級交易商長天期部位</h2>
+                <div id="chart-container-dealer_long_term_positions" class="chart-container">
+                    <div class="placeholder">圖表載入中...</div>
+                </div>
+            </div>
+            <div class="panel" data-indicator-id="dealer_short_term_positions">
+                <h2>一級交易商短天期部位</h2>
+                <div id="chart-container-dealer_short_term_positions" class="chart-container">
+                    <div class="placeholder">圖表載入中...</div>
+                </div>
+            </div>
+            <div class="panel" data-indicator-id="dealer_net_position_ranking">
+                <h2>各類部位最新淨值排名</h2>
+                <div id="chart-container-dealer_net_position_ranking" class="chart-container">
+                    <div class="placeholder">圖表載入中...</div>
+                </div>
+            </div>
+            <div class="panel" data-indicator-id="dealer_position_change_ranking">
+                <h2>各類部位最新變動排名</h2>
+                <div id="chart-container-dealer_position_change_ranking" class="chart-container">
+                    <div class="placeholder">圖表載入中...</div>
+                </div>
+            </div>
+             <div class="panel" data-indicator-id="ofr_fci">
+                <h2>OFR 金融壓力指數</h2>
+                <div id="chart-container-ofr_fci" class="chart-container">
+                    <div class="placeholder">圖表載入中...</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 新增：互動圖表彈出視窗的 HTML 結構 -->
+    <div id="interactive-chart-modal" class="modal-overlay" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="modal-chart-title">互動圖表</h2>
+                <button id="modal-close-btn" class="modal-close-btn">&times;</button>
+            </div>
+            <div id="modal-chart-container" class="modal-chart-container">
+                <!-- 互動圖表將會在此處渲染 -->
+            </div>
+        </div>
+    </div>
+
+
+    <!-- 引用對應的 JavaScript 檔案 -->
+    <script src="/static/js/primary_dealer_analysis.js"></script>
+</body>
+</html>

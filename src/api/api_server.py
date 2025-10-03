@@ -144,36 +144,6 @@ async def notification_broadcaster(app: FastAPI):
 # 由於此功能在當前部署環境中並非必要，直接移除是最高效的優化手段。
 # 這將直接縮短從啟動到服務完全就緒的時間。
 
-def _prewarm_heavy_modules():
-    """
-    在背景執行緒中「預熱」重量級模組，將它們載入記憶體。
-    這能避免使用者首次點擊相關功能時的延遲。
-    """
-    log.info("🔥 [預熱] 背景預熱任務已啟動...")
-    # 稍微延遲，避免在伺服器啟動的最尖峰時刻競爭資源
-    time.sleep(10)
-    try:
-        log.info("🔥 [預熱] 正在預熱 AI 分析模組...")
-        from tools import gemini_manager
-        from tools import quantitative_analyzer
-        log.info("  -> ✅ AI 分析模組預熱完畢。")
-
-        log.info("🔥 [預熱] 正在預熱檔案處理模組...")
-        from tools import image_compressor
-        from tools import file_hasher
-        from tools import content_extractor
-        log.info("  -> ✅ 檔案處理模組預熱完畢。")
-
-        log.info("🔥 [預熱] 正在預熱下載器模組...")
-        from tools import drive_downloader
-        from tools import youtube_downloader
-        log.info("  -> ✅ 下載器模組預熱完畢。")
-
-        log.info("✅✅✅ [預熱] 所有重量級模組預熱完畢！")
-    except Exception as e:
-        log.error(f"❌ [預熱] 預熱背景任務發生錯誤: {e}", exc_info=True)
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
@@ -194,9 +164,9 @@ async def lifespan(app: FastAPI):
     broadcaster_task = asyncio.create_task(notification_broadcaster(app))
     app.state.broadcaster_task = broadcaster_task
 
-    # 4. JULES V6: 啟動背景預熱執行緒
-    prewarm_thread = threading.Thread(target=_prewarm_heavy_modules, daemon=True)
-    prewarm_thread.start()
+    # 4. 方案D優化：移除預熱流程，立即發送就緒信號
+    # 實現真正的延遲載入 (Lazy Loading)，讓重型模組在首次使用時才被導入。
+    log.info("[SYSTEM_READY] All modules are fully initialized.")
 
     yield # 應用程式在此處運行
 
@@ -268,11 +238,15 @@ app.include_router(page3_processor.router, prefix="/api/processor", tags=["API: 
 app.include_router(page4_analyzer.router, prefix="/api/analyzer", tags=["API: AI 分析"])
 app.include_router(page5_backup.router, prefix="/api/backup", tags=["API: 備份管理"])
 app.include_router(page6_keys.router, prefix="/api/keys", tags=["API: 金鑰管理"])
-app.include_router(page7_prompts.router, prefix="/api", tags=["API: 提示詞管理"])
+app.include_router(page7_prompts.router, tags=["API: 提示詞管理"])
 app.include_router(page8_details.router, prefix="/api", tags=["API: 檔案總覽"])
 app.include_router(page9_dashboard.router, prefix="/api/dashboard", tags=["API: 績效儀表板"])
 app.include_router(page10_test.router, prefix="/api/service_test", tags=["API: 微服務測試"])
-app.include_router(bond_service_proxy.router, prefix="/api/bond_service", tags=["API: Bond Service Proxy"])
+
+# 債券服務代理
+app.include_router(bond_service_proxy.router, prefix="/api/bond_service", tags=["API: Bond Service Proxy"]) # API 代理
+app.include_router(bond_service_proxy.page_router, tags=["UI: Bond Service Pages"]) # 頁面代理，無前綴
+
 
 # --- 路徑設定 ---
 # 新的上傳檔案儲存目錄
@@ -863,6 +837,7 @@ async def process_youtube_urls(request: Request):
     download_only = payload.get("download_only", False)
     download_type = payload.get("download_type", "audio") # JULES'S NEW FEATURE
     api_key = payload.get("api_key") # 實現無狀態，從請求中直接獲取金鑰
+    timeout = payload.get("timeout", 180) # 從前端獲取超時設定，預設 180 秒
 
     if not requests_list:
         # 在加入相容性邏輯後，更新錯誤訊息
@@ -900,7 +875,8 @@ async def process_youtube_urls(request: Request):
                 "output_dir": "transcripts",
                 "tasks": tasks_to_run,
                 "output_format": output_format,
-                "api_key": api_key # 將金鑰存入任務酬載
+                "api_key": api_key, # 將金鑰存入任務酬載
+                "timeout": timeout # 將超時設定存入任務酬載
             }
 
             db_client.add_task(download_task_id, json.dumps(download_payload), task_type='youtube_download')
@@ -1192,8 +1168,9 @@ def trigger_youtube_processing(task_id: str, loop: asyncio.AbstractEventLoop):
             tasks_to_run = process_payload.get('tasks', 'summary,transcript')
             output_format = process_payload.get('output_format', 'html')
             api_key = process_payload.get('api_key') # 從任務酬載中讀取金鑰
+            timeout = process_payload.get('timeout', 180) # 從任務酬載中讀取超時設定
 
-            log.info(f"執行 Gemini 分析，任務: '{tasks_to_run}', 格式: '{output_format}'")
+            log.info(f"執行 Gemini 分析，任務: '{tasks_to_run}', 格式: '{output_format}', 超時: {timeout}s")
             asyncio.run_coroutine_threadsafe(manager.broadcast_json({
                 "type": "YOUTUBE_STATUS",
                 "payload": {"task_id": dependent_task_id, "status": "processing", "message": f"使用 {model} 進行 AI 分析...", "task_type": "gemini_process"}
@@ -1212,7 +1189,8 @@ def trigger_youtube_processing(task_id: str, loop: asyncio.AbstractEventLoop):
                 "--output-dir", str(report_output_dir),
                 "--video-title", video_title,
                 "--tasks", tasks_to_run,
-                "--output-format", output_format
+                "--output-format", output_format,
+                "--timeout", str(timeout) # 將超時參數傳遞給子程序
             ]
 
             proc_env = os.environ.copy()
@@ -1247,7 +1225,7 @@ def trigger_youtube_processing(task_id: str, loop: asyncio.AbstractEventLoop):
                  if key in process_result and process_result[key]:
                     process_result[key] = convert_to_media_url(process_result[key])
 
-            db_client.update_task_status(dependent_task_id, '已完成', json.dumps(process_result))
+            db_client.update_task_status(dependent_task_id, 'completed', json.dumps(process_result))
             log.info(f"✅ [執行緒] Gemini AI 處理完成。")
 
             # JULES'S FIX (2025-08-31): 補上遺失的 WebSocket 廣播

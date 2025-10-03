@@ -1,18 +1,37 @@
+# Core testing framework
 httpx==0.28.1
 pytest==8.4.2
 pytest-asyncio==0.23.7
+pytest-xdist==3.6.1
+pytest-timeout
+playwright==1.46.0
+
+# General testing utilities
+freezegun==1.5.1
+psutil
+
+# Dependencies for API server and other modules under test
+fastapi==0.116.1
+Jinja2==3.1.6
+python-multipart
+weasyprint
+
+# Dependencies for the bond_data_service_v2 module, also needed for its tests
+pandas
+cachetools
+fredapi
+yfinance
+openpyxl
+plotly
+kaleido
+
+# Other project-specific testing dependencies
 python-docx==1.1.2
 PyMuPDF==1.24.1
 Pillow==11.3.0
 python-pptx==0.6.23
 fpdf2==2.7.8
 requests==2.32.4
-fastapi==0.116.1
-Jinja2==3.1.6
 gdown==5.2.0
 filetype==1.2.0
-freezegun==1.5.1
 python-dateutil==2.9.0.post0
-pytest-xdist==3.6.1
-pytest-timeout
-playwright==1.46.0

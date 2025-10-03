@@ -1,0 +1,26 @@
+# FastAPI and Web Server
+fastapi==0.116.1
+uvicorn==0.35.0
+Jinja2
+python-multipart
+
+# Services Dependencies
+ollama
+pandas==2.2.2
+openpyxl
+fredapi==0.5.2
+yfinance
+
+# System & E2E Test Dependencies
+psutil
+playwright
+pytest-playwright
+requests
+pytest
+matplotlib
+
+# Report & File Handling Dependencies
+WeasyPrint
+python-docx
+lxml
+plotly

@@ -49,21 +49,28 @@ def parse_chat_log(text: str) -> list[dict]:
     lines = text.split('\n')
     i = 0
 
-    # 定義正規表示式
-    # 恢復為更精確的日期格式，此格式在第二次檢查時被證實是正確的
-    date_pattern = re.compile(r'(\d{4}/\d{1,2}/\d{1,2})（週.）')
-    message_pattern = re.compile(r'^(\d{2}:\d{2})\t([^\t]+)\t?(.*)$')
+    # 定義正規表示式 (Jules @ 2025-10-03: 增加格式彈性)
+    # 1. 日期格式：支援 YYYY/MM/DD 和 YYYY.MM.DD
+    #    使用 [./] 來匹配斜線或點。
+    #    使用 re.sub 將分隔符統一為 '-'。
+    date_pattern = re.compile(r'(\d{4}[./]\d{1,2}[./]\d{1,2}).*')
+    # 2. 訊息格式：支援 Tab 或多個空格作為分隔符
+    #    使用 [\t\s]+ 來匹配一個或多個 Tab 或空格。
+    message_pattern = re.compile(r'^(\d{2}:\d{2})[\t\s]+([^\t\s].*?)[\t\s]+(.*)$')
     url_pattern = re.compile(r'https?://\S+')
 
     while i < len(lines):
         line = lines[i].strip()
         log.debug(f"正在處理第 {i} 行: '{line[:50]}...'")
 
-        # 1. 處理日期行
+        # 1. 處理日期行 (Jules @ 2025-10-03: 格式彈性化)
         date_match = date_pattern.match(line)
         if date_match:
-            # 將 YYYY/M/D 格式標準化為 YYYY-MM-DD
-            date_parts = date_match.group(1).split('/')
+            # 將 YYYY/M/D 或 YYYY.M.D 格式標準化為 YYYY-MM-DD
+            raw_date_str = date_match.group(1)
+            # 將分隔符統一為 '-'
+            normalized_date_str = re.sub(r'[./]', '-', raw_date_str)
+            date_parts = normalized_date_str.split('-')
             current_date = f"{date_parts[0]}-{int(date_parts[1]):02d}-{int(date_parts[2]):02d}"
             i += 1
             continue
@@ -72,7 +79,7 @@ def parse_chat_log(text: str) -> list[dict]:
             i += 1
             continue
 
-        # 2. 處理訊息行
+        # 2. 處理訊息行 (Jules @ 2025-10-03: 格式彈性化)
         message_match = message_pattern.match(line)
         if message_match:
             time, author, first_line_content = message_match.groups()

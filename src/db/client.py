@@ -8,7 +8,6 @@
 # httpx 客戶端會自動管理連線池與 HTTP Keep-Alive，
 # 這意味著它可以在多個請求之間重複使用 TCP 連線，大幅減少延遲並提升效能。
 #
-import httpx
 import json
 import logging
 import os
@@ -27,6 +26,7 @@ class DBClient:
         Args:
             timeout (float): 請求的預設超時時間（秒）。
         """
+        import httpx
         self.port = self._get_server_port()
         self.base_url = f"http://127.0.0.1:{self.port}"
         # 初始化一個 httpx.Client 實例。

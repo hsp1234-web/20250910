@@ -1,8 +1,9 @@
 # src/api/routes/system.py
 
 import json
+import os
 from pathlib import Path
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Response
 
 router = APIRouter()
 
@@ -23,3 +24,12 @@ async def get_service_registry():
         return registry_data
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"讀取服務註冊檔案時發生錯誤: {e}")
+
+@router.get("/api/key_status/fred", tags=["System"])
+async def get_fred_key_status():
+    """
+    檢查 FRED_API_KEY 是否已在環境變數中設定。
+    這是一個最小化的端點，讓前端能感知後端金鑰狀態，而不需更動核心金鑰管理系統。
+    """
+    api_key = os.environ.get('FRED_API_KEY')
+    return {"available": bool(api_key)}

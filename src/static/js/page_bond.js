@@ -1,25 +1,52 @@
 // src/static/js/page_bond.js
 
 document.addEventListener('DOMContentLoaded', () => {
-    console.log("簡化版債券分析頁面腳本已載入。");
+    console.log("簡化版債券分析頁面腳本已載入 (v2 - 金鑰檢查)。");
 
     const indicators = ['gdp', 'cpi', 'fedfunds', 'ism'];
     const statusDiv = document.getElementById('update-status');
 
-    // 為每個指標的按鈕設定事件監聽器
-    indicators.forEach(id => {
-        const button = document.getElementById(`btn-fetch-${id}`);
-        if (button) {
-            button.addEventListener('click', () => {
-                // ism 按鈕是禁用的，但我們還是為它加上邏輯以備未來使用
-                if (button.disabled) {
-                    console.log(`按鈕 ${id} 目前被禁用。`);
+    async function checkFredKeyAndInitialize() {
+        try {
+            const response = await fetch('/api/key_status/fred');
+            if (!response.ok) {
+                throw new Error(`伺服器回應錯誤: ${response.status}`);
+            }
+            const keyStatus = await response.json();
+
+            if (keyStatus.available) {
+                console.log("✅ FRED API 金鑰可用，正在啟用圖表功能。");
+                statusDiv.textContent = "FRED API 金鑰已就緒，請選擇一個指標以生成圖表。";
+                initializeButtons(true); // 啟用按鈕
+            } else {
+                console.warn("FRED API 金鑰不可用，圖表功能將被禁用。");
+                statusDiv.textContent = "❌ 後端 FRED API 金鑰尚未設定，圖表功能已禁用。";
+                initializeButtons(false); // 禁用按鈕
+            }
+        } catch (error) {
+            console.error("檢查 FRED 金鑰狀態時發生錯誤:", error);
+            statusDiv.textContent = "❌ 無法檢查金鑰狀態，圖表功能已禁用。請檢查網路連線或後端服務。";
+            initializeButtons(false); // 發生錯誤時也禁用按鈕
+        }
+    }
+
+    function initializeButtons(enabled) {
+        indicators.forEach(id => {
+            const button = document.getElementById(`btn-fetch-${id}`);
+            if (button) {
+                // 無論如何，'ism' 按鈕目前都是禁用的
+                if (id === 'ism') {
+                    button.disabled = true;
                     return;
                 }
-                updateChart(id);
-            });
-        }
-    });
+
+                button.disabled = !enabled;
+                if (enabled) {
+                    button.addEventListener('click', () => updateChart(id));
+                }
+            }
+        });
+    }
 
     function updateChart(indicatorId) {
         const imgElement = document.getElementById(`${indicatorId}-chart-img`);
@@ -31,23 +58,16 @@ document.addEventListener('DOMContentLoaded', () => {
         console.log(`正在為 ${indicatorId} 更新圖表...`);
         statusDiv.textContent = `正在為 ${indicatorId.toUpperCase()} 生成圖表，請稍候...`;
 
-        // 建立 API 端點 URL。
-        // 注意：我們假設主伺服器會有一個代理將此請求轉發到 bond_data_service
-        // 這樣可以避免在前端處理服務發現和CORS問題。
         const apiUrl = `/api/bond_service/chart/${indicatorId}`;
-
-        // 附加時間戳以避免瀏覽器快取舊圖片
         const finalUrl = `${apiUrl}?t=${new Date().getTime()}`;
 
-        // 先顯示一個載入中的提示
-        imgElement.src = ""; // 清空 src 以顯示 alt 文字
+        imgElement.src = "";
         imgElement.alt = "圖表載入中...";
 
-        // 設定圖片載入成功和失敗的事件處理
         imgElement.onload = () => {
             console.log(`${indicatorId} 圖表載入成功。`);
             statusDiv.textContent = `✅ ${indicatorId.toUpperCase()} 圖表已更新。`;
-            imgElement.alt = `指標 ${indicatorId} 的圖表`; // 成功後更新 alt
+            imgElement.alt = `指標 ${indicatorId} 的圖表`;
         };
 
         imgElement.onerror = () => {
@@ -56,7 +76,9 @@ document.addEventListener('DOMContentLoaded', () => {
             imgElement.alt = "圖表載入失敗。";
         };
 
-        // 開始載入圖片
         imgElement.src = finalUrl;
     }
+
+    // 啟動頁面初始化流程
+    checkFredKeyAndInitialize();
 });

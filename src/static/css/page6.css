@@ -1,175 +1,188 @@
 /* src/static/css/page6.css */
 
-body {
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-    margin: 0;
-    padding: 0;
-    background-color: #f8f9fa;
-    color: #343a40;
+/* --- 主容器與佈局 --- */
+.content.page6-container {
+    max-width: 960px; /* 限制最大寬度，使其與 Page 3 風格一致 */
+    margin: 0 auto;   /* 水平居中 */
+    padding: 1rem 2rem;
 }
 
-.content {
-    max-width: 900px;
-    margin: 0 auto 20px; /* 移除頂部 margin 來修復與導覽列的間距問題 */
-    padding: 20px; /* 將左右 padding 移到此處以維持內容間距 */
+.main-header {
+    text-align: left;
+    margin-bottom: 2rem;
+    padding-bottom: 1rem;
+    border-bottom: 1px solid var(--border-color);
 }
 
+/* --- 面板 (Panel) 統一樣式 --- */
 .panel {
-    background: #ffffff;
-    border: 1px solid #dee2e6;
+    background-color: #ffffff;
+    border: 1px solid var(--border-color);
     border-radius: 8px;
-    padding: 20px;
-    margin-bottom: 20px;
-    box-shadow: 0 4px 8px rgba(0,0,0,0.05);
+    padding: 1.5rem 2rem;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1); /* 加深的陰影 */
+    margin-bottom: 2rem;
 }
 
-h1, h2 {
-    color: #0056b3;
-    border-bottom: 2px solid #f0f0f0;
-    padding-bottom: 10px;
-    margin-top: 0;
-}
-
-.form-group {
+.panel-header {
     display: flex;
-    gap: 10px;
-    margin-bottom: 10px;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1rem;
+    padding-bottom: 1rem;
+    border-bottom: 1px solid var(--border-color-light);
 }
 
-.form-group input[type="password"],
-.form-group input[type="text"] {
-    flex-grow: 1;
-    padding: 10px;
-    border: 1px solid #ccc;
-    border-radius: 5px;
-    font-size: 1em;
+.panel h2, .panel h3 {
+    font-size: 1.25rem;
+    color: var(--text-color-dark);
+    margin: 0 0 1rem 0;
+}
+.panel h3 {
+    font-size: 1.1rem;
+    color: #333;
 }
 
-button {
-    padding: 10px 20px;
-    font-size: 1em;
-    color: #fff;
-    background-color: #007bff;
+hr {
+    border: 0;
+    height: 1px;
+    background-color: var(--border-color-light);
+    margin: 2rem 0;
+}
+
+/* --- 表單元素統一樣式 --- */
+.form-group {
+    display: grid;
+    grid-template-columns: 1fr; /* 單欄佈局 */
+    gap: 0.5rem;
+    margin-bottom: 1.25rem;
+}
+
+.form-group label {
+    font-weight: 600;
+    color: var(--text-color-dark);
+}
+
+.form-group input[type="text"],
+.form-group input[type="number"],
+.form-group textarea,
+.form-group select {
+    width: 100%;
+    padding: 0.75rem;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    font-size: 0.95rem;
+    box-sizing: border-box;
+    transition: border-color 0.3s ease, box-shadow 0.3s ease;
+    background-color: #f8f9fa; /* 為輸入區域增加淡灰色背景 */
+}
+
+.form-group input[type="text"]:focus,
+.form-group input[type="number"]:focus,
+.form-group textarea:focus,
+.form-group select:focus {
+    outline: none;
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 3px rgba(30, 144, 255, 0.2);
+    background-color: #fff; /* 聚焦時恢復白色背景 */
+}
+
+.form-group textarea {
+    resize: vertical;
+    min-height: 80px;
+}
+
+.form-group small, .help-text {
+    font-size: 0.85rem;
+    color: var(--text-color-light);
+    margin-top: -0.25rem;
+}
+
+/* --- 按鈕統一樣式 --- */
+.button-primary, .button-secondary, .form-group button {
+    display: inline-block;
+    padding: 0.75rem 1.5rem;
+    font-size: 0.95rem;
+    font-weight: 600;
+    text-align: center;
     border: none;
-    border-radius: 5px;
+    border-radius: 6px;
     cursor: pointer;
-    transition: background-color 0.3s;
+    transition: background-color 0.3s ease, transform 0.1s ease;
+    width: auto; /* 讓按鈕寬度自適應內容 */
+    justify-self: start; /* 在網格佈局中靠左對齊 */
+}
+#add-key-btn {
+    width: 100%; /* 新增金鑰按鈕保持全寬 */
 }
 
-button:hover:not(:disabled) {
-    background-color: #0056b3;
+.button-primary, .form-group button {
+    background-color: var(--primary-color);
+    color: white;
+    border: 1px solid var(--primary-color);
+}
+
+.button-primary:hover, .form-group button:hover {
+    background-color: var(--primary-color-dark);
+}
+
+.button-secondary {
+    background-color: #f0f2f5;
+    color: var(--text-color-dark);
+    border: 1px solid var(--border-color);
+}
+
+.button-secondary:hover {
+    background-color: #e4e6e9;
 }
 
 button:disabled {
     background-color: #cccccc;
     cursor: not-allowed;
+    border-color: #cccccc;
 }
 
-#validate-all-btn {
-    background-color: #28a745;
-}
-#validate-all-btn:hover:not(:disabled) {
-    background-color: #218838;
-}
-
-#add-key-status {
-    margin-top: 10px;
-    font-weight: bold;
+/* --- 金鑰列表樣式 (與 Page 3 風格對齊) --- */
+#key-list-container, #model-list-container {
+    max-height: 400px;
+    overflow-y: auto;
+    border: 1px solid var(--border-color-light);
+    border-radius: 6px;
+    padding: 0.5rem;
 }
 
-.key-list {
-    list-style: none;
-    padding: 0;
-    margin: 0;
-}
+.key-list { list-style: none; padding: 0; margin: 0; }
+.key-item { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; padding: 1rem; border-bottom: 1px solid var(--border-color-light); transition: background-color 0.2s ease; }
+.key-item:last-child { border-bottom: none; }
+.key-item:hover { background-color: #f9fafb; }
+.key-info { flex: 1 1 200px; }
+.key-name { font-weight: 600; color: var(--text-color-dark); display: block; }
+.key-hash { font-size: 0.85rem; color: var(--text-color-light); font-family: monospace; }
+.key-status-container { display: flex; align-items: center; gap: 0.5rem; flex: 0 0 auto; margin: 0.5rem 1rem; }
+.key-type-tag { background-color: #e4e6e9; color: #4b4f56; padding: 0.2rem 0.5rem; border-radius: 4px; font-size: 0.8rem; font-weight: 600; }
+.key-status { padding: 0.2rem 0.6rem; border-radius: 12px; font-size: 0.8rem; font-weight: 600; color: white; }
+.status-valid { background-color: #5cb85c; }
+.status-invalid { background-color: #d9534f; }
+.status-untested { background-color: #f0ad4e; }
+.key-actions { flex: 1 1 250px; text-align: right; display: flex; align-items: center; justify-content: flex-end; gap: 1rem; }
+.key-validated { font-size: 0.85rem; color: var(--text-color-light); }
+.delete-btn { background: none; border: 1px solid #d9534f; color: #d9534f; padding: 0.3rem 0.7rem; border-radius: 4px; cursor: pointer; font-size: 0.85rem; transition: background-color 0.2s, color 0.2s; }
+.delete-btn:hover { background-color: #d9534f; color: white; }
 
-.key-item {
-    display: flex;
-    align-items: center;
-    gap: 15px;
-    padding: 15px;
-    border-bottom: 1px solid #f0f0f0;
-}
+/* --- 模型列表 --- */
+#model-list-container ul { list-style-type: none; padding-left: 0; }
+#model-list-container li { background-color: #f9fafb; padding: 0.5rem 1rem; border-radius: 4px; margin-bottom: 0.5rem; font-family: monospace; font-size: 0.9rem; }
 
-.key-item:last-child {
-    border-bottom: none;
-}
+/* --- 狀態訊息 --- */
+.status-message { margin-top: 1rem; }
+.status-message p { margin: 0.5rem 0 0 0; font-size: 0.9rem; }
 
-.key-item .key-name {
-    flex-basis: 20%;
-    font-weight: bold;
-    word-break: break-all;
-}
+/* --- Radio Group (已在 HTML 中移除，但保留樣式以防萬一) --- */
+.radio-group { display: flex; gap: 1rem; align-items: center; }
+.radio-group label { margin-bottom: 0; cursor: pointer; }
+.radio-group input[type="radio"] { cursor: pointer; }
 
-.key-item .key-hash {
-    flex-basis: 30%;
-    font-family: monospace;
-    color: #666;
-}
-
-.key-item .key-status {
-    flex-basis: 10%;
-    font-weight: bold;
-    padding: 4px 8px;
-    border-radius: 4px;
-    text-align: center;
-}
-
-.key-status.status-valid {
-    color: #155724;
-    background-color: #d4edda;
-}
-
-.key-status.status-invalid {
-    color: #721c24;
-    background-color: #f8d7da;
-}
-
-.key-status.status-untested {
-    color: #383d41;
-    background-color: #e2e3e5;
-}
-
-.key-item .key-validated {
-    flex-basis: 25%;
-    font-size: 0.9em;
-    color: #888;
-}
-
-.key-item .delete-btn {
-    flex-shrink: 0;
-    background-color: #dc3545;
-    font-size: 0.9em;
-    padding: 5px 10px;
-}
-.key-item .delete-btn:hover {
-    background-color: #c82333;
-}
-
-/* 響應式設計：適用於手機等較窄的螢幕 */
+/* 響應式設計 */
 @media (max-width: 768px) {
-    .form-group {
-        flex-direction: column;
-    }
-
-    .key-item {
-        flex-direction: column;
-        align-items: flex-start; /* 左對齊 */
-        gap: 8px;
-    }
-
-    .key-item > span {
-        flex-basis: auto; /* 取消固定的寬度分配 */
-        width: 100%;
-    }
-
-    .key-item .key-status {
-        text-align: left; /* 狀態文字也左對齊 */
-    }
-
-    .key-item .delete-btn {
-        width: 100%;
-        margin-top: 10px;
-        text-align: center;
-    }
+    .form-group { grid-template-columns: 1fr; }
 }

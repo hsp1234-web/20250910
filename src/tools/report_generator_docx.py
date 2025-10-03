@@ -7,10 +7,6 @@ import json
 from pathlib import Path
 from typing import List
 
-import plotly.graph_objects as go
-from docx import Document
-from docx.shared import Inches
-
 # 修正匯入路徑
 try:
     from db.client import DBClient
@@ -37,6 +33,9 @@ def create_docx_report(task_ids: List[int], db_client: DBClient) -> str:
     Returns:
         生成後 .docx 檔案的絕對路徑。
     """
+    from docx import Document
+    from docx.shared import Inches
+
     log.info(f"開始為任務 {task_ids} 生成 Word 報告...")
 
     # --- 1. 創建 Word 文件 ---
@@ -137,6 +136,7 @@ def generate_placeholder_chart() -> str:
     生成一個佔位的 Plotly 圖表並回傳其路徑。
     (此為 PoC 邏輯的臨時版本)
     """
+    import plotly.graph_objects as go
     fig = go.Figure(data=go.Scatter(x=[1, 2, 3, 4], y=[10, 11, 12, 13], mode='markers+lines'))
     fig.update_layout(title_text="範例績效圖表")
 

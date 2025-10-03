@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>互動圖表檢視器</title>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <link rel="stylesheet" href="/static/css/main.css">
+    <style>
+        body {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            margin: 0;
+        }
+        .top-bar {
+            padding: 1rem 2rem;
+            background-color: #fff;
+            border-bottom: 1px solid #ddd;
+            display: flex;
+            align-items: center;
+        }
+        .back-button {
+            text-decoration: none;
+            padding: 0.5rem 1rem;
+            border: 1px solid #007bff;
+            color: #007bff;
+            border-radius: 5px;
+            font-weight: bold;
+        }
+        .back-button:hover {
+            background-color: #007bff;
+            color: white;
+        }
+        #chart-title {
+            margin: 0 auto;
+            font-size: 1.5rem;
+            font-weight: bold;
+        }
+        #chart-container {
+            flex-grow: 1;
+            width: 100%;
+            height: calc(100% - 80px); /* 減去頂部欄位的高度 */
+        }
+        .placeholder {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100%;
+            font-size: 1.5rem;
+            color: #888;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="top-bar">
+        <a href="/primary_dealer_analysis" class="back-button">返回一級交易商分析頁面</a>
+        <h1 id="chart-title">圖表載入中...</h1>
+    </div>
+
+    <div id="chart-container">
+        <div class="placeholder">正在載入互動圖表...</div>
+    </div>
+
+    <script src="/static/js/interactive_chart.js"></script>
+</body>
+</html>

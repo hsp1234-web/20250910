@@ -505,7 +505,7 @@
                 <!-- 區域 1: API 金鑰管理 -->
                 <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px;">
                     <h2>🔑 Google API 金鑰管理</h2>
-                    <a href="/static/prompts.html" target="_blank" style="font-weight: 500;">管理提示詞 &rarr;</a>
+                    <a href="/static/prompts.html" target="_blank" class="button-like" style="background-color: #6c757d; text-decoration: none; padding: 8px 16px; font-size: 0.9em;">管理提示詞</a>
                 </div>
                 <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 12px;">
                     <input type="password" id="api-key-input" data-testid="api-key-input" placeholder="在此貼上您的 Google API 金鑰" style="flex-grow: 1; padding: 10px; border-radius: 6px; border: 1px solid #ccc;">
@@ -558,6 +558,12 @@
                                     <option value="html">HTML 報告</option>
                                     <option value="txt">純文字 (.txt)</option>
                                 </select>
+                            </div>
+                            <!-- JULES'S NEW FEATURE: Timeout Input -->
+                            <div style="margin-top: 16px;">
+                                <label for="api-timeout-input"><strong>API 逾時時間 (秒)</strong></label>
+                                <input type="number" id="api-timeout-input" value="180" min="30" max="900" style="width: 100%; padding: 10px; border-radius: 6px; border: 1px solid #ccc; box-sizing: border-box;">
+                                <small style="font-size: 0.8em; color: #666;">建議值: 180。較長的影片可能需要更長的時間。</small>
                             </div>
                         </div>
                     </div>
@@ -1329,14 +1335,30 @@
                     }
                 }
 
+                if (payload.status === 'completed' || payload.status === 'failed') {
+                    taskElement.dataset.isFinal = 'true';
+                    const finalStateEvent = new CustomEvent('task-final-state', { detail: { taskId: payload.task_id } });
+                    document.dispatchEvent(finalStateEvent);
+                }
+
                 if (payload.status === 'completed') {
                     if (progressContainer) progressContainer.style.display = 'none';
 
                     while (statusSpan.firstChild) {
                         statusSpan.removeChild(statusSpan.firstChild);
                     }
-                    let buttonGroup = createActionButtons(payload.task_id, payload);
-                    statusSpan.appendChild(buttonGroup);
+
+                    // JULES V8 FIX: Only show action buttons for the FINAL task in a chain.
+                    if (payload.task_type === 'youtube_download') {
+                        // This is an intermediate step, so just show status.
+                        if(statusTextLabel) statusTextLabel.textContent = '✅ 下載完成，等待分析...';
+                        if(statusTextLabel) statusTextLabel.style.display = 'inline';
+                    } else {
+                        // This is a final task (gemini_process, download_only, etc.)
+                        let buttonGroup = createActionButtons(payload.task_id, payload);
+                        statusSpan.appendChild(buttonGroup);
+                    }
+
                     statusSpan.dataset.testid = 'task-status-badge-completed';
 
                     const result = payload.result || {};
@@ -1935,13 +1957,15 @@
                 button.textContent = '正在建立任務...';
 
                 try {
+                    const timeoutValue = document.getElementById('api-timeout-input').value;
                     const payload = {
                         requests: requests,
                         model: geminiModelSelect.value,
                         download_only: downloadOnly,
                         tasks: selectedTasks.join(','),
                         output_format: ytOutputFormatSelect.value,
-                        api_key: localStorage.getItem('googleApiKey') // 實現無狀態傳遞
+                        api_key: localStorage.getItem('googleApiKey'), // 實現無狀態傳遞
+                        timeout: parseInt(timeoutValue, 10) || 180 // 新增 timeout 參數
                     };
                     const response = await fetch('/api/youtube/process', {
                         method: 'POST',
@@ -1952,6 +1976,9 @@
                     if (!response.ok) throw new Error((await response.json()).detail || '建立任務失敗');
                     const result = await response.json();
 
+                    const timeoutSeconds = parseInt(timeoutValue, 10) || 180;
+                    const activeTimers = {};
+
                     result.tasks.forEach(task => {
                         const taskType = task.task_type === 'youtube_process_chain' ? 'YouTube 分析' : '僅下載音訊';
                         const displayId = task.task_id;
@@ -1959,14 +1986,31 @@
 
                         const taskElement = createNewTaskElement(task.url, displayId, taskType);
 
-                        // JULES'S FIX: Map the final task ID to the element created with the initial ID
                         if (displayId !== finalId) {
                             taskElements.set(finalId, taskElement);
                         }
 
                         if (socket && socket.readyState === WebSocket.OPEN) {
-                            // We always start the chain with the first task ID
                             socket.send(JSON.stringify({ type: 'START_YOUTUBE_PROCESSING', payload: { task_id: displayId }}));
+                        }
+
+                        // Start a timeout for this specific task
+                        const timerId = setTimeout(() => {
+                            const currentTaskElement = taskElements.get(finalId);
+                            if (currentTaskElement && !currentTaskElement.dataset.isFinal) {
+                                showStatusMessage(`任務 "${task.url}" 已超過 ${timeoutSeconds} 秒的設定時間，但尚未完成。後端可能仍在處理中，或已發生錯誤。`, true, 20000);
+                            }
+                            delete activeTimers[finalId];
+                        }, timeoutSeconds * 1000);
+                        activeTimers[finalId] = timerId;
+                    });
+
+                    // Add a global listener to clear timers when tasks complete
+                    document.addEventListener('task-final-state', (e) => {
+                        const { taskId } = e.detail;
+                        if (activeTimers[taskId]) {
+                            clearTimeout(activeTimers[taskId]);
+                            delete activeTimers[taskId];
                         }
                     });
 

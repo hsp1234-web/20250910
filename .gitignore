@@ -32,6 +32,7 @@ __pycache__/
 # Database
 *.db
 *.db-*
+*.sqlite3
 
 # Application Data
 /uploads/
@@ -61,6 +62,7 @@ src/db/secrets/keys.json
 
 # Screenshots (often generated during E2E tests)
 *.png
+*.jpg
 
 # Generated config files
 circus.ini
