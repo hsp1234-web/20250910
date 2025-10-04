@@ -124,10 +124,25 @@ def parse_chat_log(text: str) -> list[dict]:
                     i = j # 移動到下一個未處理的行
                     continue
 
+                # (Jules @ 2025-10-03) 解析作者 ID 和名稱，同時保留 author 欄位相容性
+                author_match = re.match(r'^([\d-]+)(.*)', author)
+                if author_match:
+                    author_id = author_match.group(1).strip()
+                    author_name = author_match.group(2).strip()
+                else:
+                    author_id = None
+                    author_name = author
+
+                # 如果解析後名字為空（例如，作者是 "123-"），則使用原始 author 字串
+                if not author_name:
+                    author_name = author
+
                 results.append({
                     'date': current_date,
                     'time': time,
-                    'author': author,
+                    'author': author, # 保留以確保舊函式相容性
+                    'author_id': author_id,
+                    'author_name': author_name,
                     'title': title,
                     'url': url
                 })
@@ -212,6 +227,85 @@ def save_urls_to_db(parsed_data: list[dict], source_text: str, conn: Optional[sq
     finally:
         if is_managed_locally and db_conn:
             db_conn.close()
+
+
+def save_essays_to_db(parsed_data: list[dict], source_text: str, conn: Optional[sqlite3.Connection] = None):
+    """
+    (Jules @ 2025-10-03)
+    將解析後的 LINE 小作文資料儲存到資料庫的 `line_essays` 資料表中。
+
+    :param parsed_data: 一個包含解析後資料的字典列表。
+    :param source_text: 這些資料的來源文字。
+    :param conn: 一個可選的 sqlite3 Connection 物件。如果未提供，函式會自行管理連線。
+    :return: 一個元組 (成功儲存的筆數, 已存在的筆數)。
+    """
+    if not parsed_data:
+        log.info("沒有要儲存的小作文資料，跳過資料庫操作。")
+        return 0, 0
+
+    is_managed_locally = not conn
+    db_conn = conn if conn else get_db_connection()
+
+    if not db_conn:
+        log.error("無法建立資料庫連線，小作文資料儲存失敗。")
+        return 0, 0
+
+    try:
+        with db_conn:
+            cursor = db_conn.cursor()
+
+            # 從 `line_essays` 表中獲取所有現存的 URL
+            cursor.execute("SELECT url FROM line_essays")
+            existing_urls = {row[0] for row in cursor.fetchall()}
+            log.info(f"`line_essays` 表中已存在 {len(existing_urls)} 個獨立的網址。")
+
+            # 過濾掉已經存在的 URL
+            new_items = []
+            for item in parsed_data:
+                if item['url'] not in existing_urls:
+                    new_items.append(item)
+                    existing_urls.add(item['url'])
+
+            if not new_items:
+                log.info("所有解析出的小作文都已存在於資料庫中，無需新增。")
+                return 0, len(parsed_data)
+
+            log.info(f"過濾後，有 {len(new_items)} 筆新小作文需要儲存。")
+
+            # 準備並插入新資料
+            created_at_iso = get_current_taipei_time_iso()
+            data_to_insert = [
+                (
+                    item['date'],
+                    item['time'],
+                    item.get('author_id'), # 使用 .get 以確保欄位不存在時不會出錯
+                    item['author_name'],
+                    item['title'],
+                    item['url'],
+                    source_text,
+                    created_at_iso
+                )
+                for item in new_items
+            ]
+
+            cursor.executemany(
+                """
+                INSERT INTO line_essays (
+                    message_date, message_time, author_id, author_name, title, url, source_text, created_at, status
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+                """,
+                data_to_insert
+            )
+        log.info(f"成功將 {len(data_to_insert)} 筆新的小作文資料儲存到資料庫。")
+        return len(data_to_insert), len(parsed_data) - len(data_to_insert)
+
+    except sqlite3.Error as e:
+        log.error(f"儲存小作文資料到資料庫時發生錯誤: {e}", exc_info=True)
+        return 0, 0
+    finally:
+        if is_managed_locally and db_conn:
+            db_conn.close()
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="從文字中提取網址並儲存到資料庫。")

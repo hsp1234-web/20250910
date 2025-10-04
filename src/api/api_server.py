@@ -31,6 +31,10 @@ sys.path.insert(0, str(SRC_DIR))
 # V4 循環導入修復：從新的依賴檔案中導入
 from .dependencies import db_client
 
+# (Jules @ 2025-10-03) 導入 LINE 解析工具
+from tools.url_extractor import parse_chat_log, save_essays_to_db
+
+
 # --- JULES 於 2025-08-09 的修改：設定應用程式全域時區 ---
 # 為了確保所有日誌和資料庫時間戳都使用一致的時區，我們在應用程式啟動的
 # 最早期階段就將時區環境變數設定為 'Asia/Taipei'。
@@ -453,6 +457,41 @@ async def log_action_endpoint(payload: Dict):
 
     log.info(f"📝 已將前端操作記錄到資料庫: {action}") # 同時在主控台也顯示日誌
     return {"status": "logged"}
+
+
+class LineChatPayload(BaseModel):
+    text: str
+
+@app.post("/api/parse_line_chat", status_code=200)
+async def parse_line_chat_endpoint(payload: LineChatPayload):
+    """
+    (Jules @ 2025-10-03)
+    接收 LINE 聊天記錄文字，進行解析，並將結果存入資料庫。
+    """
+    log.info(f"收到 LINE 聊天記錄解析請求，文字長度: {len(payload.text)} 字元。")
+    if not payload.text or not payload.text.strip():
+        raise HTTPException(status_code=400, detail="提交的文字內容不可為空。")
+
+    try:
+        # 步驟 1: 解析文字
+        parsed_data = parse_chat_log(payload.text)
+        if not parsed_data:
+            return {"message": "在提供的文字中沒有找到有效的小作文項目。", "saved_count": 0, "existing_count": 0}
+
+        # 步驟 2: 儲存到資料庫
+        # 這裡我們傳入 None 作為連線物件，讓函式自行管理
+        saved_count, existing_count = save_essays_to_db(parsed_data, payload.text, conn=None)
+
+        log.info(f"LINE 聊天記錄處理完畢。新增 {saved_count} 筆，發現 {existing_count} 筆已存在。")
+        return {
+            "message": "處理成功。",
+            "saved_count": saved_count,
+            "existing_count": existing_count,
+            "total_found": len(parsed_data)
+        }
+    except Exception as e:
+        log.error(f"❌ 處理 LINE 聊天記錄時發生錯誤: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"伺服器內部錯誤: {e}")
 
 
 @app.get("/api/application_status")

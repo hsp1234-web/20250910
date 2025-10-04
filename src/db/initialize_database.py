@@ -33,6 +33,22 @@ CREATE TABLE IF NOT EXISTS api_keys (
 );
 """
 
+# (Jules @ 2025-10-03) 新增 line_essays 表格，用於儲存 LINE 小作文解析結果
+LINE_ESSAYS_TABLE_SQL = """
+CREATE TABLE IF NOT EXISTS line_essays (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    message_date TEXT NOT NULL,
+    message_time TEXT NOT NULL,
+    author_id TEXT,
+    author_name TEXT NOT NULL,
+    title TEXT NOT NULL,
+    url TEXT NOT NULL UNIQUE,
+    source_text TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    status TEXT NOT NULL DEFAULT 'pending' -- 'pending', 'processed', 'error'
+);
+"""
+
 def _add_column_if_not_exists(cursor: sqlite3.Cursor, table_name: str, column_name: str, column_definition: str):
     """
     一個輔助函式，用於檢查欄位是否存在，如果不存在則新增。
@@ -62,7 +78,10 @@ def initialize():
         print("步驟 1: 正在建立 `api_keys` 資料表 (如果不存在)...")
         cursor.execute(API_KEYS_TABLE_SQL)
 
-        print("\n步驟 2: 正在檢查並擴充 `api_keys` 表格欄位...")
+        print("步驟 2: 正在建立 `line_essays` 資料表 (如果不存在)...")
+        cursor.execute(LINE_ESSAYS_TABLE_SQL)
+
+        print("\n步驟 3: 正在檢查並擴充 `api_keys` 表格欄位...")
         _add_column_if_not_exists(cursor, 'api_keys', 'total_tokens_used', 'INTEGER DEFAULT 0')
         # 新增 key_type 欄位，以支援多種類型的金鑰
         _add_column_if_not_exists(cursor, 'api_keys', 'key_type', "TEXT NOT NULL DEFAULT 'gemini'")
