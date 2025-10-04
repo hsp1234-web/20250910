@@ -1,10 +1,31 @@
+
 # -*- coding: utf-8 -*-
 # ╔══════════════════════════════════════════════════════════════════╗
 # ║                                                                      ║
-# ║   ✨🐺 善狼一鍵啟動器 (v28.1) 🐺                                 ✨🐺 ║
+# ║   ✨🐺 善狼一鍵啟動器 (v48) 🐺                                   ✨🐺 ║
 # ║                                                                      ║
 # ╠══════════════════════════════════════════════════════════════════╣
 # ║                                                                      ║
+# ║ - V48 更新日誌 (2025-09-30):                                         ║
+# ║   - **功能**: 新增日誌多行顯示功能，優化行動裝置可讀性。             ║
+# ║   - **修復**: 改用命令列參數傳遞 FRED 金鑰，徹底解決注入失敗問題。   ║
+# ║ - V47 更新日誌 (2025-09-30):                                         ║
+# ║   - **修復**: 修正 FRED 金鑰未被注入資料庫導致前端無法顯示的問題。   ║
+# ║   - **修復**: 調整啟動時序，解決因競爭條件導致的首次金鑰自動驗證失敗 ║
+# ║     問題。                                                         ║
+# ║   - **調整**: 將預設分支更新至 `91`。                                ║
+# ║ - V46 更新日誌 (2025-09-30):                                         ║
+# ║   - **重構**: 調整啟動時序，修復因競爭條件導致的金鑰載入與驗證失敗   ║
+# ║     問題，大幅提升啟動穩定性。                                     ║
+# ║ - V45 更新日誌 (2025-09-30):                                         ║
+# ║   - **修復**: 修正 `colabPro.py` 執行異常問題。                      ║
+# ║   - **調整**: 更新預設分支號碼為 `90.1`，並同步版本號至 `v45`。      ║
+# ║ - V39 更新日誌 (2025-09-30):                                         ║
+# ║   - **戰略修正**: 採用最小化修改策略，為 FRED 金鑰新增前端狀態探測   ║
+# ║     接口，以確保系統穩定性。                                       ║
+# ║ - V32 更新日誌 (2025-09-27):                                         ║
+# ║   - **新增功能**: 自動偵測並顯示 `localtunnel` 的通道密碼，無需     ║
+# ║     使用者手動查詢。                                               ║
 # ║ - V28.1 更新日誌 (2025-09-16):                                       ║
 # ║   - **增強日誌**: 為金鑰自動驗證流程添加更詳細的日誌記錄，以便追蹤   ║
 # ║     執行狀態並診斷潛在問題。                                       ║
@@ -15,19 +36,27 @@
 # ║                                                                      ║
 # ╚══════════════════════════════════════════════════════════════════╝
 
-#@title ✨🐺 善狼一鍵啟動器 (v28.1) - 終極簡化版 🐺 { vertical-output: true, display-mode: "form" }
+#@title ✨🐺 善狼一鍵啟動器 (v48) - 終極簡化版 🐺 { vertical-output: true, display-mode: "form" }
 #@markdown ---
 #@markdown ### **核心設定**
 #@markdown > **請確認以下兩個核心設定。**
 #@markdown ---
 #@markdown **後端版本分支或標籤**
-TARGET_BRANCH_OR_TAG = "25.4" #@param {type:"string"}
+TARGET_BRANCH_OR_TAG = "91" #@param {type:"string"}
 #@markdown **自動從 Colab Secrets 載入的金鑰數量 (0-20)**
 #@markdown > 輸入 `2` 將載入 `GOOGLE_API_KEY`, `_1`, `_2` 共三組金鑰。
 KEY_LOAD_COUNT_LIMIT = 2 #@param {type:"number"}
+#@markdown **日誌顯示行數 (1-15)**
+#@markdown > 設定單條日誌在儀表板中佔據的總行數。`1` 為單行緊湊模式，`2-15` 為多行模式。
+LOG_SPLIT_LINES = 2 #@param {type:"number"}
 #@markdown ---
 #@markdown > **設定完成後，點擊「執行」按鈕。**
 #@markdown ---
+
+# --- JULES'S NEW FEATURE (2025-09-30): 參數邊界驗證 ---
+if not 1 <= LOG_SPLIT_LINES <= 15:
+    print(f"⚠️ 警告：日誌顯示行數設定值 ({LOG_SPLIT_LINES}) 超出有效範圍 (1-15)。將自動使用預設值 2。")
+    LOG_SPLIT_LINES = 2
 
 # ==============================================================================
 # SECTION A: 進階設定 (可在此處修改)
@@ -60,7 +89,7 @@ SHOW_LOG_LEVEL_DEBUG = True
 
 # Part 4: 報告與歸檔設定
 LOG_ARCHIVE_ROOT_FOLDER = "paper"
-SERVER_READY_TIMEOUT = 60
+SERVER_READY_TIMEOUT = 150
 LOG_COPY_MAX_LINES = 5000
 
 # ==============================================================================
@@ -138,12 +167,45 @@ class DisplayManager:
         self._thread = threading.Thread(target=self._run, daemon=True)
 
     def _build_output_buffer(self) -> list[str]:
-        output_buffer = ["✨🐺 善狼一鍵啟動器 (v28.1) 🐺", ""]
+        output_buffer = ["✨🐺 善狼一鍵啟動器 (v48) 🐺", ""]
         logs_to_display = self._log_manager.get_display_logs()
+
+        # JULES'S NEW FEATURE (2025-09-30): 日誌格式化邏輯
         for log in logs_to_display:
             ts = log['timestamp'].strftime('%H:%M:%S')
             level, msg = log['level'], log['message']
-            output_buffer.append(f"[{ts}] {colorize(f'[{level:^8}]', level)} {msg}")
+
+            if LOG_SPLIT_LINES == 1:
+                # --- 單行緊湊模式 ---
+                output_buffer.append(f"[{ts}] {colorize(f'[{level:^8}]', level)} {msg}")
+            else:
+                # --- 多行舒適模式 ---
+                # 第一行：永遠是時間戳和日誌等級
+                header = f"[{ts}] {colorize(f'[{level:^8}]', level)}"
+                output_buffer.append(header)
+
+                # 後續行：處理訊息本文
+                num_message_lines = max(1, LOG_SPLIT_LINES - 1)
+
+                if not msg: # 如果訊息為空，則不添加額外行
+                    continue
+
+                # 計算每行應顯示的平均字元數
+                avg_len = len(msg) / num_message_lines
+
+                start_index = 0
+                for i in range(num_message_lines):
+                    if start_index >= len(msg):
+                        break
+
+                    # 對於最後一行，直接取到結尾
+                    end_index = len(msg) if i == num_message_lines - 1 else int(start_index + avg_len + 0.5)
+
+                    line_content = msg[start_index:end_index].strip()
+                    if line_content:
+                        output_buffer.append(line_content)
+
+                    start_index = end_index
 
         urls = self._stats.get('urls', {})
         if urls:
@@ -256,6 +318,18 @@ class ServerManager:
                 "--mode", "manual", "--manual-keys", keys_string
             ]
 
+            # --- JULES'S FIX V3 (2025-09-30): 改用命令列參數傳遞 FRED 金鑰 ---
+            # 這是最穩健可靠的方式，徹底避免環境變數繼承問題。
+            fred_api_key = None
+            try:
+                fred_api_key = userdata.get('FRED_API_KEY')
+                if fred_api_key and fred_api_key.strip():
+                    # 如果找到了 FRED 金鑰，就將其附加到命令列參數中
+                    command.extend(["--fred-key", fred_api_key])
+                    self._log_manager.log("INFO", "[背景] 成功讀取 FRED_API_KEY 並準備透過參數傳遞。", "KeyInjector")
+            except Exception:
+                self._log_manager.log("WARN", "[背景] 未能在 Colab Secrets 中找到 FRED_API_KEY。", "KeyInjector")
+
             # 使用 Popen 以非阻塞方式執行，並透過 stream_reader 處理日誌
             process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8')
             for line in iter(process.stdout.readline, ''):
@@ -304,14 +378,36 @@ class ServerManager:
             if project_src_path_str not in sys.path:
                 sys.path.insert(0, project_src_path_str)
 
-            from db.database import initialize_database, add_system_log
-            initialize_database()
-            add_system_log("colab_setup", "INFO", "Git repository cloned successfully.")
+            # --- JULES (2025-09-30): 重構啟動流程，將資料庫初始化提升至最高優先級 ---
+            self._log_manager.log("INFO", "🔩 步驟 1/5: 正在初始化資料庫結構...")
+            try:
+                # 動態匯入最新的金鑰資料庫初始化模組
+                from db import initialize_database as key_db_init
+                # 使用一個假的 stream 來捕獲其 print 輸出, 以便整合到主日誌
+                from io import StringIO
+                import contextlib
 
-            # --- JULES'S FIX (2025-09-16): 非同步化金鑰注入 ---
-            # 將耗時的金鑰注入操作移至背景執行緒，使其與依賴安裝並行
-            key_thread = threading.Thread(target=self._inject_keys_background, args=(project_path,), daemon=True)
-            key_thread.start()
+                init_log_stream = StringIO()
+                with contextlib.redirect_stdout(init_log_stream):
+                    key_db_init.initialize()
+
+                init_logs = init_log_stream.getvalue().strip()
+                if init_logs:
+                    for line in init_logs.split('\n'):
+                        # 將子腳本的日誌轉發到主日誌管理器
+                        self._log_manager.log("INFO", f"[DB_Init] {line}", "Database")
+                self._log_manager.log("SUCCESS", "✅ 金鑰資料庫結構已是最新版本。")
+
+                # 保留舊的任務資料庫初始化流程 (如果仍然需要)
+                from db.database import initialize_database as task_db_init, add_system_log
+                task_db_init()
+                add_system_log("colab_setup", "INFO", "Git repository cloned and DB schema updated.")
+                self._log_manager.log("INFO", "✅ 舊版任務資料庫初始化成功。")
+
+            except Exception as e:
+                self._log_manager.log("CRITICAL", f"資料庫初始化失敗，這是一個致命錯誤，啟動中止。 {e}", "Database")
+                # 終止執行緒
+                return
 
             # --- JULES: 重構為兩階段依賴安裝 (Pip 優先) ---
             def install_requirements(req_files, log_prefix="", force_pip=False):
@@ -424,20 +520,27 @@ class ServerManager:
                     self._log_manager.log("CRITICAL", f"[{log_prefix}] 強制依賴安裝失敗！", "Installer")
                     raise
 
-            # --- 階段 0: 強制安裝下載器依賴 ---
-            self._log_manager.log("INFO", "步驟 1/4: 正在強制安裝下載器核心依賴...")
-            downloader_req_file = project_path / "requirements" / "downloader.txt"
-            force_install_packages(downloader_req_file, "下載器")
+            # --- JULES'S FIX (2025-09-30): 統一強制安裝所有核心依賴 ---
+            # 解決方案：將所有服務啟動前必需的依賴（下載器、核心、分析）都納入強制安裝階段，
+            # 確保在任何服務（包括 api_server 和背景腳本）啟動前，環境都已準備齊全。
+            self._log_manager.log("INFO", "步驟 1/4 & 2/4: 正在強制安裝所有核心服務依賴...")
 
-            # --- 階段 2: 同步安裝核心依賴 (使用 Pip) ---
-            self._log_manager.log("INFO", "步驟 2/4: 正在快速安裝啟動器核心依賴...")
-            # JULES (2025-09-25): 優化啟動流程。
-            # 啟動器現在只安裝啟動 orchestrator.py 所需的最小依賴 (requests)。
-            # 其他依賴項將由 orchestrator.py 在後台自行安裝。
-            core_requirements = [
-                project_path / "requirements" / "features_core.txt"
-            ]
-            install_requirements(core_requirements, "啟動器核心", force_pip=True)
+            essential_req_files = {
+                "下載器": project_path / "requirements" / "downloader.txt",
+                "核心服務": project_path / "requirements" / "core.txt",
+                "分析功能": project_path / "requirements" / "analysis.txt",
+                "啟動器核心": project_path / "requirements" / "features_core.txt",
+            }
+
+            for name, req_file in essential_req_files.items():
+                force_install_packages(req_file, name)
+
+            self._log_manager.log("SUCCESS", "✅ 所有核心依賴安裝完畢。")
+
+            # --- JULES'S FIX (2025-09-30): 修正金鑰注入時序 ---
+            # 將金鑰注入操作移至依賴安裝完成後，以解決 ModuleNotFoundError 的時序問題。
+            key_thread = threading.Thread(target=self._inject_keys_background, args=(project_path,), daemon=True)
+            key_thread.start()
 
             # --- 階段 3: 啟動後端服務 ---
             self._log_manager.log("INFO", "步驟 3/4: 正在啟動後端協調器...")
@@ -445,6 +548,21 @@ class ServerManager:
             process_env = os.environ.copy()
             src_path_str = str((project_path / "src").resolve())
             process_env['PYTHONPATH'] = f"{src_path_str}{os.pathsep}{process_env.get('PYTHONPATH', '')}".strip(os.pathsep)
+
+            # 安全地注入 FRED API 金鑰
+            try:
+                from google.colab import userdata
+                fred_api_key = userdata.get('FRED_API_KEY')
+                if fred_api_key:
+                    process_env['FRED_API_KEY'] = fred_api_key
+                    self._log_manager.log("SUCCESS", "✅ 成功從 Colab Secrets 讀取並注入 FRED_API_KEY。")
+                else:
+                    self._log_manager.log("WARN", "🟡 在 Colab Secrets 中找到 FRED_API_KEY，但其值為空。")
+            except (ImportError, userdata.SecretNotFoundError):
+                self._log_manager.log("WARN", "🟡 未在 Colab Secrets 中找到 FRED_API_KEY，部分圖表可能無法顯示。")
+            except Exception as e:
+                self._log_manager.log("ERROR", f"讀取 FRED_API_KEY 時發生錯誤: {e}")
+
             self.server_process = subprocess.Popen(launch_command, cwd=str(project_path), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8', preexec_fn=os.setsid, env=process_env)
 
             # --- 階段 4: [已停用] V5.5 之後，大型依賴的安裝由使用者在需要時觸發 ---
@@ -553,7 +671,22 @@ class TunnelManager:
             if self._stop_event.is_set(): break
             self._log("DEBUG", line.strip(), "Localtunnel")
             if match := url_pattern.search(line):
-                self._update_url_status("Localtunnel", "ready", url=match.group(1), priority=3); return
+                tunnel_url = match.group(1)
+                self._log("INFO", f"✅ Localtunnel URL '{tunnel_url}' 已獲取，正在查詢通道密碼...", "Localtunnel")
+                password = "查詢中..."
+                try:
+                    # 使用 curl 查詢密碼 (公開 IP)
+                    result = subprocess.run(["curl", "https://loca.lt/mytunnelpassword"], capture_output=True, text=True, timeout=10, check=True)
+                    password = result.stdout.strip()
+                    self._log("SUCCESS", f"✅ 已成功獲取 Localtunnel 密碼。", "Localtunnel")
+                except (subprocess.TimeoutExpired, subprocess.CalledProcessError, FileNotFoundError) as e:
+                    self._log("WARN", f"查詢 Localtunnel 密碼失敗: {e}", "Localtunnel")
+                    password = "查詢失敗"
+                except Exception as e:
+                    self._log("ERROR", f"查詢 Localtunnel 密碼時發生未知錯誤: {e}", "Localtunnel")
+                    password = "未知錯誤"
+                self._update_url_status("Localtunnel", "ready", url=tunnel_url, password=password, priority=3)
+                return
         if not self._stop_event.is_set(): self._update_url_status("Localtunnel", "error", error="無法從日誌中解析 URL")
 
     def _run_colab_proxy(self):

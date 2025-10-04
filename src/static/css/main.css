@@ -1,175 +1,195 @@
-/* --- General Body and Container Styles --- */
+/* === Phoenix Global Styles === */
+
+/* --- 1. CSS Variables (Theming) --- */
+:root {
+    --phoenix-font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --phoenix-monospace-font: "Courier New", Courier, monospace;
+
+    --phoenix-primary-color: #007bff;
+    --phoenix-primary-hover-color: #0056b3;
+    --phoenix-secondary-color: #6c757d;
+    --phoenix-secondary-hover-color: #5a6268;
+    --phoenix-success-color: #28a745;
+    --phoenix-danger-color: #dc3545;
+    --phoenix-warning-color: #ffc107;
+    --phoenix-info-color: #17a2b8;
+
+    --phoenix-background-color: #f8f9fa; /* Light grey */
+    --phoenix-panel-bg-color: #ffffff;
+    --phoenix-text-color: #212529; /* Darker text for better contrast */
+    --phoenix-heading-color: #0d47a1; /* A deeper blue for headings */
+    --phoenix-link-color: var(--phoenix-primary-color);
+
+    --phoenix-border-color: #dee2e6;
+    --phoenix-border-radius: 8px;
+    --phoenix-box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+
+/* --- 2. General Body and Container Styles --- */
 body {
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    font-family: var(--phoenix-font-family);
     margin: 0;
-    padding-top: 80px; /* Add padding for the fixed navbar */
-    background-color: #f8f9fa; /* A light grey background */
-    color: #343a40;
+    padding: 20px;
+    background-color: var(--phoenix-background-color);
+    color: var(--phoenix-text-color);
+    line-height: 1.6;
 }
 
 .content {
-    padding: 20px;
-    max-width: 1200px;
+    padding: 0;
+    max-width: 1400px;
     margin: 0 auto;
 }
 
-h1, h2 {
-    color: #0056b3;
+h1, h2, h3 {
+    color: var(--phoenix-heading-color);
+    font-weight: 600;
 }
 
-/* --- Navigation Bar --- */
-.navbar {
-    background-color: #343a40;
-    width: 100%;
-    position: fixed;
-    top: 0;
-    left: 0;
-    z-index: 1000;
-    display: flex;
-    justify-content: space-between; /* Align items */
-    align-items: center;
-    padding: 0 20px;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-}
-
-.navbar-brand {
-    color: #fff;
+a {
+    color: var(--phoenix-link-color);
     text-decoration: none;
-    font-size: 1.5em;
-    font-weight: bold;
+    transition: color 0.2s ease-in-out;
 }
 
-.navbar-links {
-    display: flex;
-    list-style: none;
-    margin: 0;
-    padding: 0;
+a:hover {
+    color: var(--phoenix-primary-hover-color);
+    text-decoration: underline;
 }
 
-.navbar-links a {
-    color: #f2f2f2;
-    text-align: center;
-    padding: 14px 16px;
-    text-decoration: none;
-    font-size: 16px;
-    transition: background-color 0.3s, color 0.3s;
+/* --- 3. Panel/Card Styles --- */
+.panel {
+    background: var(--phoenix-panel-bg-color);
+    border: 1px solid var(--phoenix-border-color);
+    border-radius: var(--phoenix-border-radius);
+    padding: 25px;
+    margin-bottom: 25px;
+    box-shadow: var(--phoenix-box-shadow);
+    transition: box-shadow 0.3s ease-in-out;
 }
 
-.navbar-links a:hover {
-    background-color: #495057;
+.panel:hover {
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.12);
 }
 
-.navbar-links a.active {
-    background-color: #007bff;
-    color: white;
-    border-radius: 4px;
-}
-
-/* --- Hamburger Menu for Mobile --- */
-.navbar-toggle {
-    display: none;
-    flex-direction: column;
-    cursor: pointer;
-}
-
-.navbar-toggle .bar {
-    width: 25px;
-    height: 3px;
-    background-color: white;
-    margin: 4px 0;
-    transition: 0.4s;
-}
-
-/* --- Responsive Design --- */
-@media (max-width: 768px) {
-    .navbar-links {
-        display: none;
-        flex-direction: column;
-        width: 100%;
-        background-color: #343a40;
-        position: absolute;
-        top: 60px; /* Position below the navbar */
-        left: 0;
-    }
-
-    .navbar-links.active {
-        display: flex;
-    }
-
-    .navbar-toggle {
-        display: flex;
-    }
-}
-
-/* --- Buttons and Forms --- */
+/* --- 4. Buttons and Forms --- */
 button, .button {
     display: inline-block;
-    padding: 10px 20px;
+    padding: 12px 24px;
     font-size: 1em;
+    font-weight: 600;
     color: #fff;
-    background-color: #007bff;
+    background-color: var(--phoenix-primary-color);
     border: none;
-    border-radius: 5px;
+    border-radius: var(--phoenix-border-radius);
     text-decoration: none;
     cursor: pointer;
-    transition: background-color 0.3s;
+    transition: background-color 0.2s, transform 0.2s;
     margin: 5px;
+    text-align: center;
 }
 
 button:hover, .button:hover {
-    background-color: #0056b3;
+    background-color: var(--phoenix-primary-hover-color);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+    color: #fff; /* 確保懸停時文字顏色不變 */
+    text-decoration: none; /* 移除懸停時的底線 */
 }
 
-button.secondary {
-    background-color: #6c757d;
+button.secondary, .button.secondary {
+    background-color: var(--phoenix-secondary-color);
 }
 
-button.secondary:hover {
-    background-color: #5a6268;
+button.secondary:hover, .button.secondary:hover {
+    background-color: var(--phoenix-secondary-hover-color);
 }
 
 button:disabled {
-    background-color: #6c757d;
+    background-color: var(--phoenix-secondary-color);
     cursor: not-allowed;
+    opacity: 0.65;
+    transform: none;
+    box-shadow: none;
 }
 
-/* --- Card/Panel Styles --- */
-.panel {
-    background: #ffffff;
-    border: 1px solid #dee2e6;
-    border-radius: 8px;
-    padding: 20px;
-    margin-bottom: 20px;
-    box-shadow: 0 4px 8px rgba(0,0,0,0.05);
-}
-
-/* --- List Styles --- */
-ul {
-    list-style: none;
-    padding: 0;
-}
-
-ul li {
+input[type="text"],
+input[type="password"],
+input[type="date"] {
     padding: 10px;
-    border-bottom: 1px solid #eee;
+    border: 1px solid var(--phoenix-border-color);
+    border-radius: var(--phoenix-border-radius);
+    font-size: 1em;
+    width: calc(100% - 22px); /* Account for padding and border */
+    transition: border-color 0.2s, box-shadow 0.2s;
 }
 
-ul li:last-child {
-    border-bottom: none;
+input[type="text"]:focus,
+input[type="password"]:focus,
+input[type="date"]:focus {
+    outline: none;
+    border-color: var(--phoenix-primary-color);
+    box-shadow: 0 0 0 3px rgba(0, 123, 255, 0.25);
 }
 
-ul li label {
-    margin-left: 10px;
+.form-group {
+    display: flex;
+    gap: 10px;
+    align-items: center;
 }
 
-/* --- Status Area --- */
-#status-area {
+/* --- 5. Dashboard and Chart Styles --- */
+.dashboard-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(450px, 1fr));
+    gap: 25px;
+}
+
+.chart-container {
+    width: 100%;
+    min-height: 350px;
+    background-color: #fdfdfd;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-top: 1px solid var(--phoenix-border-color);
     margin-top: 20px;
-    border: 1px solid #ccc;
-    padding: 15px;
-    min-height: 100px;
-    background: #f9f9f9;
-    border-radius: 5px;
-    white-space: pre-wrap; /* Preserve line breaks */
-    font-family: "Courier New", Courier, monospace;
+    padding-top: 20px;
+}
+
+.chart-container .placeholder {
+    color: var(--phoenix-secondary-color);
+    font-size: 1rem;
+}
+
+/* --- 6. Responsive Design --- */
+@media (max-width: 600px) {
+    body {
+        padding: 10px;
+    }
+    .dashboard-grid {
+        grid-template-columns: 1fr;
+    }
+    .form-group {
+        flex-direction: column;
+        align-items: stretch;
+    }
+}
+
+/* --- 7. Page-Specific Overrides --- */
+
+/* 修正：確保主頁上的主要按鈕始終為藍色 */
+#main-page-actions .button {
+    background-color: var(--phoenix-primary-color);
+}
+#main-page-actions .button:hover {
+    background-color: var(--phoenix-primary-hover-color);
+}
+
+/* 確保次要按鈕保持灰色 */
+#main-page-actions .button.secondary {
+    background-color: var(--phoenix-secondary-color);
+}
+#main-page-actions .button.secondary:hover {
+    background-color: var(--phoenix-secondary-hover-color);
 }

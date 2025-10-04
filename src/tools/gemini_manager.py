@@ -36,7 +36,8 @@ class GeminiManager:
         if not genai:
             raise ImportError("GeminiManager 無法初始化，因為 google.generativeai 模組未安裝。")
         if not api_keys:
-            raise ValueError("API 金鑰列表不可為空。")
+            logging.error("GeminiManager 初始化失敗：傳入的 API 金鑰列表為空。AI 分析功能將因此停用。")
+            raise ValueError("API 金鑰列表不可為空，無法初始化 Gemini 管理器。")
 
         self.key_pool = deque([ApiKey(key_value=k['value'], name=k['name']) for k in api_keys])
         self._key_map = {k.key: k for k in self.key_pool} # 預先建立金鑰對應表

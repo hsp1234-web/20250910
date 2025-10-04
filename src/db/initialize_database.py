@@ -13,13 +13,14 @@ DB_DIR = Path(__file__).parent
 DB_PATH = DB_DIR / "database.sqlite3"
 
 # --- SQL 定義 ---
-# 新版本包含了 total_tokens_used 欄位
+# 新版本包含了 key_type 和 total_tokens_used 欄位
 API_KEYS_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS api_keys (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     key_name TEXT NOT NULL UNIQUE,
     key_hash TEXT NOT NULL UNIQUE,
     key_value TEXT NOT NULL,
+    key_type TEXT NOT NULL DEFAULT 'gemini', -- 'gemini' or 'fred'
     status TEXT NOT NULL DEFAULT 'active', -- 'active', 'cooldown', 'disabled'
     last_used_at TIMESTAMP,
     cooldown_until TIMESTAMP,
@@ -63,8 +64,8 @@ def initialize():
 
         print("\n步驟 2: 正在檢查並擴充 `api_keys` 表格欄位...")
         _add_column_if_not_exists(cursor, 'api_keys', 'total_tokens_used', 'INTEGER DEFAULT 0')
-        # 未來若有更多欄位，可在此處繼續添加
-        # _add_column_if_not_exists(cursor, 'api_keys', 'new_column', 'TEXT')
+        # 新增 key_type 欄位，以支援多種類型的金鑰
+        _add_column_if_not_exists(cursor, 'api_keys', 'key_type', "TEXT NOT NULL DEFAULT 'gemini'")
 
         connection.commit()
         print(f"\n資料庫初始化/更新成功。資料庫檔案位於: {DB_PATH}")

@@ -1,52 +1,87 @@
-# services/bond_data_service/main.py
+# poc/bond_data_service_v2/main.py
 
-import os
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import Response
-from fastapi.middleware.cors import CORSMiddleware
+import logging
 from contextlib import asynccontextmanager
-import database
-from data_manager import DataManager
-import plotly.graph_objects as go
-import io
+import asyncio
 
-# --- Global instances ---
-data_manager = None
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
-# --- Constants ---
-INDICATOR_LABELS = {
-    "gdp": "US Real GDP (Billions of Dollars)",
-    "cpi": "US CPI (Annual Rate)",
-    "fedfunds": "Federal Funds Rate (%)",
-    "ism": "US ISM Manufacturing PMI"
-}
+# 匯入重構後的新架構
+import api_routes
+from repository import FinancialDataRepository, initialize_database
+from service import StressIndexService
 
+# --- 日誌設定 ---
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# --- 背景任務 ---
+async def periodic_data_updater(service: StressIndexService):
+    """
+    定期在背景檢查是否有新的數據點，並協調廣播。
+    """
+    await asyncio.sleep(15) # 啟動後延遲
+
+    while True:
+        try:
+            logger.info("背景任務 (v2.1)：呼叫服務層檢查更新...")
+            # 服務層現在會返回需要廣播的數據，或 None
+            update_payload = service.check_for_updates()
+
+            if update_payload:
+                logger.info(f"背景任務：從服務層收到更新 payload，準備交由 API 層廣播。")
+                # 將 payload 交給 API 層的廣播函式
+                await api_routes.broadcast_update(update_payload)
+            else:
+                logger.info("背景任務：服務層回報無新數據。")
+
+        except Exception as e:
+            logger.error(f"背景數據更新任務發生錯誤: {e}", exc_info=True)
+
+        await asyncio.sleep(300) # 等待 5 分鐘
+
+# --- 應用程式生命週期 ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global data_manager
-    # 在應用啟動時執行的程式碼
-    print("Bond Data Service is starting up...")
-    database.initialize_database()
+    """
+    處理應用程式啟動和關閉事件，並設定好依賴注入。
+    """
+    logger.info("債券資料服務 (v2.1) 啟動中...")
 
-    # 從環境變數讀取 API 金鑰，若無則使用後備金鑰
-    api_key = os.getenv("FRED_API_KEY", "77b0a570c6a17007e4f5af229c2aecc9")
-    if not api_key:
-        raise ValueError("FRED_API_KEY is not set in environment variables.")
-    data_manager = DataManager(api_key=api_key)
+    # 1. 初始化資料庫
+    initialize_database()
+
+    # 2. 建立倉儲和服務實例
+    repository = FinancialDataRepository()
+    service = StressIndexService(repository)
+
+    # 3. 將 service 實例注入到 API 路由模組中
+    api_routes.service = service
+
+    # 4. 啟動背景任務
+    update_task = asyncio.create_task(periodic_data_updater(service))
 
     yield
-    # 在應用關閉時執行的程式碼
-    print("Bond Data Service is shutting down...")
 
+    # --- 關閉邏輯 ---
+    logger.info("正在關閉背景更新任務...")
+    update_task.cancel()
+    try:
+        await update_task
+    except asyncio.CancelledError:
+        logger.info("背景更新任務已成功取消。")
+    logger.info("債券資料服務已關閉。")
+
+# --- FastAPI 應用實例化 ---
 app = FastAPI(
     lifespan=lifespan,
-    title="Bond Data Service",
-    description="一個專門用來獲取和提供債券相關宏觀經濟數據的微服務。",
-    version="0.1.0",
+    title="債券與一級交易商分析服務 (v2.1 Refactored)",
+    description="採用分層架構的重構版本，提供債券相關宏觀經濟數據與壓力指數分析。",
+    version="2.1.0",
 )
 
-# --- CORS (跨來源資源共用) 設定 ---
-# 允許所有來源，在生產環境中應更嚴格
+# --- CORS 中間件 ---
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -55,80 +90,5 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-@app.get("/ping")
-async def ping():
-    """健康檢查端點"""
-    return {"status": "ok", "message": "Bond Data Service is running."}
-
-@app.post("/fetch/{indicator}")
-async def fetch_data_endpoint(indicator: str):
-    """觸發特定指標的資料抓取與儲存"""
-    try:
-        print(f"收到 '{indicator}' 的資料抓取請求...")
-        count = data_manager.fetch_and_store_data(indicator)
-        return {"indicator": indicator, "message": f"成功抓取並儲存了 {count} 筆數據。"}
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"處理時發生內部錯誤: {e}")
-
-@app.get("/data/{indicator}")
-async def get_data_endpoint(indicator: str):
-    """獲取指定指標的已儲存數據"""
-    try:
-        data = data_manager.get_data(indicator)
-        if not data:
-            # 即使沒有數據，也返回一個空的列表，讓前端更容易處理
-            return []
-        return data
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"讀取數據時發生內部錯誤: {e}")
-
-@app.get("/chart/{indicator_id}")
-async def get_chart_endpoint(indicator_id: str):
-    """
-    獲取指定指標的數據，生成圖表並以圖片格式返回。
-    """
-    try:
-        # 1. 獲取數據
-        data = data_manager.get_data(indicator_id)
-
-        # 2. 如果沒有數據，觸發抓取
-        if not data:
-            print(f"'{indicator_id}' 在資料庫中沒有數據，正在觸發自動抓取...")
-            data_manager.fetch_and_store_data(indicator_id)
-            data = data_manager.get_data(indicator_id)
-
-            if not data:
-                # 如果還是沒有數據，可以返回一個"無資料"的圖片或錯誤
-                # 這裡我們選擇拋出錯誤，讓前端知道
-                raise HTTPException(status_code=404, detail=f"指標 '{indicator_id}' 在嘗試更新後依然沒有數據。")
-
-        # 3. 準備繪圖數據
-        dates = [item['date'] for item in data]
-        values = [item['value'] for item in data]
-        title = INDICATOR_LABELS.get(indicator_id, indicator_id.upper())
-
-        # 4. 使用 Plotly 繪圖
-        fig = go.Figure()
-        fig.add_trace(go.Scatter(x=dates, y=values, mode='lines', name=title))
-        fig.update_layout(
-            title=title,
-            xaxis_title="Date",
-            yaxis_title="Value",
-            template="plotly_white"
-        )
-
-        # 5. 將圖表轉換為圖片並存入記憶體
-        img_bytes = fig.to_image(format="jpeg", width=800, height=500, scale=2)
-
-        # 6. 回傳圖片
-        return Response(content=img_bytes, media_type="image/jpeg")
-
-    except ValueError as e:
-        # 這是 data_manager.fetch_and_store_data 可能拋出的錯誤
-        raise HTTPException(status_code=404, detail=str(e))
-    except Exception as e:
-        print(f"為 '{indicator_id}' 生成圖表時發生錯誤: {e}")
-        # 為了安全，不在 production 環境中暴露詳細錯誤
-        raise HTTPException(status_code=500, detail=f"生成圖表時發生內部錯誤。")
+# --- 包含 API 路由 ---
+app.include_router(api_routes.router)

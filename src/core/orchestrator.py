@@ -11,7 +11,8 @@ import threading
 import time
 import json
 from pathlib import Path
-import requests # V5.5 新增導入
+
+# V5.5 導入 'requests' 已被移至 _background_setup_and_validate 函式內部，以解決啟動時的依賴問題
 
 # --- 路徑修正 (必須在所有專案內部模組導入之前) ---
 SRC_DIR = Path(__file__).resolve().parent.parent
@@ -20,6 +21,7 @@ ROOT_DIR = SRC_DIR.parent
 
 # --- 現在可以安全地導入專案內部模組了 ---
 from db.client import DBClient
+from core import key_manager
 
 logging.basicConfig(
     level=logging.INFO,
@@ -116,6 +118,30 @@ def launch_microservice(service_path: Path):
     proc_env = os.environ.copy()
     proc_env["PORT"] = str(port)
 
+    # 修正：使用更安全的方式將主環境的 API 金鑰傳遞給子服務
+    # FRED 金鑰 (Jules 修正 @ 2025-10-01: 主動從資料庫注入，而非被動依賴環境)
+    try:
+        # 使用 key_manager 直接從資料庫讀取金鑰
+        # 確保金鑰是經過驗證的，且類型為 'fred'
+        # (Jules @ 2025-10-01) 修復 #92.3：改為呼叫新的 get_key_by_type 函式
+        fred_api_key = key_manager.get_key_by_type('fred')
+        if fred_api_key:
+            proc_env["FRED_API_KEY"] = fred_api_key
+            log.info(f"[{log_prefix}] 已成功從資料庫獲取已驗證的 FRED API 金鑰並注入到服務環境中。")
+        else:
+            log.warning(f"[{log_prefix}] 在資料庫中未找到已驗證的 FRED API 金鑰，部分服務功能可能受限。")
+    except Exception as e:
+        log.error(f"[{log_prefix}] 從資料庫讀取 FRED API 金鑰時發生錯誤: {e}，服務可能無法正常抓取數據。")
+
+    # Gemini/Google 金鑰 (處理 'GEMINI_API_KEY' 錯誤的根源)
+    google_api_key = os.environ.get("GOOGLE_API_KEY")
+    if google_api_key:
+        proc_env["GOOGLE_API_KEY"] = google_api_key
+        log.info(f"[{log_prefix}] 已將 GOOGLE_API_KEY 注入到服務環境中。")
+    else:
+        log.warning(f"[{log_prefix}] 在主協調器環境中未找到 GOOGLE_API_KEY，AI 分析功能可能受限。")
+
+
     command = [
         str(python_exec), "-m", "uvicorn",
         f"{main_script.stem}:app",
@@ -178,54 +204,80 @@ def start_all_microservices():
 
 
 # --- V5.5 舊有邏輯 (待移除) ---
-def prepare_core_services(api_port: int, api_ready_event: threading.Event):
+def _background_setup_and_validate(api_port: int, api_ready_event: threading.Event, api_fully_ready_event: threading.Event):
     """
-    V6.0 更新：此函式的依賴安裝部分已被移除。
-    它現在只負責觸發舊有的金鑰驗證流程。
+    [JULES 2025-09-30] 解決時序問題的整合式背景任務。
+    此函式在一個獨立的執行緒中，按順序執行服務啟動後的關鍵任務。
     """
     try:
-        log.info("[核心準備] 背景任務已啟動。")
-
-        # 步驟 1: 等待 API 伺服器就緒
-        log.info("[核心準備] 等待 API 伺服器就緒...")
+        import requests # V5.5 新增導入，移至此處以解決啟動依賴問題
+        # --- 步驟 1: 等待主 API 伺服器就緒 (Uvicorn 啟動) ---
+        log.info("[背景任務] 等待主 API 伺服器就緒...")
         if not api_ready_event.wait(timeout=60):
-            log.error("[核心準備] 等待 API 伺服器就緒超時。")
-            full_readiness_event.set()
-            READINESS_SIGNAL_FILE.touch()
+            log.error("[背景任務] 等待 API 伺服器就緒超時，後續任務取消。")
             return
 
-        # 步驟 2: 立即發送「完全就緒」信號
-        log.info("✅ [核心準備] 核心服務準備完畢！發送『完全就緒』信號。")
+        # --- 步驟 1.5: 等待主 API 伺服器完全就緒 (內部模組預熱完成) ---
+        log.info("[背景任務] 等待 API 伺服器內部模組預熱...")
+        if not api_fully_ready_event.wait(timeout=120): # 等待更長時間，因為預熱耗時
+            log.warning("[背景任務] 等待 API 伺服器完全就緒超時，但將繼續嘗試執行驗證。")
+        else:
+            log.info("[背景任務] ✅ API 伺服器已完全就緒！")
+
+
+        # --- 步驟 2: 安裝非必要的重量級依賴 ---
+        # 這是觸發金鑰驗證前的必要步驟，確保驗證工具（如 google-generativeai）已安裝。
+        log.info("[背景任務] 開始安裝重量級依賴...")
+        install_non_essential_dependencies_background()
+        log.info("[背景任務] ✅ 重量級依賴安裝流程結束。")
+
+        # --- 步驟 3: 發送「完全就緒」信號 (提前發送) ---
+        # 為了改善冷啟動體驗，我們先宣告系統就緒，讓前端可以訪問。
+        log.info("✅ [背景任務] 核心服務已啟動！提前發送『完全就緒』信號。")
         full_readiness_event.set()
         READINESS_SIGNAL_FILE.touch()
 
-        # JULES (2025-09-25): 在此處啟動非必要依賴的背景安裝
-        log.info("[核心準備] 準備在背景安裝重量級依賴...")
-        non_essential_install_thread = threading.Thread(target=install_non_essential_dependencies_background, daemon=True)
-        non_essential_install_thread.start()
-        threads.append(non_essential_install_thread)
+        # --- 步驟 4: 在背景中非阻塞地觸發所有金鑰的自動驗證 ---
+        log.info("[背景任務] 準備在背景中觸發所有金鑰的自動驗證...")
+        validation_url = f"http://127.0.0.1:{api_port}/api/keys/validate"
+        max_attempts = 3
+        base_delay = 5  # 秒
 
-        # 步驟 3: 背景觸發金鑰驗證 (舊流程)
-        def _run_validation_in_background():
-            log.info("[金鑰驗證-背景] 等待2秒後開始...")
-            time.sleep(2)
-            validation_url = f"http://127.0.0.1:{api_port}/api/keys/validate"
-            log.info(f"[金鑰驗證-背景] 正在向 {validation_url} 發送 POST 請求...")
+        for attempt in range(max_attempts):
             try:
-                requests.post(validation_url, timeout=180)
+                log.info(f"[背景任務] 正在向 {validation_url} 發送驗證請求 (第 {attempt + 1}/{max_attempts} 次)...")
+                response = requests.post(validation_url, timeout=300) # 使用較長的超時
+                if response.status_code == 200:
+                    log.info("[背景任務] ✅ 金鑰驗證請求已成功發送。")
+                    break  # 成功，跳出迴圈
+                else:
+                    log.warning(f"[背景任務] 第 {attempt + 1} 次驗證失敗，伺服器回應: {response.status_code} {response.text}")
             except Exception as req_e:
-                log.error(f"[金鑰驗證-背景] 發送驗證請求時發生錯誤: {req_e}")
+                log.warning(f"[背景任務] 第 {attempt + 1} 次驗證請求時發生錯誤: {req_e}")
 
-        log.info("[核心準備] 準備在背景啟動金鑰驗證...")
-        validation_thread = threading.Thread(target=_run_validation_in_background, daemon=True)
-        validation_thread.start()
-        threads.append(validation_thread)
+            # 如果這不是最後一次嘗試，則等待後重試
+            if attempt < max_attempts - 1:
+                delay = base_delay * (2 ** attempt)
+                log.info(f"[背景任務] 將在 {delay} 秒後重試...")
+                time.sleep(delay)
+        else: # for-else 迴圈，只有在迴圈正常結束（未被 break）時執行
+            log.error("[背景任務] ❌ 所有金鑰驗證嘗試均告失敗。請檢查 API 伺服器狀態或手動觸發驗證。")
+
+        log.info("✅ [背景任務] 所有啟動後任務 (包括金鑰驗證) 已執行完畢。")
 
     except Exception as e:
-        log.critical(f"❌ [核心準備] 背景任務發生致命錯誤: {e}", exc_info=True)
+        log.critical(f"❌ [背景任務] 執行緒發生致命錯誤: {e}", exc_info=True)
+        # 即使失敗，也應發送就緒信號，以避免前端無限期等待
+        if not full_readiness_event.is_set():
+            full_readiness_event.set()
+            READINESS_SIGNAL_FILE.touch()
 
 
-def stream_reader(stream, prefix, ready_event=None, ready_signal=None):
+def stream_reader(stream, prefix, ready_event=None, ready_signal=None, second_ready_event=None, second_ready_signal=None):
+    """
+    從流中讀取日誌，並可選地根據一或兩個信號來設定事件。
+    JULES (2025-09-30): 擴充此函式以支援第二個信號，用於更精準的「完全就緒」檢測。
+    """
     try:
         for line in iter(stream.readline, ''):
             if not line: break
@@ -235,6 +287,10 @@ def stream_reader(stream, prefix, ready_event=None, ready_signal=None):
             if ready_event and not ready_event.is_set() and ready_signal and ready_signal in stripped_line:
                 ready_event.set()
                 log.info(f"✅ 偵測到來自 '{prefix}' 的就緒信號 '{ready_signal}'！")
+
+            if second_ready_event and not second_ready_event.is_set() and second_ready_signal and second_ready_signal in stripped_line:
+                second_ready_event.set()
+                log.info(f"✅ 偵測到來自 '{prefix}' 的第二個就緒信號 '{second_ready_signal}'！")
 
     except Exception as e:
         log.error(f"讀取流 '{prefix}' 時發生錯誤: {e}", exc_info=True)
@@ -257,20 +313,9 @@ def install_core_dependencies():
         "gemini.txt",
     ]
 
-    # 效能優化：新增一個簡單的 lock 機制，避免每次啟動都重新安裝
+    # 效能優化：為解決臨時環境中套件不保留的問題，暫時強制每次都安裝依賴。
     lock_file = requirements_dir / ".install_lock"
     should_install = True
-
-    if lock_file.exists():
-        # 檢查 requirements/ 目錄下是否有任何 .txt 檔案比 lock 檔案新
-        try:
-            latest_req_time = max(f.stat().st_mtime for f in requirements_dir.glob("*.txt") if f.is_file())
-            if lock_file.stat().st_mtime >= latest_req_time:
-                log.info("核心依賴未變更，跳過安裝。")
-                should_install = False
-        except ValueError:
-            # 如果 requirements/ 目錄下沒有任何 .txt 檔案，也無需安裝
-            should_install = False
 
     if should_install:
         for req_file_name in core_req_files:
@@ -375,13 +420,15 @@ def main():
 
         log.info("🔧 正在啟動主 API 伺服器...")
         api_ready_event = threading.Event()
+        api_fully_ready_event = threading.Event()
         api_server_cmd = [sys.executable, "-m", "api.api_server", "--port", str(api_port)]
         if args.mock: api_server_cmd.append("--mock")
 
         api_proc = subprocess.Popen(api_server_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding='utf-8', env=proc_env)
         processes.append(api_proc)
         api_stdout_thread = threading.Thread(target=stream_reader, args=(api_proc.stdout, 'api_server', api_ready_event, "Uvicorn running on"))
-        api_stderr_thread = threading.Thread(target=stream_reader, args=(api_proc.stderr, 'api_server_stderr', api_ready_event, "Uvicorn running on"))
+        # JULES'S FIX (2025-09-30): 讓 stderr 的 reader 同時監聽新的 [SYSTEM_READY] 信號
+        api_stderr_thread = threading.Thread(target=stream_reader, args=(api_proc.stderr, 'api_server_stderr', api_ready_event, "Uvicorn running on", api_fully_ready_event, "[SYSTEM_READY]"))
         threads.extend([api_stdout_thread, api_stderr_thread])
         api_stdout_thread.daemon = True
         api_stderr_thread.daemon = True
@@ -391,11 +438,11 @@ def main():
         # 步驟 2: 啟動所有微服務
         start_all_microservices()
 
-        # 步驟 3: 執行舊的核心準備任務 (發送就緒信號等)
-        log.info("🚀 正在啟動核心服務準備任務 (背景執行)...")
-        core_prep_thread = threading.Thread(target=prepare_core_services, args=(api_port, api_ready_event), daemon=True)
-        threads.append(core_prep_thread)
-        core_prep_thread.start()
+        # 步驟 3: 啟動整合式的背景設定與驗證任務
+        log.info("🚀 正在啟動背景任務 (依賴安裝與金鑰驗證)...")
+        background_thread = threading.Thread(target=_background_setup_and_validate, args=(api_port, api_ready_event, api_fully_ready_event), daemon=True)
+        threads.append(background_thread)
+        background_thread.start()
 
         log.info("--- [協調器進入監控模式] ---")
         while not stop_event.is_set():

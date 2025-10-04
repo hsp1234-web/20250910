@@ -1,50 +1,78 @@
-/* For panel headers that need a title and a button aligned */
+/* === Phoenix Common Component Styles === */
+
+/* --- 1. Panel Header --- */
 .panel-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 10px; /* Add some space below the header */
+    margin-bottom: 20px;
+    padding-bottom: 15px;
+    border-bottom: 1px solid var(--phoenix-border-color);
 }
 
 .copy-button {
     background: none;
-    border: none;
-    font-size: 1.5rem;
+    border: 1px solid var(--phoenix-border-color);
+    font-size: 1rem;
     cursor: pointer;
-    padding: 0 5px;
+    padding: 8px 12px;
+    border-radius: var(--phoenix-border-radius);
+    transition: background-color 0.2s, color 0.2s;
 }
 
 .copy-button:hover {
-    opacity: 0.7;
+    background-color: #e9ecef;
+    color: var(--phoenix-text-color);
 }
 
-/* --- Sub-navigation for multi-step pages --- */
+/* --- 2. Breadcrumb & Sub-navigation --- */
+.breadcrumb {
+    margin-bottom: 15px;
+}
+
+.back-link {
+    font-size: 1rem;
+    font-weight: 500;
+    color: var(--phoenix-secondary-color);
+}
+
+.back-link:hover {
+    color: var(--phoenix-text-color);
+}
+
 .sub-nav {
     display: flex;
-    gap: 10px;
-    margin-bottom: 20px;
-    padding-bottom: 10px;
-    border-bottom: 1px solid #e0e0e0;
+    gap: 5px; /* Tighter gap for a tab-like feel */
+    margin-bottom: 25px;
+    border-bottom: 2px solid var(--phoenix-border-color);
     flex-wrap: wrap;
 }
 
 .sub-nav-button {
-    padding: 8px 16px;
-    border: 1px solid #ccc;
-    background-color: #f0f0f0;
-    color: #333;
+    padding: 12px 20px;
+    border: 2px solid transparent;
+    border-bottom: none; /* Remove bottom border */
+    background-color: transparent;
+    color: var(--phoenix-secondary-color);
     text-decoration: none;
-    border-radius: 5px;
-    font-weight: bold;
-    transition: background-color 0.2s, color 0.2s;
+    border-radius: var(--phoenix-border-radius) var(--phoenix-border-radius) 0 0; /* Round top corners */
+    font-weight: 600;
+    transition: background-color 0.2s, color 0.2s, border-color 0.2s;
+    margin-bottom: -2px; /* Overlap the container's bottom border */
+    position: relative;
 }
 
 .sub-nav-button:hover {
-    background-color: #e0e0e0;
+    background-color: #e9ecef;
+    color: var(--phoenix-text-color);
+    border-bottom-color: #adb5bd; /* 滑鼠懸停時顯示底部邊框顏色 */
 }
 
 .sub-nav-button.active {
-    background-color: #007bff;
-    color: white;
-    border-color: #007bff;
+    background-color: var(--phoenix-panel-bg-color);
+    color: var(--phoenix-primary-color);
+    border-color: var(--phoenix-border-color) var(--phoenix-border-color) transparent var(--phoenix-border-color);
+    border-bottom: 3px solid var(--phoenix-primary-color); /* 使用更強烈的藍色下底線來表示當前選中狀態 */
+    font-weight: 700;
+    margin-bottom: -2px; /* 維持對齊 */
 }
