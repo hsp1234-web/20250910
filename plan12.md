@@ -70,3 +70,27 @@
 *   修改後的資料庫初始化腳本 (`initialize_database.py`)。
 *   新的後端 API 端點，用於處理資料的接收、儲存、查詢、匯出與同步。
 *   所有程式碼註解、輸出訊息均使用繁體中文。
+
+小作文範例
+
+] 小作文天地的聊天記錄 儲存日期：2025/9/17 18:40
+
+2025/4/3（週四） 14:36 069-0401669Crswin加入聊天 17:06 501-0723486Mason加入聊天 17:11 501-0723486Mason 四月小作文-0050元大台灣50 https://1drv.ms/u/s!AoaAyZHt1qThgRnnZPjmjLXlpMal?e=QtBZG4 17:13 502-0724579Cowboy加入聊天 17:13 502-0724579 Cowboy 四月小作文-來頡6799 https://drive.google.com/file/d/1RUl7XhxyJpxKO4RBX0AxeeyD4ABYPU_l/view?usp=sharing 17:54 500-0724304FOMO就剁手手加入聊天
+
+2025/4/4（週五） 17:44 504-0718103Leo加入聊天 17:46 504-0718103Leo已收回訊息 17:46 504-0718103Leo 四月小作文-精確3162 https://docs.google.com/document/d/16TkL54YmFAToS1UR26VdV_mYgr8bCAml/edit?tab=t.0 17:48 505-0724540捲髮狼加入聊天 17:48 505-0724540捲髮狼 四月小作文-5515建國 https://drive.google.com/file/d/1dwnVczcEvhIIj5TOXRHVow876da6zAGp/view?usp=drivesdk
+
+2025/4/5（週六） 12:21 383-0488695 三寶已收回訊息 12:21 383-0488695 三寶 小作文-2424隴華
+
+這是第一種
+
+2025/9/17 18:40
+
+2025/4/3（週四） 14:36 069-0401669Crswin加入聊天 17:06 501-0723486Mason加入聊天 17:11 501-0723486Mason 四月小作文-0050元大台灣50 https://1drv.ms/u/s!AoaAyZHt1qThgRnnZPjmjLXlpMal?e=QtBZG4 17:13 502-0724579Cowboy加入聊天 17:13 502-0724579 Cowboy 四月小作文-來頡6799 https://drive.google.com/file/d/1RUl7XhxyJpxKO4RBX0AxeeyD4ABYPU_l/view?usp=sharing 17:54 500-0724304FOMO就剁手手加入聊天
+
+2025/4/4（週五） 17:44 504-0718103Leo加入聊天 17:46 504-0718103Leo已收回訊息 17:46 504-0718103Leo 四月小作文-精確3162 https://docs.google.com/document/d/16TkL54YmFAToS1UR26VdV_mYgr8bCAml/edit?tab=t.0 17:48 505-0724540捲髮狼加入聊天 17:48 505-0724540捲髮狼 四月小作文-5515建國 https://drive.google.com/file/d/1dwnVczcEvhIIj5TOXRHVow876da6zAGp/view?usp=drivesdk
+
+2025/4/5（週六） 12:21 383-0488695 三寶已收回訊息 12:21 383-0488695 三寶 小作文-2424隴華
+
+https://docs.google.com/document/d/10nDGa7nWuSZCLhU9qtR_VW8Cx-yQllk5/edit?usp=drive_link&ouid=105443695704290227678&rtpof=true&sd=true 13:19 421-0299033青蛙狼 https://docs.google.com/document/d/1-OeWOZfZ8-KQb2-S-QhfthC7k-UPb4KofyzmLiGT17Y/edit 14:08 506-0723994 樂觀感恩加入聊天 14:08 503-0551726千千加入聊天 14:09 503-0551726千千 四月小作文-日月光投控 3711 https://drive.google.com/file/d/1ADg9NnB10z3qjnSZPOn6BLh_Fz8wjY9T/view?usp=sharing
+
+這是第二種
