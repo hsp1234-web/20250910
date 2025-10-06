@@ -14,6 +14,8 @@ PyMuPDF
 python-docx
 python-pptx
 Pillow
+# From: stock_id_extractor
+twstock
 
 # --- Testing Dependencies ---
 pytest

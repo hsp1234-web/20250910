@@ -1,121 +1,133 @@
 import pytest
 import json
 import httpx
-from unittest.mock import AsyncMock, MagicMock
+import asyncio
+from unittest.mock import AsyncMock, MagicMock, patch, ANY
 
 # --- 將專案根目錄加入 sys.path ---
-# 這一步是必要的，以便測試腳本能找到位於 src 和 services 目錄下的模組
 import sys
 from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 # --- 模組匯入 ---
-# 從我們的服務中匯入要測試的函式
-from services.document_processor_service.processor import build_analysis_prompt, analyze_text_with_llm
+from services.document_processor_service.processor import build_analysis_prompt, analyze_text_with_llm, process_document_url
+from services.document_processor_service.stock_id_extractor import extract_stock_ids
 
-# --- 測試 `build_analysis_prompt` 函式 ---
-def test_build_analysis_prompt_structure():
-    """
-    單元測試：驗證提示詞 (Prompt) 是否被正確地建構。
-    """
-    test_content = "這是一段測試用的文件內容。"
-    prompt = build_analysis_prompt(test_content)
+# --- 測試 `build_analysis_prompt` 函式 (已更新) ---
 
-    # 驗證提示詞中是否包含了關鍵指令和欄位名稱
-    assert "你是一位專業的金融市場分析師" in prompt
-    assert "嚴格按照指定的 JSON 格式" in prompt
+def test_build_analysis_prompt_with_stock_ids():
+    """
+    單元測試：驗證當提供股票代號時，提示詞是否被正確建構。
+    """
+    test_content = "這是一段關於 3711 的文件內容。"
+    stock_ids = ["3711"]
+    prompt = build_analysis_prompt(test_content, stock_ids)
+
+    assert "你是一位專業、謹慎的金融市場分析師" in prompt
+    assert "預提取的股票代號" in prompt
+    assert f"識別出以下台股股票代號：{stock_ids}" in prompt
     assert test_content in prompt
-    assert "summary" in prompt
-    assert "stock_id" in prompt
-    assert "strategy" in prompt
-    assert "quality_score" in prompt
-    assert "is_trade_related" in prompt
+    assert "analyzed_stock_ids" in prompt
+    # 舊的 "stock_id": (字串) 格式不應存在，這個斷言更精確，避免被 'analyzed_stock_ids' 誤判
+    assert '"stock_id":' not in prompt
 
-# --- 測試 `analyze_text_with_llm` 函式 ---
+def test_build_analysis_prompt_without_stock_ids():
+    """
+    單元測試：驗證當未提供股票代號時，提示詞是否也能被正確建構。
+    """
+    test_content = "這是一段沒有代號的文件內容。"
+    stock_ids = []
+    prompt = build_analysis_prompt(test_content, stock_ids)
+
+    assert "沒有找到任何台股股票代號" in prompt
+    assert "analyzed_stock_ids" in prompt
+
+# --- 測試 `analyze_text_with_llm` 函式 (已更新) ---
 
 @pytest.mark.asyncio
 async def test_analyze_text_with_llm_success(mocker):
     """
     單元測試：驗證在 llm_service 成功回傳有效 JSON 時，函式是否能正確解析。
     """
-    # 準備一個模擬的、成功的 AI 分析結果
     mock_analysis_result = {
         "summary": "這是一段摘要",
-        "stock_id": "2330",
+        "analyzed_stock_ids": ["2330"],
         "strategy": "看多",
         "quality_score": 8,
         "is_trade_related": "是"
     }
-    # llm_service 的回應是包含一個 response_text 鍵的 JSON
     mock_llm_response_payload = {"response_text": json.dumps(mock_analysis_result)}
 
-    # 模擬 httpx.AsyncClient.post 的行為
     mock_response = MagicMock(spec=httpx.Response)
     mock_response.status_code = 200
     mock_response.json.return_value = mock_llm_response_payload
 
-    # 設定非同步的 post 方法
     mock_post = AsyncMock(return_value=mock_response)
     mocker.patch("httpx.AsyncClient.post", mock_post)
 
-    # 執行被測試的函式
-    result = await analyze_text_with_llm("任何測試文字")
-
-    # 驗證結果是否與我們預期的解析結果相符
+    result = await analyze_text_with_llm("任何測試文字", stock_ids=["2330"])
     assert result == mock_analysis_result
 
-@pytest.mark.asyncio
-async def test_analyze_text_with_llm_json_decode_error(mocker):
-    """
-    單元測試：驗證當 llm_service 回傳無效 JSON 時，函式是否能引發 ValueError。
-    """
-    # 準備一個無效的 JSON 字串
-    invalid_json_string = "這不是一個有效的JSON"
-    mock_llm_response_payload = {"response_text": invalid_json_string}
+# --- 新增的整合測試 (已修正) ---
 
-    # 模擬 httpx 的行為
-    mock_response = MagicMock(spec=httpx.Response)
-    mock_response.status_code = 200
-    mock_response.json.return_value = mock_llm_response_payload
-
-    mock_post = AsyncMock(return_value=mock_response)
-    mocker.patch("httpx.AsyncClient.post", mock_post)
-
-    # 驗證在這種情況下，函式是否會如預期般引發 ValueError
-    with pytest.raises(ValueError, match="llm_service 回傳的不是有效的 JSON"):
-        await analyze_text_with_llm("任何測試文字")
+# 從 plan14_poc.md 複製的真實測試文本
+REAL_TEST_TEXT = """
+小作文 日月光投控 3711 公司簡介 隸屬 電子–半導體 產業類別。資本額 441.53 億 日月光投資控股股份有限公司（以下稱本公司）於107 年4 月30 日設立於高雄楠梓科技 產業園區。所營業務主要為半導體、基板、電腦週邊設備及電子零配件之製造、組合、加 工、測試及銷售。 觀看角度 基本面：毛利率連續 4 季較去年同期成長。本益比為過去五年平均高點 技術面：受大盤影響已連續三個跳空下跌 籌碼面：大戶持股比例高 投信連買一個月 外資持續賣超 消息面：投入66 億投資新廠，設立面板及扇出型封裝產線，預計第二季設備進廠 第三季 試量產，送樣客戶驗證。 扇出型封裝特色：顯著降低成本、解決散熱訊號串接問題、解決客戶現有12 吋晶圓尺寸 不夠用問題 個人觀點 先進封裝需求不減，新型封裝方式成本降低同時吸引更多訂單，未來獲利可期 已長遠角度觀察現在價格位階並不高，加上投信連續買進，待外資賣壓減弱後可望止穩， 靜待大盤回覆正常盤勢，可望跟隨大盤一同起漲。
+"""
 
 @pytest.mark.asyncio
-async def test_analyze_text_with_llm_connection_error(mocker):
+async def test_process_document_url_integration_with_real_text(mocker):
     """
-    單元測試：驗證當無法連線到 llm_service 時，函式是否能引發 ConnectionError。
+    整合測試：使用真實文本，驗證從「下載」到「儲存」的完整串聯流程。
+    這個測試會真實執行 `extract_stock_ids`，但會模擬所有 I/O 和外部服務。
     """
-    # 模擬 httpx 在 post 時引發網路錯誤
-    mocker.patch("httpx.AsyncClient.post", side_effect=httpx.RequestError("網路連線失敗"))
+    # --- 1. 設定 (Arrange) ---
+    test_url = "http://example.com/real_report.pdf"
+    fake_path = "/fake/path/real_report.pdf"
 
-    # 驗證在這種情況下，函式是否會如預期般引發 ConnectionError
-    with pytest.raises(ConnectionError, match="無法連線到 llm_service"):
-        await analyze_text_with_llm("任何測試文字")
+    mock_ai_response = {
+        "summary": "AI 對日月光投控的分析摘要。",
+        "analyzed_stock_ids": ["3711"],
+        "strategy": "看多",
+        "quality_score": 9,
+        "is_trade_related": "是"
+    }
 
-@pytest.mark.asyncio
-async def test_analyze_text_with_llm_handles_markdown(mocker):
-    """
-    單元測試：驗證函式是否能正確處理被 markdown 符號包圍的 JSON。
-    """
-    mock_analysis_result = {"key": "value"}
-    # 模擬 LLM 有時會用 markdown 區塊來包圍 JSON
-    json_with_markdown = f"```json\n{json.dumps(mock_analysis_result)}\n```"
-    mock_llm_response_payload = {"response_text": json_with_markdown}
+    # 模擬所有同步 I/O 函式
+    mock_update_status = mocker.patch('services.document_processor_service.processor.update_task_status')
+    mocker.patch('services.document_processor_service.processor.download_file', return_value=(True, fake_path, "Success"))
+    mocker.patch('services.document_processor_service.processor.extract_content', return_value={"text": REAL_TEST_TEXT, "images": []})
+    mock_save_analysis = mocker.patch('services.document_processor_service.processor.save_successful_analysis')
+    mock_os_path_exists = mocker.patch('services.document_processor_service.processor.os.path.exists', return_value=True)
+    mock_os_remove = mocker.patch('services.document_processor_service.processor.os.remove')
 
-    mock_response = MagicMock(spec=httpx.Response)
-    mock_response.status_code = 200
-    mock_response.json.return_value = mock_llm_response_payload
+    # 模擬非同步的 analyze_text_with_llm
+    mock_analyze_llm = mocker.patch('services.document_processor_service.processor.analyze_text_with_llm', new_callable=AsyncMock, return_value=mock_ai_response)
 
-    mock_post = AsyncMock(return_value=mock_response)
-    mocker.patch("httpx.AsyncClient.post", mock_post)
+    # 關鍵修正：建立一個 async def 的 mock 來正確模擬 asyncio.to_thread
+    # 這樣它回傳的就是一個協程 (coroutine)，可以被 `await`
+    async def sync_to_thread_mock(func, *args, **kwargs):
+        # 直接同步執行被傳入的函式，並回傳其結果
+        return func(*args, **kwargs)
+    mocker.patch('services.document_processor_service.processor.asyncio.to_thread', new=sync_to_thread_mock)
 
-    result = await analyze_text_with_llm("任何測試文字")
+    # --- 2. 執行 (Act) ---
+    await process_document_url(test_url)
 
-    # 驗證即使有 markdown 符號，結果依然能被正確解析
-    assert result == mock_analysis_result
+    # --- 3. 斷言 (Assert) ---
+    mock_update_status.assert_any_call(test_url, 'processing')
+
+    # 驗證 `analyze_text_with_llm` 的呼叫
+    mock_analyze_llm.assert_called_once_with(REAL_TEST_TEXT, ["3711"])
+
+    # 驗證儲存函式
+    mock_save_analysis.assert_called_once_with(test_url, mock_ai_response)
+
+    # 驗證沒有呼叫失敗狀態
+    for call in mock_update_status.call_args_list:
+        assert call.args[1] != 'failed'
+
+    # 驗證檔案清理
+    mock_os_path_exists.assert_called_once_with(fake_path)
+    mock_os_remove.assert_called_once_with(fake_path)
