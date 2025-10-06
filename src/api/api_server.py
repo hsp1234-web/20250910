@@ -570,7 +570,7 @@ async def download_transcript(task_id: str):
     if not task:
         raise HTTPException(status_code=404, detail="找不到指定的任務 ID。")
 
-    if task['status'] != '已完成':
+    if task['status'] != 'completed':
         raise HTTPException(status_code=400, detail="任務尚未完成，無法下載。")
 
     try:
