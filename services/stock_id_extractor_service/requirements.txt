@@ -1,0 +1,9 @@
+# --- Core Service Dependencies ---
+fastapi
+uvicorn[standard]
+
+# --- Tool Dependencies ---
+twstock
+
+# --- Testing Dependencies ---
+pytest
