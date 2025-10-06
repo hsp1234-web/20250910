@@ -1465,6 +1465,17 @@
                         openPreviewModal(outputPath, title, mimeType, taskId);
                     });
                     buttonGroup.appendChild(previewBtn);
+
+                    // --- JULES'S NEW FEATURE 2025-10-06: 新增「新視窗開啟」按鈕 ---
+                    const openInNewTabBtn = document.createElement('a');
+                    openInNewTabBtn.href = outputPath;
+                    openInNewTabBtn.className = 'btn-preview'; // 使用與預覽相同的樣式
+                    openInNewTabBtn.textContent = '新視窗開啟';
+                    openInNewTabBtn.target = '_blank';
+                    openInNewTabBtn.rel = 'noopener noreferrer';
+                    openInNewTabBtn.style.backgroundColor = '#17a2b8'; // 使用不同的顏色 (青色) 以作區分
+                    openInNewTabBtn.addEventListener('click', () => logAction('click-open-in-new-tab', taskId));
+                    buttonGroup.appendChild(openInNewTabBtn);
                 }
 
                 // Additional actions for media files
@@ -1909,6 +1920,18 @@
 
                 actionsDiv.appendChild(detailsBtn);
                 actionsDiv.appendChild(previewBtn);
+
+                // --- JULES'S NEW FEATURE 2025-10-06: 新增「新視窗開啟」按鈕 ---
+                const openInNewTabBtn = document.createElement('a');
+                openInNewTabBtn.href = outputPath;
+                openInNewTabBtn.className = 'btn-preview'; // 使用與預覽相同的樣式
+                openInNewTabBtn.textContent = '新視窗開啟';
+                openInNewTabBtn.target = '_blank';
+                openInNewTabBtn.rel = 'noopener noreferrer';
+                openInNewTabBtn.style.backgroundColor = '#17a2b8'; // 使用不同的顏色 (青色) 以作區分
+                openInNewTabBtn.addEventListener('click', () => logAction('click-yt-report-download', taskId)); // Re-use existing log action
+                actionsDiv.appendChild(openInNewTabBtn);
+
                 actionsDiv.appendChild(downloadBtn);
 
                 reportElement.appendChild(fileInfoDiv);
