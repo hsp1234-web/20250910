@@ -4,6 +4,7 @@ uvicorn[standard]
 
 # --- Tool Dependencies ---
 twstock
+lxml
 
 # --- Testing Dependencies ---
 pytest
