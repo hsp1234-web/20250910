@@ -570,7 +570,7 @@ async def download_transcript(task_id: str):
     if not task:
         raise HTTPException(status_code=404, detail="找不到指定的任務 ID。")
 
-    if task['status'] != '已完成':
+    if task['status'] != 'completed':
         raise HTTPException(status_code=400, detail="任務尚未完成，無法下載。")
 
     try:
@@ -608,7 +608,9 @@ async def download_transcript(task_id: str):
             log.error(f"❌ 檔案系統中的檔案不存在: {file_path}")
             raise HTTPException(status_code=404, detail="檔案遺失或無法讀取。")
 
-        # 提供檔案下載
+        # --- JULES'S FIX 2025-10-06: 修正檔名亂碼問題 ---
+        # 透過手動設定 Content-Disposition 標頭並使用 URL 編碼，
+        # 來確保包含中文等非 ASCII 字元的檔名能被瀏覽器正確解析。
         ext = file_path.suffix.lower()
         if ext == '.pdf':
             media_type = 'application/pdf'
@@ -620,7 +622,15 @@ async def download_transcript(task_id: str):
             media_type = f'audio/{ext.strip(".")}'
         else:
             media_type = 'text/plain'
-        return FileResponse(path=file_path, filename=file_path.name, media_type=media_type)
+
+        # 建立 FileResponse
+        response = FileResponse(path=file_path, media_type=media_type)
+
+        # 對檔名進行 URL 編碼，並設定 Content-Disposition 標頭
+        encoded_filename = quote(file_path.name)
+        response.headers["Content-Disposition"] = f"attachment; filename*=UTF-8''{encoded_filename}"
+
+        return response
 
     except (json.JSONDecodeError, KeyError) as e:
         log.error(f"❌ 解析任務 {task_id} 的結果時出錯: {e}")
