@@ -18,6 +18,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from services.document_processor_service.repository import update_task_status, save_successful_analysis
 from src.tools.universal_downloader import download_file
 from src.tools.content_extractor import extract_content
+from .stock_id_extractor import extract_stock_ids
 
 # --- 日誌與常數設定 ---
 log = logging.getLogger(__name__)
@@ -26,33 +27,58 @@ MODEL_NAME = "gemma2:2b"
 DOWNLOAD_DIR = Path(__file__).parent / "downloads"
 DOWNLOAD_DIR.mkdir(exist_ok=True)
 
-def build_analysis_prompt(text_content: str) -> str:
+def build_analysis_prompt(text_content: str, stock_ids: list[str]) -> str:
     """
     建構一個詳細的提示詞，指導本地 LLM 進行文件分析，並以指定的 JSON 格式回傳結果。
+    這個版本的提示詞會將預先提取的股票代號列表提供給模型。
     """
     # 移除多餘的空白，避免在提示詞中佔用過多 token
     cleaned_text = "\n".join(line.strip() for line in text_content.split('\n') if line.strip())
 
+    # 根據 stock_ids 是否為空，決定提示詞的具體指示
+    if stock_ids:
+        stock_id_info = f"外部工具已經在文本中識別出以下台股股票代號：{stock_ids}。請將此列表作為你分析的基礎。"
+        stock_id_instruction = (
+            "基於提供的股票代號列表和文件上下文，確認這些是文本中主要討論的股票。如果確認，請將它們全部包含在 `analyzed_stock_ids` 欄位中。 "
+            "如果文本的核心似乎與這些代號無關，請回傳一個空列表 `[]`。"
+        )
+        stock_id_json_field = '"analyzed_stock_ids": ["3711", "2330"]'
+    else:
+        stock_id_info = "外部工具在文本中沒有找到任何台股股票代號。"
+        stock_id_instruction = "請再次確認文本中是否真的沒有任何股票代號。如果沒有，請在 `analyzed_stock_ids` 欄位中回傳一個空列表 `[]`。"
+        stock_id_json_field = '"analyzed_stock_ids": []'
+
+
     prompt = f"""
-你是一位專業的金融市場分析師。請仔細閱讀以下提供的財經報告文字，並嚴格按照指定的 JSON 格式回傳你的分析結果。
+你是一位專業、謹慎的金融市場分析師。你的任務是根據提供的資訊，以絕對精確的格式回傳分析結果。
 
---- 文件內容開始 ---
-{cleaned_text[:4000]}
---- 文件內容結束 ---
+--- 已知資訊 ---
+1.  **文件內容**:
+    --- 文件內容開始 ---
+    {cleaned_text[:4000]}
+    --- 文件內容結束 ---
+2.  **預提取的股票代號**: {stock_id_info}
 
-請根據文件內容，生成一個包含以下五個鍵的 JSON 物件：
+--- 你的任務 ---
+請仔細閱讀文件內容，並嚴格按照指定的 JSON 格式回傳你的分析。
+
+--- JSON 輸出指令 ---
+請生成一個包含以下五個鍵的 JSON 物件：
 1.  `summary`: (字串) 對文件內容的摘要，長度約在 50 到 100 字之間。
-2.  `stock_id`: (字串) 如果內容中明確提到台股股票代號（例如 2330, 0050），請填入此代號。如果沒有提到，請回傳 `null`。
+2.  `analyzed_stock_ids`: (字串列表) {stock_id_instruction}
 3.  `strategy`: (字串) 判斷作者對主要標的的使用策略。必須是以下五個選項之一： "看多", "看空", "多策略", "無法判斷", "空值"。
 4.  `quality_score`: (整數) 根據報告的分析深度、數據支持和論述清晰度，給出 1 到 10 的評分。1 代表品質最差，10 代表品質最好。
 5.  `is_trade_related`: (字串) 判斷這份文件是否與金融交易直接相關。必須是以下三個選項之一： "是", "否", "空值"。
 
-你的回覆**必須**是一個格式正確的 JSON 物件，不要包含任何 JSON 以外的文字、解釋或註解。
+--- 重要提醒 ---
+-   你的回覆**必須**是一個格式完全正確的 JSON 物件。
+-   不要包含任何 JSON 以外的文字、解釋或註解。
+-   `analyzed_stock_ids` 必須是一個列表 (list)，即使裡面只有一個元素或沒有元素。
 
-JSON 格式範例：
+--- JSON 格式範例 ---
 {{
   "summary": "這是一段約50到100字的內容摘要...",
-  "stock_id": "2330",
+  {stock_id_json_field},
   "strategy": "看多",
   "quality_score": 8,
   "is_trade_related": "是"
@@ -60,11 +86,11 @@ JSON 格式範例：
 """
     return prompt
 
-async def analyze_text_with_llm(text_content: str) -> Dict[str, Any]:
+async def analyze_text_with_llm(text_content: str, stock_ids: list[str]) -> Dict[str, Any]:
     """
     使用本地 llm_service 分析文字。
     """
-    prompt = build_analysis_prompt(text_content)
+    prompt = build_analysis_prompt(text_content, stock_ids)
     payload = {"model": MODEL_NAME, "prompt": prompt}
 
     async with httpx.AsyncClient(timeout=300.0) as client: # 加長超時時間以應對大型模型
@@ -94,7 +120,7 @@ async def analyze_text_with_llm(text_content: str) -> Dict[str, Any]:
 
 async def process_document_url(source_url: str):
     """
-    執行完整的「下載 -> 拆解 -> 分析 -> 保存」工作流程。
+    執行完整的「下載 -> 拆解 -> 提取代號 -> 分析 -> 保存」工作流程。
     這是一個非同步函式，設計為在背景執行。
     """
     log.info(f"開始處理新文件，來源 URL: {source_url}")
@@ -104,7 +130,7 @@ async def process_document_url(source_url: str):
         await asyncio.to_thread(update_task_status, source_url, 'processing')
 
         # 步驟 1: 下載文件
-        log.info(f"步驟 1/4: 正在從 {source_url} 下載文件...")
+        log.info(f"步驟 1/5: 正在從 {source_url} 下載文件...")
         success, downloaded_path_str, message = await asyncio.to_thread(
             download_file, source_url, str(DOWNLOAD_DIR)
         )
@@ -113,19 +139,25 @@ async def process_document_url(source_url: str):
         log.info(f"文件已成功下載至: {downloaded_path_str}")
 
         # 步驟 2: 拆解文件，提取內容
-        log.info(f"步驟 2/4: 正在從 {downloaded_path_str} 提取內容...")
+        log.info(f"步驟 2/5: 正在從 {downloaded_path_str} 提取內容...")
         content_data = await asyncio.to_thread(extract_content, downloaded_path_str, str(DOWNLOAD_DIR))
         if not content_data or not content_data.get("text"):
             raise ValueError("文件內容提取失敗或文件內沒有文字。")
         log.info(f"成功提取 {len(content_data['text'])} 字元的文字內容。")
 
-        # 步驟 3: 使用本地 LLM 分析內容
-        log.info("步驟 3/4: 正在使用本地 LLM 分析文件內容...")
-        analysis_result = await analyze_text_with_llm(content_data["text"])
+        # 步驟 3: 預先提取股票代號
+        log.info("步驟 3/5: 正在使用規則提取器提取股票代號...")
+        # extract_stock_ids 是 CPU-bound 的，使用 to_thread 避免阻塞事件循環
+        stock_ids = await asyncio.to_thread(extract_stock_ids, content_data["text"])
+        log.info(f"已提取出 {len(stock_ids)} 個有效的股票代號: {stock_ids}")
+
+        # 步驟 4: 使用本地 LLM 結合已提取的代號進行分析
+        log.info("步驟 4/5: 正在使用本地 LLM 分析文件內容...")
+        analysis_result = await analyze_text_with_llm(content_data["text"], stock_ids)
         log.info("文件內容分析完成。")
 
-        # 步驟 4: 將成功結果保存到資料庫
-        log.info("步驟 4/4: 正在將分析結果保存到資料庫...")
+        # 步驟 5: 將成功結果保存到資料庫
+        log.info("步驟 5/5: 正在將分析結果保存到資料庫...")
         await asyncio.to_thread(save_successful_analysis, source_url, analysis_result)
         log.info(f"文件處理流程已成功完成: {source_url}")
 

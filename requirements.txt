@@ -17,10 +17,18 @@ playwright
 pytest-playwright
 requests
 pytest
+pytest-mock
+pytest-asyncio
 matplotlib
+python-dateutil
+gdown
+twstock
+filetype
 
 # Report & File Handling Dependencies
 WeasyPrint
 python-docx
 lxml
 plotly
+PyMuPDF
+python-pptx
