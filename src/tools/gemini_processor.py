@@ -21,13 +21,33 @@ log = logging.getLogger('gemini_processor_tool')
 
 # --- 輔助函式 ---
 def sanitize_filename(title: str, max_len: int = 60) -> str:
+    """
+    一個更穩健的檔名清理函式，能保留中日韓等 UTF-8 字元，
+    同時移除作業系統不允許的特殊字元。
+    """
     if not title:
         title = "untitled_document"
-    title = re.sub(r'[\\/*?:"<>|]', "_", title)
-    title = title.replace(" ", "_")
-    title = re.sub(r"_+", "_", title)
-    title = title.strip('_')
-    return title[:max_len]
+
+    # 移除 Windows 和 Linux/Mac 不允許的字元
+    # 包括 \ / : * ? " < > | 以及所有控制字元 (ASCII 0-31)
+    # 這次的修復確保了它不會錯誤地移除中文字元。
+    sanitized_title = re.sub(r'[\\/*?:"<>|\x00-\x1f]', "", title)
+
+    # 將空格替換為底線，並壓縮多個底線
+    sanitized_title = sanitized_title.replace(" ", "_")
+    sanitized_title = re.sub(r"_+", "_", sanitized_title)
+
+    # 移除開頭和結尾的底線或點
+    sanitized_title = sanitized_title.strip('_.')
+
+    # 簡單地按字元長度截斷，這對於多數情況是足夠的
+    sanitized_title = sanitized_title[:max_len]
+
+    # 如果清理後檔名為空，提供一個預設值
+    if not sanitized_title:
+        return "sanitized_document"
+
+    return sanitized_title
 
 def print_progress(status: str, detail: str, extra_data: dict = None):
     progress_data = {"type": "progress", "status": status, "detail": detail}

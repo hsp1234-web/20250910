@@ -1,0 +1,21 @@
+# --- Core Service Dependencies ---
+fastapi
+uvicorn[standard]
+httpx
+pydantic
+
+# --- Tool Dependencies ---
+# From: universal_downloader
+gdown
+requests
+filetype
+# From: content_extractor
+PyMuPDF
+python-docx
+python-pptx
+Pillow
+
+# --- Testing Dependencies ---
+pytest
+pytest-mock
+pytest-asyncio
