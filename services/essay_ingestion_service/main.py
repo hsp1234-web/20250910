@@ -8,12 +8,14 @@ from typing import List, Dict, Any, Optional
 
 # 從本地模組匯入核心邏輯
 try:
-    from logic import parse_chat_log, save_parsed_data_to_db, initialize_database
+    # (Jules) 移除對 initialize_database 的依賴，因為此服務不再管理自己的資料庫
+    from logic import parse_chat_log, save_parsed_data_to_db
 except ImportError:
     import sys
     from pathlib import Path
     sys.path.append(str(Path(__file__).parent))
-    from logic import parse_chat_log, save_parsed_data_to_db, initialize_database
+    # (Jules) 移除對 initialize_database 的依賴
+    from logic import parse_chat_log, save_parsed_data_to_db
 
 # --- 日誌設定 ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -24,7 +26,7 @@ log = logging.getLogger('essay_ingestion_service_main')
 async def lifespan(app: FastAPI):
     """在應用程式啟動時執行的生命週期事件。"""
     log.info("「小作文擷取服務」啟動中...")
-    initialize_database()
+    # (Jules) 移除廢棄的本地資料庫初始化呼叫
     log.info("✅ 服務已就緒，可以開始接收請求。")
     yield
     log.info("「小作文擷取服務」正在關閉。")
