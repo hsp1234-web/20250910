@@ -9,7 +9,9 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(level
 log = logging.getLogger(__name__)
 
 # --- 資料庫路徑設定 ---
-DB_FILE = Path(__file__).parent / "tasks.db"
+# (Jules @ 2025-10-08) 修正：將資料庫檔案統一指向 `database.sqlite3`，以解決與 `initialize_database.py` 和其他服務的資料來源不一致問題。
+# 這是導致「找不到ID」錯誤的根本原因。
+DB_FILE = Path(__file__).parent / "database.sqlite3"
 
 import os
 

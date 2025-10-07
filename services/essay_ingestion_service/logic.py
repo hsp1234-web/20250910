@@ -1,66 +1,24 @@
 # services/essay_ingestion_service/logic.py
 import re
-import sqlite3
 import sys
 from pathlib import Path
 import logging
-from typing import Optional, List, Dict
+from typing import List, Dict
+
+# --- 專案根目錄設定，確保可以正確 import src ---
+# 走訪三層目錄回到專案根目錄 (services/essay_ingestion_service -> services -> project_root)
+# 這樣才能夠找到 src 目錄
+project_root = Path(__file__).resolve().parent.parent.parent
+sys.path.insert(0, str(project_root))
+
+from src.db.client import DBClient
 
 # --- 日誌設定 ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 log = logging.getLogger('essay_ingestion_service')
 
-# --- 資料庫路徑 ---
-DB_PATH = Path(__file__).resolve().parent.parent.parent / "src" / "db" / "database.sqlite3"
-
-def _add_column_if_not_exists(cursor: sqlite3.Cursor, table_name: str, column_name: str, column_definition: str):
-    """一個輔助函式，用於檢查欄位是否存在，如果不存在則新增。"""
-    cursor.execute(f"PRAGMA table_info({table_name})")
-    columns = [row[1] for row in cursor.fetchall()]
-    if column_name not in columns:
-        log.info(f"在 `{table_name}` 表中找不到 `{column_name}` 欄位，正在新增...")
-        cursor.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_definition}")
-        log.info(f"`{column_name}` 欄位已成功新增。")
-    else:
-        log.info(f"欄位 `{column_name}` 已在 `{table_name}` 表中，無需改動。")
-
-def initialize_database():
-    """
-    [微服務自我修復]
-    確保資料庫及 `extracted_urls` 表結構符合本服務的需求。
-    此函式應在服務啟動時執行。
-    """
-    log.info("正在執行微服務的資料庫結構自我校驗...")
-    if not DB_PATH.parent.exists():
-        log.error(f"資料庫目錄不存在: {DB_PATH.parent}，無法繼續。")
-        return
-
-    try:
-        with get_db_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS extracted_urls (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    url TEXT NOT NULL UNIQUE
-                );
-            """)
-            _add_column_if_not_exists(cursor, 'extracted_urls', 'title', 'TEXT')
-            _add_column_if_not_exists(cursor, 'extracted_urls', 'author', 'TEXT')
-            _add_column_if_not_exists(cursor, 'extracted_urls', 'message_date', 'TEXT')
-            _add_column_if_not_exists(cursor, 'extracted_urls', 'source', 'TEXT')
-            conn.commit()
-            log.info("✅ 資料庫結構校驗完成。")
-    except sqlite3.Error as e:
-        log.error(f"資料庫自我校驗時發生嚴重錯誤: {e}", exc_info=True)
-
-
-def get_db_connection() -> sqlite3.Connection:
-    """建立並返回一個資料庫連線。"""
-    try:
-        return sqlite3.connect(DB_PATH, timeout=10)
-    except sqlite3.Error as e:
-        log.error(f"連線資料庫時發生錯誤: {e}", exc_info=True)
-        raise
+# (Jules @ 2025-10-08) 移除 initialize_database 和 get_db_connection
+# 此服務不應再直接操作資料庫，所有操作都應透過 DBClient 代理
 
 def parse_chat_log(text: str) -> List[Dict]:
     """
@@ -118,64 +76,42 @@ def parse_chat_log(text: str) -> List[Dict]:
     log.info(f"從聊天紀錄中解析出 {len(results)} 筆結構化資料。")
     return results
 
-def save_parsed_data_to_db(parsed_data: List[Dict]) -> List[Dict]:
+def save_parsed_data_to_db(parsed_data: List[Dict], source_text: str) -> List[Dict]:
     """
-    [微服務專用版本] 將解析後的資料儲存到資料庫，並回傳包含新 ID 的項目列表。
+    [重構後] 將解析後的資料透過 DBClient 傳送給 db_manager 服務進行儲存。
+    這個函式現在負責與微服務架構整合，而不是直接操作資料庫。
     """
     if not parsed_data:
         log.info("沒有要儲存的資料。")
         return []
 
-    conn = get_db_connection()
     try:
-        cursor = conn.cursor()
-        cursor.execute("SELECT url FROM extracted_urls")
-        existing_urls = {row[0] for row in cursor.fetchall()}
+        log.info("初始化 DBClient，準備將資料傳送至 db_manager...")
+        db_client = DBClient()
 
-        new_items = [item for item in parsed_data if item['url'] not in existing_urls]
+        # 組合 message_date
+        for item in parsed_data:
+            item['message_date'] = f"{item['date']} {item['time']}"
 
-        if not new_items:
-            log.info("所有解析出的網址都已存在於資料庫中，無需新增。")
-            return []
+        log.info(f"正在呼叫 db_client.add_new_urls，準備新增 {len(parsed_data)} 筆資料...")
 
-        log.info(f"過濾後，有 {len(new_items)} 筆新資料需要儲存。")
-
-        data_to_insert = [
-            (item['url'], item['title'], item['author'], f"{item['date']} {item['time']}", 'essay_performance')
-            for item in new_items
-        ]
-
-        cursor.executemany(
-            "INSERT INTO extracted_urls (url, title, author, message_date, source) VALUES (?, ?, ?, ?, ?)",
-            data_to_insert
+        # 呼叫 DBClient 的方法，將資料傳送給 db_manager
+        # db_manager 內部會處理去重和儲存邏輯
+        # 傳遞 source_text 可讓 db_manager 根據雜湊值判斷來源文字是否重複處理
+        newly_added_rows = db_client.add_new_urls(
+            parsed_data=parsed_data,
+            source_text=source_text
         )
 
-        if cursor.rowcount > 0:
-            log.info(f"成功將 {cursor.rowcount} 筆新的解析資料插入資料庫。")
-            conn.commit()
-
-            inserted_urls = [item['url'] for item in new_items]
-            placeholders = ','.join('?' for _ in inserted_urls)
-
-            cursor.execute(
-                f"SELECT id, url, title, author, message_date FROM extracted_urls WHERE url IN ({placeholders})",
-                inserted_urls
-            )
-
-            columns = [description[0] for description in cursor.description]
-            inserted_rows = [dict(zip(columns, row)) for row in cursor.fetchall()]
-
-            log.info(f"成功取回 {len(inserted_rows)} 筆包含資料庫 ID 的新項目。")
-            return inserted_rows
+        if newly_added_rows:
+            log.info(f"成功透過 db_manager 新增了 {len(newly_added_rows)} 筆資料。")
+            # add_new_urls 預期會回傳新增的項目列表，包含 ID
+            return newly_added_rows
         else:
-            conn.rollback()
-            log.warning("資料庫執行插入後，回報影響行數為 0。")
+            log.info("db_manager 回報沒有新增任何資料 (可能都已存在)。")
             return []
 
-    except sqlite3.Error as e:
-        log.error(f"儲存解析資料到資料庫時發生錯誤: {e}", exc_info=True)
-        conn.rollback()
+    except Exception as e:
+        log.error(f"透過 DBClient 儲存資料時發生嚴重錯誤: {e}", exc_info=True)
+        # 在生產環境中，這裡可能需要更複雜的錯誤處理或重試機制
         return []
-    finally:
-        if conn:
-            conn.close()
