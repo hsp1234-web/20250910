@@ -3,29 +3,201 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>小作文績效 - AI 處理</title>
-    <link rel="stylesheet" href="/static/css/main.css">
-    <link rel="stylesheet" href="/static/css/essay_performance_tabs.css">
+    <title>小作文績效 - 本地 AI 處理</title>
+    <link rel="stylesheet" href="/static/css/page1_unified.css">
+    <!-- (Jules @ 2025-10-08) 樣式直接參考 page1_sub_overview.html 以確保視覺一致性 -->
+    <style>
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .item-id {
+            font-size: 0.9em;
+            color: #6c757d;
+        }
+        .item-status {
+            font-size: 0.85em;
+            font-weight: bold;
+            padding: 3px 8px;
+            border-radius: 12px;
+            text-transform: uppercase;
+        }
+        /* 狀態顏色映射 */
+        .status-waiting { color: #383d41; background-color: #e2e3e5; }
+        .status-downloading { color: #0c5460; background-color: #d1ecf1; }
+        .status-downloaded { color: #155724; background-color: #d4edda; }
+        .status-failed { color: #721c24; background-color: #f8d7da; }
+
+        .card-body p {
+            margin-bottom: 0.5rem;
+        }
+        .card-body p:last-child {
+            margin-bottom: 0;
+        }
+        .error-message {
+            color: #721c24;
+            font-size: 0.9em;
+            word-break: break-all;
+        }
+        #summary-panel {
+            font-size: 1.2em;
+            padding: 1rem;
+            background-color: #f8f9fa;
+            border-radius: 8px;
+            margin-bottom: 1.5rem;
+            border: 1px solid #dee2e6;
+        }
+    </style>
 </head>
 <body>
-    <div class="navbar">
-        <a href="/" class="navbar-brand">鳳凰主頁</a>
-        <ul class="navbar-links" id="navbar-links">
-        </ul>
-    </div>
     <div class="content">
         <div class="panel">
-            <h1>小作文績效</h1>
-            <div class="tab-container" style="margin-top: 20px;">
-                <a href="/essay_performance/ingestion" class="tab-button">資料擷取與處理</a>
-                <a href="/essay_performance/processing" class="tab-button active">本地AI處理</a>
-                <a href="/essay_performance/report" class="tab-button">報告生成</a>
+            <h2>小作文績效 - 文件下載與處理</h2>
+            <div id="summary-panel">
+                <p id="summary-status">正在初始化...</p>
             </div>
         </div>
-        <div class="panel">
-            <h2>本地AI處理</h2>
-            <p>此階段的內容將在此處顯示...</p>
+
+        <div id="cards-container" class="card-grid">
+            <!-- 卡片將由 JavaScript 動態生成 -->
         </div>
     </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const summaryStatusEl = document.getElementById('summary-status');
+            const cardsContainer = document.getElementById('cards-container');
+
+            let currentTaskId = null;
+            let statusInterval = null;
+            let startTime = null;
+
+            // 狀態與顯示文字的映射
+            const statusMap = {
+                'WAITING': { text: '⌛ 等待中', class: 'status-waiting' },
+                'DOWNLOADING': { text: '📥 下載中...', class: 'status-downloading' },
+                'DOWNLOADED': { text: '✅ 下載完成', class: 'status-downloaded' },
+                'FAILED': { text: '❌ 下載失敗', class: 'status-failed' },
+            };
+
+            const render = (data) => {
+                if (!data || !data.items) {
+                    summaryStatusEl.textContent = '無法獲取任務資料，請重試。';
+                    return;
+                }
+
+                // 更新上方狀態欄
+                const totalItems = Object.keys(data.items).length;
+                const completedItems = Object.values(data.items).filter(item => ['DOWNLOADED', 'FAILED'].includes(item.status)).length;
+                const timeElapsed = startTime ? ((new Date() - startTime) / 1000).toFixed(1) : 0;
+                summaryStatusEl.textContent = `正在處理 ${completedItems} / ${totalItems} 個項目... | 總耗時: ${timeElapsed} 秒`;
+
+                // 清空並重新渲染卡片
+                cardsContainer.innerHTML = '';
+                for (const itemId in data.items) {
+                    const item = data.items[itemId];
+                    const card = document.createElement('div');
+                    card.className = 'card';
+
+                    const statusInfo = statusMap[item.status] || { text: '❓ 未知狀態', class: 'status-waiting' };
+
+                    let errorHtml = '';
+                    if (item.status === 'FAILED' && item.error_message) {
+                        errorHtml = `<p class="error-message"><strong>錯誤:</strong> ${item.error_message}</p>`;
+                    }
+
+                    card.innerHTML = `
+                        <div class="card-header">
+                            <span class="item-id">ID: ${item.id}</span>
+                            <span class="item-status ${statusInfo.class}">${statusInfo.text}</span>
+                        </div>
+                        <div class="card-body">
+                            <p><strong>標題:</strong> ${item.title || '讀取中...'}</p>
+                            <p><strong>作者:</strong> ${item.author || '讀取中...'}</p>
+                            <p><strong>時間:</strong> ${item.message_date || ''} ${item.message_time || ''}</p>
+                            ${errorHtml}
+                        </div>
+                    `;
+                    cardsContainer.appendChild(card);
+                }
+            };
+
+            const fetchStatus = async () => {
+                if (!currentTaskId) return;
+
+                try {
+                    const response = await fetch(`/api/essay_performance/download_status/${currentTaskId}`);
+                    if (!response.ok) {
+                        throw new Error(`伺服器錯誤: ${response.status}`);
+                    }
+                    const data = await response.json();
+                    render(data);
+
+                    // 如果整個大任務完成了，就停止輪詢
+                    if (data.status === 'COMPLETED') {
+                        clearInterval(statusInterval);
+                        const timeElapsed = startTime ? ((new Date() - startTime) / 1000).toFixed(1) : 0;
+                        summaryStatusEl.textContent = `全部處理完成！ | 總耗時: ${timeElapsed} 秒`;
+                        console.log('任務完成，停止輪詢。');
+                    }
+                } catch (error) {
+                    summaryStatusEl.textContent = `輪詢狀態失敗: ${error.message}`;
+                    console.error('輪詢狀態時發生錯誤:', error);
+                    clearInterval(statusInterval);
+                }
+            };
+
+            const startProcess = async () => {
+                const params = new URLSearchParams(window.location.search);
+                const idsParam = params.get('ids');
+
+                if (!idsParam) {
+                    summaryStatusEl.textContent = '錯誤：URL 中缺少有效的 "ids" 參數。';
+                    return;
+                }
+
+                const ids = idsParam.split(',').map(id => parseInt(id.trim())).filter(id => !isNaN(id));
+
+                if (ids.length === 0) {
+                    summaryStatusEl.textContent = '錯誤：未提供有效的項目 ID。';
+                    return;
+                }
+
+                try {
+                    summaryStatusEl.textContent = `正在向伺服器請求開始處理 ${ids.length} 個項目...`;
+                    const response = await fetch('/api/essay_performance/start_download', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({ ids: ids }),
+                    });
+
+                    if (!response.ok) {
+                        const errorData = await response.json();
+                        throw new Error(errorData.detail || '啟動任務失敗');
+                    }
+
+                    const result = await response.json();
+                    currentTaskId = result.task_id;
+                    startTime = new Date(); // 開始計時
+
+                    // 立即獲取一次初始狀態並渲染卡片
+                    await fetchStatus();
+
+                    // 啟動定時器開始輪詢
+                    statusInterval = setInterval(fetchStatus, 3000);
+
+                } catch (error) {
+                    summaryStatusEl.textContent = `啟動處理程序時發生錯誤: ${error.message}`;
+                    console.error('啟動處理程序時發生錯誤:', error);
+                }
+            };
+
+            // 頁面載入後立即開始
+            startProcess();
+        });
+    </script>
 </body>
 </html>
