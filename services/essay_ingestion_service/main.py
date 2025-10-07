@@ -8,12 +8,14 @@ from typing import List, Dict, Any, Optional
 
 # 從本地模組匯入核心邏輯
 try:
-    from logic import parse_chat_log, save_parsed_data_to_db, initialize_database
+    # (Jules @ 2025-10-08) 移除 initialize_database，此服務不再負責資料庫初始化
+    from logic import parse_chat_log, save_parsed_data_to_db
 except ImportError:
     import sys
     from pathlib import Path
     sys.path.append(str(Path(__file__).parent))
-    from logic import parse_chat_log, save_parsed_data_to_db, initialize_database
+    # (Jules @ 2025-10-08) 移除 initialize_database
+    from logic import parse_chat_log, save_parsed_data_to_db
 
 # --- 日誌設定 ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -24,7 +26,7 @@ log = logging.getLogger('essay_ingestion_service_main')
 async def lifespan(app: FastAPI):
     """在應用程式啟動時執行的生命週期事件。"""
     log.info("「小作文擷取服務」啟動中...")
-    initialize_database()
+    # (Jules @ 2025-10-08) 移除 initialize_database()，初始化由 db_manager 統一處理
     log.info("✅ 服務已就緒，可以開始接收請求。")
     yield
     log.info("「小作文擷取服務」正在關閉。")
@@ -74,8 +76,8 @@ async def ingest_text(request: IngestRequest):
             return IngestResponse(message="未解析出有效資料。", inserted_count=0, inserted_items=[])
 
         log.info(f"解析出 {len(parsed_data)} 筆資料，準備存入資料庫...")
-        # (Jules @ 2025-10-07) 修改：接收回傳的詳細列表
-        inserted_items = save_parsed_data_to_db(parsed_data)
+        # (Jules @ 2025-10-08) 修正：傳入原始文字 request.text 作為 source_text
+        inserted_items = save_parsed_data_to_db(parsed_data, source_text=request.text)
         inserted_count = len(inserted_items)
         log.info(f"成功儲存 {inserted_count} 筆新資料。")
 

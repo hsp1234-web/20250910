@@ -121,17 +121,26 @@ async def redirect_to_essay_performance_ingestion():
     """重定向至小作文績效的第一個頁面"""
     return RedirectResponse(url="/essay_performance/ingestion")
 
-@router.get("/essay_performance/ingestion", tags=["UI"])
-async def read_essay_performance_ingestion_page():
-    """提供 小作文績效 - 資料擷取與處理 頁面"""
-    return FileResponse(os.path.join(STATIC_DIR, "essay_performance_ingestion.html"))
+@router.get("/essay_performance/ingestion", response_class=HTMLResponse, tags=["UI"])
+async def serve_essay_performance_ingestion_page(request: Request):
+    """(重構後) 提供 小作文績效 - 資料擷取與處理 頁面 (使用 Jinja2 樣板)"""
+    return templates.TemplateResponse("essay_performance_ingestion.html", {
+        "request": request,
+        "active_page": "ingestion" # 用於標示當前分頁
+    })
 
-@router.get("/essay_performance/processing", tags=["UI"])
-async def read_essay_performance_processing_page():
-    """提供 小作文績效 - 本地AI處理 頁面"""
-    return FileResponse(os.path.join(STATIC_DIR, "essay_performance_processing.html"))
+@router.get("/essay_performance/processing", response_class=HTMLResponse, tags=["UI"])
+async def serve_essay_performance_processing_page(request: Request):
+    """(重構後) 提供 小作文績效 - 本地AI處理 頁面 (使用 Jinja2 樣板)"""
+    return templates.TemplateResponse("essay_performance_processing.html", {
+        "request": request,
+        "active_page": "processing" # 用於標示當前分頁
+    })
 
-@router.get("/essay_performance/report", tags=["UI"])
-async def read_essay_performance_report_page():
-    """提供 小作文績效 - 報告生成 頁面"""
-    return FileResponse(os.path.join(STATIC_DIR, "essay_performance_report.html"))
+@router.get("/essay_performance/report", response_class=HTMLResponse, tags=["UI"])
+async def serve_essay_performance_report_page(request: Request):
+    """(重構後) 提供 小作文績效 - 報告生成 頁面 (使用 Jinja2 樣板)"""
+    return templates.TemplateResponse("essay_performance_report.html", {
+        "request": request,
+        "active_page": "report" # 用於標示當前分頁
+    })
