@@ -118,6 +118,11 @@ def launch_microservice(service_path: Path):
     proc_env = os.environ.copy()
     proc_env["PORT"] = str(port)
 
+    # V6.2 修正: 確保微服務可以找到 'src' 模組
+    # 將專案根目錄加入到 PYTHONPATH，這樣 'from src.db.client import ...' 才能正常運作
+    existing_python_path = proc_env.get("PYTHONPATH", "")
+    proc_env["PYTHONPATH"] = f"{str(ROOT_DIR)}{os.pathsep}{existing_python_path}"
+
     # 修正：使用更安全的方式將主環境的 API 金鑰傳遞給子服務
     # FRED 金鑰 (Jules 修正 @ 2025-10-01: 主動從資料庫注入，而非被動依賴環境)
     try:
