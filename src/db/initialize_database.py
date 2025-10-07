@@ -13,7 +13,6 @@ DB_DIR = Path(__file__).parent
 DB_PATH = DB_DIR / "database.sqlite3"
 
 # --- SQL 定義 ---
-# 新版本包含了 key_type 和 total_tokens_used 欄位
 API_KEYS_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS api_keys (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -30,6 +29,13 @@ CREATE TABLE IF NOT EXISTS api_keys (
     request_count INTEGER DEFAULT 0,
     error_count INTEGER DEFAULT 0,
     total_tokens_used INTEGER DEFAULT 0
+);
+"""
+
+EXTRACTED_URLS_TABLE_SQL = """
+CREATE TABLE IF NOT EXISTS extracted_urls (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    url TEXT NOT NULL UNIQUE
 );
 """
 
@@ -59,13 +65,24 @@ def initialize():
         connection = sqlite3.connect(DB_PATH)
         cursor = connection.cursor()
 
-        print("步驟 1: 正在建立 `api_keys` 資料表 (如果不存在)...")
+        print("步驟 1: 正在建立/更新 `api_keys` 資料表...")
         cursor.execute(API_KEYS_TABLE_SQL)
-
-        print("\n步驟 2: 正在檢查並擴充 `api_keys` 表格欄位...")
         _add_column_if_not_exists(cursor, 'api_keys', 'total_tokens_used', 'INTEGER DEFAULT 0')
-        # 新增 key_type 欄位，以支援多種類型的金鑰
         _add_column_if_not_exists(cursor, 'api_keys', 'key_type', "TEXT NOT NULL DEFAULT 'gemini'")
+
+        print("\n步驟 2: 正在建立/更新 `extracted_urls` 資料表...")
+        # 首先確保資料表存在 (至少有 id 和 url)
+        cursor.execute(EXTRACTED_URLS_TABLE_SQL)
+
+        # (Jules @ 2025-10-07) 核心修正：為所有欄位新增向下相容檢查，確保舊資料庫也能平滑升級
+        _add_column_if_not_exists(cursor, 'extracted_urls', 'title', 'TEXT')
+        _add_column_if_not_exists(cursor, 'extracted_urls', 'author', 'TEXT')
+        _add_column_if_not_exists(cursor, 'extracted_urls', 'message_date', 'TEXT')
+        _add_column_if_not_exists(cursor, 'extracted_urls', 'message_time', 'TEXT')
+        _add_column_if_not_exists(cursor, 'extracted_urls', 'source_text', 'TEXT')
+        _add_column_if_not_exists(cursor, 'extracted_urls', 'created_at', 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP')
+        _add_column_if_not_exists(cursor, 'extracted_urls', 'status', "TEXT DEFAULT 'pending'")
+        _add_column_if_not_exists(cursor, 'extracted_urls', 'source', "TEXT")
 
         connection.commit()
         print(f"\n資料庫初始化/更新成功。資料庫檔案位於: {DB_PATH}")
