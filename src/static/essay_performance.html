@@ -295,9 +295,17 @@
             ws.onmessage = (event) => {
                 try {
                     const data = JSON.parse(event.data);
-                    if (data.type === 'essay_performance_update') {
-                        logStatus(`收到任務 #${data.task_id} 的更新: ${data.message}`);
-                        renderProcessingCard(data);
+                    // **統一事件監聽**：現在我們監聽標準的 'task_update' 事件
+                    if (data.type === 'task_update' && data.task_type === 'processing') {
+                         const taskData = {
+                            task_id: data.task_id,
+                            status: data.status,
+                            message: data.result?.status_message || data.status,
+                            result: data.result, // 這裡可能需要根據後端回傳的結果調整
+                            source_doc: data.result // 假設 result 中包含了 source_doc 的資訊
+                        };
+                        logStatus(`收到任務 #${taskData.task_id} 的更新: ${taskData.message}`);
+                        renderProcessingCard(taskData);
                     }
                 } catch (e) {
                     logStatus(`處理 WebSocket 訊息時發生錯誤: ${e}`, 'red');

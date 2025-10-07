@@ -48,16 +48,14 @@ async def start_essay_processing(payload: ProcessRequest):
     if not payload.ids:
         raise HTTPException(status_code=400, detail="未提供要處理的檔案 ID。")
     try:
-        # 1. 動態發現 document_processor_service 的位址
+        # 動態發現 document_processor_service 的位址
+        # 注意：我們現在呼叫的是 page3_processor 的 API
         processor_service_url = get_service_url("document_processor_service")
         target_url = f"{processor_service_url}/api/processor/start_processing"
 
-        # 2. 建立 HTTP 客戶端並轉發請求
         async with httpx.AsyncClient(timeout=60.0) as client:
             log.info(f"正在將請求轉發至: {target_url}")
             response = await client.post(target_url, json={"ids": payload.ids})
-
-            # 3. 檢查回應並將其直接回傳給前端
             response.raise_for_status()
             log.info("請求已成功轉發至 document_processor_service。")
             return JSONResponse(content=response.json(), status_code=response.status_code)
@@ -69,7 +67,6 @@ async def start_essay_processing(payload: ProcessRequest):
         log.error(f"請求 document_processor_service 時發生錯誤: {e}", exc_info=True)
         raise HTTPException(status_code=503, detail="與後端處理服務的通訊失敗。")
     except httpx.HTTPStatusError as e:
-        # 將下游服務的錯誤直接透傳給客戶端
         log.error(f"下游服務回傳錯誤: {e.response.status_code} {e.response.text}")
         return JSONResponse(content=e.response.json(), status_code=e.response.status_code)
 
@@ -98,19 +95,25 @@ async def get_all_completed_reports(db: DBClient = Depends(get_db)):
     """獲取所有 stage1_status 為 'completed' 的分析任務，用於報告頁面生成。"""
     log.info("API (essay_performance): 收到獲取所有已完成報告的請求。")
     try:
-        all_tasks = db.get_all_analysis_tasks()
+        # 我們現在需要獲取的是 document_urls 表中 status 為 'processed' 的項目
+        # 以及與其關聯的 analysis_tasks 表中的結果
+        processed_docs = db.get_urls_by_statuses(statuses=['processed', 'processing_failed'])
+
         completed_reports = []
-        for task in all_tasks:
-            if task.get('stage1_status') == 'completed' and task.get('stage1_result_json'):
+        for doc in processed_docs:
+            # 對於每個已處理的文件，我們需要找到對應的分析任務
+            analysis_task = db.get_analysis_task_by_file_id(doc['id'])
+            if analysis_task and analysis_task.get('stage1_status') == 'completed' and analysis_task.get('stage1_result_json'):
                 try:
-                    analysis_result = json.loads(task['stage1_result_json'])
+                    analysis_result = json.loads(analysis_task['stage1_result_json'])
                     report_item = {
-                        "task_id": task['id'], "file_id": task['source_document_id'],
-                        "filename": task['filename'], "analysis": analysis_result
+                        "task_id": analysis_task['id'], "file_id": doc['id'],
+                        "filename": doc.get('title') or Path(doc.get('local_path')).name,
+                        "analysis": analysis_result
                     }
                     completed_reports.append(report_item)
                 except (json.JSONDecodeError, TypeError):
-                    log.warning(f"無法解析任務 ID {task.get('id')} 的分析結果 JSON。")
+                    log.warning(f"無法解析任務 ID {analysis_task.get('id')} 的分析結果 JSON。")
                     continue
         return JSONResponse(content=completed_reports)
     except Exception as e:
