@@ -219,7 +219,21 @@ async def add_server_port_to_state(request: Request, call_next):
 
 # --- 整合模組化路由 ---
 from core import config_manager
-from api.routes import ui, page1, page2_downloader, page3_processor, page4_analyzer, page5_backup, page6_keys, page7_prompts, page8_details, page9_dashboard, page10_test, system, bond_service_proxy
+from api.routes import ui
+from api.routes import page1
+from api.routes import page2_downloader
+from api.routes import page3_processor
+from api.routes import page4_analyzer
+from api.routes import page5_backup
+from api.routes import page6_keys
+from api.routes import page7_prompts
+from api.routes import page8_details
+from api.routes import page9_dashboard
+from api.routes import page10_test
+from api.routes import system
+from api.routes import bond_service_proxy
+# 修正循環匯入：直接從模組匯入 router 物件
+from api.routes.essay_performance import router as essay_performance_router
 
 # --- JULES (2025-09-15): 在應用程式啟動時載入設定 ---
 # 將設定載入到 app.state 中，使其在整個應用程式中可用。
@@ -236,6 +250,7 @@ app.include_router(page1.router) # No prefix, as it's defined in the router itse
 app.include_router(page2_downloader.router, prefix="/api/downloader", tags=["API: 批次下載"])
 app.include_router(page3_processor.router, prefix="/api/processor", tags=["API: 檔案處理"])
 app.include_router(page4_analyzer.router, prefix="/api/analyzer", tags=["API: AI 分析"])
+app.include_router(essay_performance_router, prefix="/api/essay_performance", tags=["API: 小作文績效"])
 app.include_router(page5_backup.router, prefix="/api/backup", tags=["API: 備份管理"])
 app.include_router(page6_keys.router, prefix="/api/keys", tags=["API: 金鑰管理"])
 app.include_router(page7_prompts.router, tags=["API: 提示詞管理"])

@@ -4,18 +4,444 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>小作文績效</title>
-    <link rel="stylesheet" href="/static/css/main.css">
+    <!-- 引用通用樣式 -->
+    <link rel="stylesheet" href="/static/css/nav.css">
+    <link rel="stylesheet" href="/static/css/common.css">
+    <style>
+        /* 專為此頁面設計的樣式 */
+        .sub-nav {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            border-bottom: 2px solid #ccc;
+            padding-bottom: 10px;
+        }
+        .sub-nav-button {
+            padding: 10px 15px;
+            border: 1px solid #ccc;
+            background-color: #f0f0f0;
+            cursor: pointer;
+            border-radius: 5px 5px 0 0;
+            text-decoration: none;
+            color: #333;
+        }
+        .sub-nav-button.active {
+            background-color: #fff;
+            border-bottom: 2px solid #fff;
+            margin-bottom: -2px;
+        }
+        .tab-content {
+            display: none;
+        }
+        .tab-content.active {
+            display: block;
+        }
+        /* 沿用 page3 的卡片網格樣式 */
+        .card-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+            gap: 15px;
+            margin-top: 15px;
+        }
+        .file-card {
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            padding: 15px;
+            background-color: #fff;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .file-card .card-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            border-bottom: 1px solid #eee;
+            padding-bottom: 10px;
+            margin-bottom: 10px;
+        }
+        .file-card .info-grid {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 8px;
+        }
+        .info-item strong {
+            color: #555;
+        }
+    </style>
 </head>
 <body>
-    <div class="navbar">
-        <a href="/" class="navbar-brand">返回主頁</a>
-    </div>
+    <!-- 頂部主導覽列 (參考 page3.html) -->
+    <nav class="top-nav">
+        <ul>
+            <li><a href="/">鳳凰主頁</a></li>
+            <li><a href="/page1">網址提取</a></li>
+            <li><a href="/page2">批次下載</a></li>
+            <li><a href="/page3">檔案處理</a></li>
+            <li><a href="/page4_stage1_ai">AI 分析</a></li>
+            <!-- 將當前頁面標記為 active -->
+            <li><a href="/essay_performance" class="active">小作文績效</a></li>
+            <li><a href="/page5">備份管理</a></li>
+            <li><a href="/page6">金鑰管理</a></li>
+            <li><a href="/page7">提示詞管理</a></li>
+            <li><a href="/page9">績效儀表板</a></li>
+        </ul>
+    </nav>
 
     <div class="content">
-        <div class="panel">
-            <h1>小作文績效</h1>
-            <p>此頁面正在建置中。</p>
+        <h1>小作文績效</h1>
+
+        <!-- 副導覽列 -->
+        <div class="sub-nav">
+            <a href="#data-extraction" id="nav-data-extraction" class="sub-nav-button active">資料擷取與處理</a>
+            <a href="#ai-processing" id="nav-ai-processing" class="sub-nav-button">本地AI處理</a>
+            <a href="#report-generation" id="nav-report-generation" class="sub-nav-button">報告生成</a>
+        </div>
+
+        <!-- 頁籤內容容器 -->
+        <div id="tab-content-container">
+            <!-- 頁籤一: 資料擷取與處理 -->
+            <div id="tab-data-extraction" class="tab-content active">
+                <div class="panel">
+                    <h2>第一步：選擇要分析的檔案</h2>
+                    <p>此處會列出所有已下載完成、可以進行處理的檔案。</p>
+                    <div class="action-bar">
+                        <div class="action-group">
+                            <button id="select-all-button">全選</button>
+                            <button id="deselect-all-button">取消全選</button>
+                        </div>
+                        <div class="action-group">
+                            <button id="start-processing-button" class="primary-action">下一步：開始本地AI處理 &raquo;</button>
+                        </div>
+                    </div>
+                    <div id="file-list-container" class="card-grid">
+                        <p>正在載入檔案列表...</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 頁籤二: 本地AI處理 -->
+            <div id="tab-ai-processing" class="tab-content">
+                <div class="panel">
+                    <h2>第二步：監控AI處理進度</h2>
+                     <div class="action-bar">
+                        <div class="action-group">
+                            <button id="toggle-all-cards-button">全部展開/收合</button>
+                        </div>
+                        <div class="action-group">
+                            <button id="go-to-report-button" class="primary-action">前往最終報告頁 &raquo;</button>
+                        </div>
+                    </div>
+                    <div id="processing-status-container">
+                        <p>請先在第一步選擇檔案並開始處理。</p>
+                    </div>
+                </div>
+                 <div class="panel">
+                    <h2>狀態日誌</h2>
+                    <div id="status-log-container"></div>
+                </div>
+            </div>
+
+            <!-- 頁籤三: 報告生成 -->
+            <div id="tab-report-generation" class="tab-content">
+                <div class="panel">
+                    <h2>第三步：檢視分析報告</h2>
+                    <div id="report-container" class="card-grid">
+                        <p>處理完成後，此處將以卡片形式顯示最終報告。</p>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
+
+    <!-- JavaScript 邏輯 -->
+    <script>
+    document.addEventListener('DOMContentLoaded', () => {
+        // --- DOM 元素快取 ---
+        const navButtons = document.querySelectorAll('.sub-nav-button');
+        const tabContents = document.querySelectorAll('.tab-content');
+        const fileListContainer = document.getElementById('file-list-container');
+        const selectAllButton = document.getElementById('select-all-button');
+        const deselectAllButton = document.getElementById('deselect-all-button');
+        const startProcessingButton = document.getElementById('start-processing-button');
+        const processingStatusContainer = document.getElementById('processing-status-container');
+        const statusLogContainer = document.getElementById('status-log-container');
+        const toggleAllCardsButton = document.getElementById('toggle-all-cards-button');
+        const goToReportButton = document.getElementById('go-to-report-button');
+
+        // --- 狀態管理 ---
+        let processedTasks = {}; // 存放已處理完成的任務結果
+
+        // --- 通用輔助函式 ---
+        const escapeHtml = (unsafe) => {
+            if (unsafe === null || typeof unsafe === 'undefined') return '';
+            return unsafe.toString()
+                         .replace(/&/g, "&amp;")
+                         .replace(/</g, "&lt;")
+                         .replace(/>/g, "&gt;")
+                         .replace(/"/g, "&quot;")
+                         .replace(/'/g, "&#039;");
+        };
+
+        const logStatus = (message, color = 'black') => {
+            const timestamp = new Date().toLocaleTimeString('zh-TW', { hour12: false });
+            statusLogContainer.insertAdjacentHTML('afterbegin', `<p style="color: ${color};">[${timestamp}] ${message}</p>`);
+        };
+
+        // --- 頁籤一：資料擷取與處理 ---
+        const fetchAndRenderFiles = async () => {
+            fileListContainer.innerHTML = '<p>正在載入檔案列表...</p>';
+            try {
+                const response = await fetch('/api/essay_performance/get_files');
+                if (!response.ok) throw new Error(`伺服器錯誤 (狀態 ${response.status})`);
+                const files = await response.json();
+
+                if (files.length === 0) {
+                    fileListContainer.innerHTML = '<p>目前沒有已完成下載、可供分析的檔案。</p>';
+                    startProcessingButton.disabled = true;
+                    return;
+                }
+
+                fileListContainer.innerHTML = '';
+                files.forEach(file => {
+                    const cardHTML = `
+                        <div class="file-card" data-id="${file.id}">
+                            <div class="card-header">
+                                <input type="checkbox" class="file-checkbox" value="${escapeHtml(file.id)}">
+                                <h3 class="filename" title="${escapeHtml(file.title || file.filename)}">${escapeHtml(file.title || file.filename)}</h3>
+                            </div>
+                            <div class="card-body">
+                                <div class="info-grid">
+                                    <div class="info-item"><strong>作者:</strong> ${escapeHtml(file.author || 'N/A')}</div>
+                                    <div class="info-item"><strong>時間:</strong> ${file.message_date ? new Date(file.message_date).toLocaleString('zh-TW') : 'N/A'}</div>
+                                </div>
+                            </div>
+                        </div>`;
+                    fileListContainer.insertAdjacentHTML('beforeend', cardHTML);
+                });
+                startProcessingButton.disabled = false;
+            } catch (error) {
+                fileListContainer.innerHTML = `<p style="color: red;">載入檔案列表失敗：${error.message}</p>`;
+                startProcessingButton.disabled = true;
+            }
+        };
+
+        // --- 頁籤二：AI 處理介面 ---
+        const renderProcessingCard = (taskData) => {
+            const { task_id, status, message, result, source_doc } = taskData;
+            let card = document.getElementById(`task-card-${task_id}`);
+
+            // 如果卡片不存在，則建立它
+            if (!card) {
+                card = document.createElement('div');
+                card.id = `task-card-${task_id}`;
+                card.className = 'file-card processing-card'; // 初始 class
+                processingStatusContainer.appendChild(card);
+            }
+
+            const title = source_doc?.title || source_doc?.filename || `任務 #${task_id}`;
+            let contentHTML = '';
+
+            if (status === 'processed') {
+                card.classList.add('status-processed', 'collapsible');
+                const analysis = result;
+                contentHTML = `
+                    <div class="card-header collapsible-header">
+                        <span class="collapse-icon">▶️</span>
+                        <h3 class="filename">${escapeHtml(title)}</h3>
+                        <span class="status-badge status-completed">✅ 處理完成</span>
+                    </div>
+                    <div class="card-content-collapsible">
+                        <div class="info-grid">
+                            <div class="info-item"><strong>股票代號:</strong> ${escapeHtml(analysis.analyzed_stock_ids?.join(', ') || '無')}</div>
+                            <div class="info-item"><strong>內容品質:</strong> ${escapeHtml(analysis.quality_score)}/10</div>
+                            <div class="info-item"><strong>交易相關:</strong> ${escapeHtml(analysis.is_trade_related)}</div>
+                            <div class="info-item"><strong>投資策略:</strong> ${escapeHtml(analysis.strategy)}</div>
+                        </div>
+                        <hr>
+                        <p><strong>內容大意:</strong></p>
+                        <p>${escapeHtml(analysis.summary)}</p>
+                    </div>`;
+            } else if (status === 'processing_failed') {
+                card.classList.add('status-failed');
+                contentHTML = `
+                     <div class="card-header">
+                        <h3 class="filename">${escapeHtml(title)}</h3>
+                        <span class="status-badge status-error">❌ 處理失敗</span>
+                    </div>
+                    <div class="card-body">
+                       <p><strong>錯誤訊息:</strong> ${escapeHtml(result?.error || '未知錯誤')}</p>
+                    </div>`;
+            } else { // queued, stock_id_extraction, ai_processing
+                card.classList.add('status-processing');
+                contentHTML = `
+                    <div class="card-header">
+                        <h3 class="filename">${escapeHtml(title)}</h3>
+                    </div>
+                     <div class="card-body">
+                        <p><strong>狀態:</strong> ⚙️ ${escapeHtml(message)}</p>
+                    </div>`;
+            }
+            card.innerHTML = contentHTML;
+        };
+
+        // --- WebSocket 邏輯 ---
+        const setupWebSocket = () => {
+            const ws = new WebSocket(`${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/api/ws`);
+            ws.onopen = () => logStatus('WebSocket 連線成功。', 'blue');
+            ws.onclose = () => {
+                logStatus('WebSocket 連線已中斷。5 秒後嘗試重新連線...', 'orange');
+                setTimeout(setupWebSocket, 5000);
+            };
+            ws.onerror = (error) => logStatus(`WebSocket 發生錯誤: ${error}`, 'red');
+            ws.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    if (data.type === 'essay_performance_update') {
+                        logStatus(`收到任務 #${data.task_id} 的更新: ${data.message}`);
+                        renderProcessingCard(data);
+                    }
+                } catch (e) {
+                    logStatus(`處理 WebSocket 訊息時發生錯誤: ${e}`, 'red');
+                }
+            };
+        };
+
+        // --- 事件監聽器 ---
+        selectAllButton.addEventListener('click', () => document.querySelectorAll('#tab-data-extraction .file-checkbox').forEach(cb => cb.checked = true));
+        deselectAllButton.addEventListener('click', () => document.querySelectorAll('#tab-data-extraction .file-checkbox').forEach(cb => cb.checked = false));
+
+        startProcessingButton.addEventListener('click', async () => {
+            const selectedIds = Array.from(document.querySelectorAll('#tab-data-extraction .file-checkbox:checked')).map(cb => parseInt(cb.value));
+            if (selectedIds.length === 0) {
+                alert('請至少選擇一個要處理的項目。');
+                return;
+            }
+
+            // 清空第二頁籤的內容
+            processingStatusContainer.innerHTML = `<p>已發送 ${selectedIds.length} 個處理請求...</p>`;
+            logStatus(`正在發送 ${selectedIds.length} 個項目的處理請求...`, 'purple');
+
+            try {
+                const response = await fetch('/api/essay_performance/start_processing', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ ids: selectedIds })
+                });
+                const result = await response.json();
+                if (!response.ok) throw new Error(result.detail || '啟動處理時發生未知錯誤。');
+
+                logStatus(result.message, 'green');
+                switchTab('ai-processing'); // 自動切換到處理頁籤
+            } catch (error) {
+                logStatus(`請求失敗：${error.message}`, 'red');
+                alert(`請求失敗：${error.message}`);
+            }
+        });
+
+        processingStatusContainer.addEventListener('click', (e) => {
+            const header = e.target.closest('.collapsible-header');
+            if (header) {
+                const content = header.nextElementSibling;
+                const icon = header.querySelector('.collapse-icon');
+                if (content && content.classList.contains('card-content-collapsible')) {
+                    content.style.display = content.style.display === 'block' ? 'none' : 'block';
+                    icon.textContent = content.style.display === 'block' ? '🔽' : '▶️';
+                }
+            }
+        });
+
+        toggleAllCardsButton.addEventListener('click', () => {
+            const allCards = processingStatusContainer.querySelectorAll('.collapsible .card-content-collapsible');
+            if (allCards.length === 0) return;
+            // 以第一個卡片的狀態為基準來決定全部操作
+            const shouldOpen = allCards[0].style.display !== 'block';
+            allCards.forEach(content => {
+                content.style.display = shouldOpen ? 'block' : 'none';
+                const icon = content.previousElementSibling.querySelector('.collapse-icon');
+                if(icon) icon.textContent = shouldOpen ? '🔽' : '▶️';
+            });
+        });
+
+        goToReportButton.addEventListener('click', () => {
+            fetchAndRenderReports();
+        });
+
+        // --- 頁籤三：報告生成 ---
+        const fetchAndRenderReports = async () => {
+            const reportContainer = document.getElementById('report-container');
+            reportContainer.innerHTML = '<p>正在載入最終報告...</p>';
+            switchTab('report-generation'); // 先切換頁面
+
+            try {
+                const response = await fetch('/api/essay_performance/get_reports');
+                if (!response.ok) throw new Error(`伺服器錯誤 (狀態 ${response.status})`);
+                const reports = await response.json();
+
+                if (reports.length === 0) {
+                    reportContainer.innerHTML = '<p>目前沒有已完成的分析報告。</p>';
+                    return;
+                }
+
+                reportContainer.innerHTML = ''; // 清空容器
+                reports.forEach(report => {
+                    const analysis = report.analysis;
+                    const cardHTML = `
+                        <div class="file-card status-processed">
+                            <div class="card-header">
+                                <h3 class="filename">${escapeHtml(report.filename)}</h3>
+                            </div>
+                            <div class="card-body">
+                                <div class="info-grid">
+                                    <div class="info-item"><strong>股票代號:</strong> ${escapeHtml(analysis.analyzed_stock_ids?.join(', ') || '無')}</div>
+                                    <div class="info-item"><strong>內容品質:</strong> ${escapeHtml(analysis.quality_score)}/10</div>
+                                    <div class="info-item"><strong>交易相關:</strong> ${escapeHtml(analysis.is_trade_related)}</div>
+                                    <div class="info-item"><strong>投資策略:</strong> ${escapeHtml(analysis.strategy)}</div>
+                                </div>
+                                <hr>
+                                <p><strong>內容大意:</strong></p>
+                                <p>${escapeHtml(analysis.summary)}</p>
+                            </div>
+                        </div>`;
+                    reportContainer.insertAdjacentHTML('beforeend', cardHTML);
+                });
+
+            } catch (error) {
+                reportContainer.innerHTML = `<p style="color: red;">載入報告失敗：${error.message}</p>`;
+            }
+        };
+
+        // --- 頁籤切換邏輯 ---
+        function switchTab(targetId) {
+            tabContents.forEach(content => content.classList.remove('active'));
+            navButtons.forEach(button => button.classList.remove('active'));
+
+            const targetContent = document.getElementById(`tab-${targetId}`);
+            const targetButton = document.getElementById(`nav-${targetId}`);
+
+            if (targetContent) targetContent.classList.add('active');
+            if (targetButton) targetButton.classList.add('active');
+
+            if (targetId === 'data-extraction') fetchAndRenderFiles();
+        }
+
+        navButtons.forEach(button => {
+            button.addEventListener('click', (e) => {
+                e.preventDefault();
+                const targetId = button.id.replace('nav-', '');
+                window.location.hash = `#${targetId}`;
+                switchTab(targetId);
+            });
+        });
+
+        // --- 頁面初始化 ---
+        const currentHash = window.location.hash.replace('#', '');
+        if (currentHash && ['data-extraction', 'ai-processing', 'report-generation'].includes(currentHash)) {
+            switchTab(currentHash);
+        } else {
+            switchTab('data-extraction');
+        }
+
+        setupWebSocket(); // 啟動 WebSocket
+    });
+    </script>
 </body>
 </html>

@@ -22,10 +22,33 @@ from .stock_id_extractor import extract_stock_ids
 
 # --- 日誌與常數設定 ---
 log = logging.getLogger(__name__)
-LLM_SERVICE_URL = "http://127.0.0.1:8001/generate"
+# LLM_SERVICE_URL = "http://127.0.0.1:8001/generate" # DEPRECATED: Replaced with dynamic service discovery
 MODEL_NAME = "gemma2:2b"
 DOWNLOAD_DIR = Path(__file__).parent / "downloads"
 DOWNLOAD_DIR.mkdir(exist_ok=True)
+SERVICE_REGISTRY_FILE = Path("/tmp/service_registry.json")
+
+def get_llm_service_url() -> str:
+    """
+    從服務註冊檔案中動態讀取 llm_service 的 URL。
+    這是解決微服務架構中服務發現問題的關鍵。
+    """
+    if not SERVICE_REGISTRY_FILE.exists():
+        log.error(f"服務註冊檔案不存在: {SERVICE_REGISTRY_FILE}")
+        raise FileNotFoundError("Service registry file not found.")
+
+    with open(SERVICE_REGISTRY_FILE, 'r') as f:
+        registry = json.load(f)
+
+    llm_service_info = registry.get("llm_service")
+    if not llm_service_info or not llm_service_info.get("port"):
+        log.error(f"在服務註冊檔案中找不到 'llm_service' 的有效埠號設定。")
+        raise ValueError("Invalid llm_service configuration in registry.")
+
+    port = llm_service_info["port"]
+    url = f"http://127.0.0.1:{port}/generate"
+    log.info(f"從服務註冊中心動態解析到 LLM 服務 URL: {url}")
+    return url
 
 def build_analysis_prompt(text_content: str, stock_ids: list[str]) -> str:
     """
@@ -95,8 +118,10 @@ async def analyze_text_with_llm(text_content: str, stock_ids: list[str]) -> Dict
 
     async with httpx.AsyncClient(timeout=300.0) as client: # 加長超時時間以應對大型模型
         try:
-            log.info(f"正在向 llm_service ({LLM_SERVICE_URL}) 發送分析請求...")
-            response = await client.post(LLM_SERVICE_URL, json=payload)
+            # 動態獲取 llm_service 的 URL
+            llm_service_url = get_llm_service_url()
+            log.info(f"正在向 llm_service ({llm_service_url}) 發送分析請求...")
+            response = await client.post(llm_service_url, json=payload)
             response.raise_for_status()
 
             # llm_service 的回應本身是一個 JSON，我們需要的是裡面的 "response_text"

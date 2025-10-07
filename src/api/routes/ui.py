@@ -112,3 +112,8 @@ async def serve_page_bond(request: Request):
 async def serve_primary_dealer_analysis(request: Request):
     """ 提供一級交易商分析儀表板頁面 """
     return templates.TemplateResponse("primary_dealer_analysis.html", {"request": request})
+
+@router.get("/essay_performance", response_class=HTMLResponse)
+async def serve_essay_performance_page(request: Request):
+    """ 提供「小作文績效」頁面 """
+    return templates.TemplateResponse("essay_performance.html", {"request": request})
