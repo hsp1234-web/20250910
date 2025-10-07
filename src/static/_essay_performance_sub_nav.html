@@ -1,0 +1,7 @@
+<!-- 共用的「小作文績效」模組副導覽列 -->
+<!-- (Jules @ 2025-10-08) 使用 Jinja2 樣板語法，根據後端傳入的 active_page 變數動態設定 active class -->
+<div class="tab-container" style="margin-top: 20px;">
+    <a href="/essay_performance/ingestion" class="tab-button {% if active_page == 'ingestion' %}active{% endif %}" id="nav-ingestion">資料擷取與處理</a>
+    <a href="/essay_performance/processing" class="tab-button {% if active_page == 'processing' %}active{% endif %}" id="nav-processing">本地AI處理</a>
+    <a href="/essay_performance/report" class="tab-button {% if active_page == 'report' %}active{% endif %}" id="nav-report">報告生成</a>
+</div>
