@@ -1,11 +1,13 @@
+import os
 from fastapi import APIRouter, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, FileResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from pathlib import Path
 
 # --- 路徑與樣板設定 ---
 SRC_DIR = Path(__file__).resolve().parent.parent.parent
-templates = Jinja2Templates(directory=str(SRC_DIR / "static"))
+STATIC_DIR = str(SRC_DIR / "static")
+templates = Jinja2Templates(directory=STATIC_DIR)
 router = APIRouter()
 
 # --- UI 頁面路由 ---
@@ -112,3 +114,24 @@ async def serve_page_bond(request: Request):
 async def serve_primary_dealer_analysis(request: Request):
     """ 提供一級交易商分析儀表板頁面 """
     return templates.TemplateResponse("primary_dealer_analysis.html", {"request": request})
+
+
+@router.get("/essay_performance", tags=["UI"])
+async def redirect_to_essay_performance_ingestion():
+    """重定向至小作文績效的第一個頁面"""
+    return RedirectResponse(url="/essay_performance/ingestion")
+
+@router.get("/essay_performance/ingestion", tags=["UI"])
+async def read_essay_performance_ingestion_page():
+    """提供 小作文績效 - 資料擷取與處理 頁面"""
+    return FileResponse(os.path.join(STATIC_DIR, "essay_performance_ingestion.html"))
+
+@router.get("/essay_performance/processing", tags=["UI"])
+async def read_essay_performance_processing_page():
+    """提供 小作文績效 - 本地AI處理 頁面"""
+    return FileResponse(os.path.join(STATIC_DIR, "essay_performance_processing.html"))
+
+@router.get("/essay_performance/report", tags=["UI"])
+async def read_essay_performance_report_page():
+    """提供 小作文績效 - 報告生成 頁面"""
+    return FileResponse(os.path.join(STATIC_DIR, "essay_performance_report.html"))
