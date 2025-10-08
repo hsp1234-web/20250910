@@ -1,3 +1,17 @@
+# 核心 Web 框架
 fastapi
 uvicorn
+
+# 異步 HTTP 客戶端
 httpx
+
+# 新增：通用下載器依賴
+requests
+gdown
+filetype
+
+# 新增：內容提取器依賴
+PyMuPDF
+python-docx
+python-pptx
+Pillow
