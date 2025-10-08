@@ -4,9 +4,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from typing import List
 
 # 從相鄰模組中匯入必要的元件
-import key_logic
-import database
-from models import KeyCreate, KeyInfo, UpsertResponse, ValidKeyResponse
+from . import key_logic
+from . import database
+from .models import KeyCreate, KeyInfo, UpsertResponse, ValidKeyResponse
 
 # --- FastAPI 應用程式實例 ---
 app = FastAPI(
