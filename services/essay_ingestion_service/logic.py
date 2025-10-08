@@ -87,8 +87,8 @@ def save_parsed_data_to_db(parsed_data: List[Dict], source_text: str) -> List[Di
             "url": item['url'],
             "title": item['title'],
             "author": item['author'],
-            "message_date": item['date'],
-            "message_time": item['time'],
+            "date": item['date'],
+            "time": item['time'],
             "source": "essay_performance"
         }
         for item in parsed_data
