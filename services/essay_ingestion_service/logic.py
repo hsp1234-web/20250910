@@ -1,66 +1,19 @@
 # services/essay_ingestion_service/logic.py
 import re
-import sqlite3
+import logging
+from typing import List, Dict
 import sys
 from pathlib import Path
-import logging
-from typing import Optional, List, Dict
+
+# --- 路徑修正 ---
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
+
+# --- 專案模組匯入 ---
+from src.db.client import DBClient
 
 # --- 日誌設定 ---
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-log = logging.getLogger('essay_ingestion_service')
-
-# --- 資料庫路徑 ---
-DB_PATH = Path(__file__).resolve().parent.parent.parent / "src" / "db" / "database.sqlite3"
-
-def _add_column_if_not_exists(cursor: sqlite3.Cursor, table_name: str, column_name: str, column_definition: str):
-    """一個輔助函式，用於檢查欄位是否存在，如果不存在則新增。"""
-    cursor.execute(f"PRAGMA table_info({table_name})")
-    columns = [row[1] for row in cursor.fetchall()]
-    if column_name not in columns:
-        log.info(f"在 `{table_name}` 表中找不到 `{column_name}` 欄位，正在新增...")
-        cursor.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_definition}")
-        log.info(f"`{column_name}` 欄位已成功新增。")
-    else:
-        log.info(f"欄位 `{column_name}` 已在 `{table_name}` 表中，無需改動。")
-
-def initialize_database():
-    """
-    [微服務自我修復]
-    確保資料庫及 `extracted_urls` 表結構符合本服務的需求。
-    此函式應在服務啟動時執行。
-    """
-    log.info("正在執行微服務的資料庫結構自我校驗...")
-    if not DB_PATH.parent.exists():
-        log.error(f"資料庫目錄不存在: {DB_PATH.parent}，無法繼續。")
-        return
-
-    try:
-        with get_db_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS extracted_urls (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    url TEXT NOT NULL UNIQUE
-                );
-            """)
-            _add_column_if_not_exists(cursor, 'extracted_urls', 'title', 'TEXT')
-            _add_column_if_not_exists(cursor, 'extracted_urls', 'author', 'TEXT')
-            _add_column_if_not_exists(cursor, 'extracted_urls', 'message_date', 'TEXT')
-            _add_column_if_not_exists(cursor, 'extracted_urls', 'source', 'TEXT')
-            conn.commit()
-            log.info("✅ 資料庫結構校驗完成。")
-    except sqlite3.Error as e:
-        log.error(f"資料庫自我校驗時發生嚴重錯誤: {e}", exc_info=True)
-
-
-def get_db_connection() -> sqlite3.Connection:
-    """建立並返回一個資料庫連線。"""
-    try:
-        return sqlite3.connect(DB_PATH, timeout=10)
-    except sqlite3.Error as e:
-        log.error(f"連線資料庫時發生錯誤: {e}", exc_info=True)
-        raise
+log = logging.getLogger(__name__)
 
 def parse_chat_log(text: str) -> List[Dict]:
     """
@@ -118,64 +71,37 @@ def parse_chat_log(text: str) -> List[Dict]:
     log.info(f"從聊天紀錄中解析出 {len(results)} 筆結構化資料。")
     return results
 
-def save_parsed_data_to_db(parsed_data: List[Dict]) -> List[Dict]:
+def save_parsed_data_to_db(parsed_data: List[Dict], source_text: str) -> List[Dict]:
     """
-    [微服務專用版本] 將解析後的資料儲存到資料庫，並回傳包含新 ID 的項目列表。
+    [V2 - 修正後版本] 將解析後的資料透過 DBClient 傳送給 db_manager 服務進行儲存。
     """
     if not parsed_data:
         log.info("沒有要儲存的資料。")
         return []
 
-    conn = get_db_connection()
+    log.info(f"準備將 {len(parsed_data)} 筆解析資料透過 DBClient 傳送至中央資料庫...")
+
+    # (Jules) 修正：現在 data_to_send 的格式是 DBClient.add_new_urls 所期望的
+    data_to_send = [
+        {
+            "url": item['url'],
+            "title": item['title'],
+            "author": item['author'],
+            "message_date": item['date'],
+            "message_time": item['time'],
+            "source": "essay_performance"
+        }
+        for item in parsed_data
+    ]
+
     try:
-        cursor = conn.cursor()
-        cursor.execute("SELECT url FROM extracted_urls")
-        existing_urls = {row[0] for row in cursor.fetchall()}
+        db_client = DBClient()
+        # (Jules) 修正：呼叫正確的方法 `add_new_urls` 並傳遞必要的 `source_text` 參數
+        inserted_items = db_client.add_new_urls(parsed_data=data_to_send, source_text=source_text)
 
-        new_items = [item for item in parsed_data if item['url'] not in existing_urls]
+        log.info(f"成功透過 db_manager 儲存了 {len(inserted_items)} 筆新資料。")
+        return inserted_items
 
-        if not new_items:
-            log.info("所有解析出的網址都已存在於資料庫中，無需新增。")
-            return []
-
-        log.info(f"過濾後，有 {len(new_items)} 筆新資料需要儲存。")
-
-        data_to_insert = [
-            (item['url'], item['title'], item['author'], f"{item['date']} {item['time']}", 'essay_performance')
-            for item in new_items
-        ]
-
-        cursor.executemany(
-            "INSERT INTO extracted_urls (url, title, author, message_date, source) VALUES (?, ?, ?, ?, ?)",
-            data_to_insert
-        )
-
-        if cursor.rowcount > 0:
-            log.info(f"成功將 {cursor.rowcount} 筆新的解析資料插入資料庫。")
-            conn.commit()
-
-            inserted_urls = [item['url'] for item in new_items]
-            placeholders = ','.join('?' for _ in inserted_urls)
-
-            cursor.execute(
-                f"SELECT id, url, title, author, message_date FROM extracted_urls WHERE url IN ({placeholders})",
-                inserted_urls
-            )
-
-            columns = [description[0] for description in cursor.description]
-            inserted_rows = [dict(zip(columns, row)) for row in cursor.fetchall()]
-
-            log.info(f"成功取回 {len(inserted_rows)} 筆包含資料庫 ID 的新項目。")
-            return inserted_rows
-        else:
-            conn.rollback()
-            log.warning("資料庫執行插入後，回報影響行數為 0。")
-            return []
-
-    except sqlite3.Error as e:
-        log.error(f"儲存解析資料到資料庫時發生錯誤: {e}", exc_info=True)
-        conn.rollback()
+    except Exception as e:
+        log.error(f"呼叫 DBClient 時發生嚴重錯誤: {e}", exc_info=True)
         return []
-    finally:
-        if conn:
-            conn.close()
