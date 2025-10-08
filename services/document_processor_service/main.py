@@ -15,10 +15,13 @@ from services.document_processor_service.repository import initialize_database
 
 # --- 日誌基礎設定 ---
 # 確保在應用程式啟動時，日誌記錄器就被設定好
+# (Jules) 修正 logging.basicConfig 的用法
+# 'stream' 參數需要一個流對象，而不是一個 Handler。
+# 正確的作法是使用 'handlers' 參數傳遞一個 Handler 列表。
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    stream=logging.StreamHandler()
+    handlers=[logging.StreamHandler(sys.stdout)]
 )
 log = logging.getLogger(__name__)
 

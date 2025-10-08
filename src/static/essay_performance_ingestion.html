@@ -5,14 +5,26 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>小作文績效 - 資料擷取</title>
     <link rel="stylesheet" href="/static/css/main.css">
+    <link rel="stylesheet" href="/static/css/nav.css"> <!-- (Jules) 補上導覽列樣式 -->
     <link rel="stylesheet" href="/static/css/essay_performance_tabs.css">
     <link rel="stylesheet" href="/static/css/page1_unified.css">
 </head>
 <body>
-    <div class="navbar">
-        <a href="/" class="navbar-brand">鳳凰主頁</a>
-        <ul class="navbar-links" id="navbar-links"></ul>
-    </div>
+    <!-- (Jules) 替換為標準的 top-nav 導覽列 -->
+    <nav class="top-nav">
+        <ul>
+            <li><a href="/">鳳凰主頁</a></li>
+            <li><a href="/page1">資料處理</a></li>
+            <li><a href="/page2">批次下載</a></li>
+            <li><a href="/page3">檔案處理</a></li>
+            <li><a href="/page4_stage1_ai">AI 分析</a></li>
+            <li><a href="/page5">備份管理</a></li>
+            <li><a href="/page6">金鑰管理</a></li>
+            <li><a href="/page7">提示詞管理</a></li>
+            <li><a href="/page9">績效儀表板</a></li>
+            <li><a href="/essay_performance/ingestion" class="active">小作文績效</a></li>
+        </ul>
+    </nav>
     <div class="content">
         <div class="panel">
             <h1>小作文績效</h1>
