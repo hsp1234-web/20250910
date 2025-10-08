@@ -145,9 +145,16 @@ def launch_microservice(service_path: Path):
         log.warning(f"[{log_prefix}] 在主協調器環境中未找到 GOOGLE_API_KEY，AI 分析功能可能受限。")
 
 
+    # JULES (2025-10-09) 關鍵修復：
+    # 1. 將工作目錄改為專案根目錄 (ROOT_DIR)。
+    # 2. 將 uvicorn 的 app 參數改為完整的模組路徑 (e.g., 'services.essay_ingestion_service.main:app')。
+    # 這兩項修改共同確保 Python 能以正確的套件模式載入微服務，從而解決相對匯入的 ImportError。
+    module_path = ".".join(service_path.relative_to(ROOT_DIR).parts)
+    app_string = f"{module_path}.main:app"
+
     command = [
         str(python_exec), "-m", "uvicorn",
-        f"{main_script.stem}:app",
+        app_string,
         "--host", "127.0.0.1",
         "--port", str(port)
     ]
@@ -158,7 +165,7 @@ def launch_microservice(service_path: Path):
         text=True,
         encoding='utf-8',
         env=proc_env,
-        cwd=service_path
+        cwd=ROOT_DIR  # <-- 關鍵修復：將工作目錄設定為專案根目錄
     )
 
     # 為每個服務的日誌建立一個獨立的 reader thread
