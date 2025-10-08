@@ -117,6 +117,9 @@ def launch_microservice(service_path: Path):
     port = find_free_port()
     proc_env = os.environ.copy()
     proc_env["PORT"] = str(port)
+    # JULES (2025-10-09) 關鍵修復：為所有微服務設定 PYTHONPATH
+    # 確保子程序能將專案根目錄視為一個套件，從而正確處理相對/絕對匯入
+    proc_env["PYTHONPATH"] = str(ROOT_DIR) + os.pathsep + proc_env.get("PYTHONPATH", "")
 
     # 修正：使用更安全的方式將主環境的 API 金鑰傳遞給子服務
     # FRED 金鑰 (Jules 修正 @ 2025-10-01: 主動從資料庫注入，而非被動依賴環境)

@@ -1,21 +1,22 @@
 # services/essay_ingestion_service/main.py
 import uvicorn
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 import logging
 from contextlib import asynccontextmanager
 from typing import List, Dict, Any, Optional
 
-# 從本地模組匯入核心邏輯
-try:
-    # (Jules) 移除對 initialize_database 的依賴，因為此服務不再管理自己的資料庫
-    from logic import parse_chat_log, save_parsed_data_to_db
-except ImportError:
-    import sys
-    from pathlib import Path
-    sys.path.append(str(Path(__file__).parent))
-    # (Jules) 移除對 initialize_database 的依賴
-    from logic import parse_chat_log, save_parsed_data_to_db
+# --- 核心邏輯模組匯入 ---
+
+# JULES: 舊有的聊天紀錄解析邏輯
+# 使用相對匯入以符合套件標準
+from .logic import parse_chat_log, save_parsed_data_to_db
+
+# JULES: 新增的文件分析邏輯
+# 使用相對匯入
+from .document_analyzer import process_document_url
+from .document_repository import initialize_database as initialize_document_db
+
 
 # --- 日誌設定 ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -26,7 +27,9 @@ log = logging.getLogger('essay_ingestion_service_main')
 async def lifespan(app: FastAPI):
     """在應用程式啟動時執行的生命週期事件。"""
     log.info("「小作文擷取服務」啟動中...")
-    # (Jules) 移除廢棄的本地資料庫初始化呼叫
+    # JULES: 初始化新的文件分析資料庫
+    log.info("正在初始化文件分析資料庫...")
+    initialize_document_db()
     log.info("✅ 服務已就緒，可以開始接收請求。")
     yield
     log.info("「小作文擷取服務」正在關閉。")
@@ -34,16 +37,17 @@ async def lifespan(app: FastAPI):
 # --- FastAPI 應用實例 ---
 app = FastAPI(
     title="小作文擷取服務 (Essay Ingestion Service)",
-    description="一個獨立的微服務，專門用於解析 LINE 聊天紀錄並將其儲存至資料庫。",
-    version="1.2.0", # 版本升級
+    description="一個多功能微服務，用於：1. 解析 LINE 聊天紀錄、2. 接收文件 URL 並進行圖文分析。",
+    version="2.0.0", # JULES: 版本升級，反映重大功能新增
     lifespan=lifespan
 )
 
-# --- 資料模型 (Pydantic Model) ---
+# --- 資料模型 (Pydantic Models) ---
+
+# 模型 for /ingest (聊天紀錄解析)
 class IngestRequest(BaseModel):
     text: str
 
-# (Jules @ 2025-10-08) 恢復：定義回傳的單個項目模型
 class InsertedItem(BaseModel):
     id: int
     url: str
@@ -51,14 +55,24 @@ class InsertedItem(BaseModel):
     author: Optional[str] = None
     message_date: Optional[str] = None
 
-# (Jules @ 2025-10-08) 恢復：更新 API 回應模型以包含項目列表
 class IngestResponse(BaseModel):
     message: str
     inserted_count: int
     inserted_items: List[InsertedItem]
 
+# JULES: 新增的模型 for /analyze-document (文件分析)
+class AnalyzeDocumentRequest(BaseModel):
+    source_url: str
+
+class AnalyzeDocumentResponse(BaseModel):
+    message: str
+    task_url: str
+
+
 # --- API 端點 ---
-@app.post("/ingest", response_model=IngestResponse)
+
+# 端點 1: /ingest (現有功能)
+@app.post("/ingest", response_model=IngestResponse, tags=["聊天紀錄解析"])
 async def ingest_text(request: IngestRequest):
     """
     接收文字，解析後存入資料庫，並回傳新增的項目列表。
@@ -76,10 +90,8 @@ async def ingest_text(request: IngestRequest):
             return IngestResponse(message="未解析出有效資料。", inserted_count=0, inserted_items=[])
 
         log.info(f"解析出 {len(parsed_data)} 筆資料，準備存入資料庫...")
-        # save_parsed_data_to_db 現在返回一個詳細的字典列表
         inserted_items = save_parsed_data_to_db(parsed_data, source_text=request.text)
         inserted_count = len(inserted_items)
-        # 相關日誌記錄已在 logic.py 中處理
 
         return IngestResponse(
             message=f"處理完成，成功新增 {inserted_count} 筆資料。",
@@ -91,7 +103,30 @@ async def ingest_text(request: IngestRequest):
         log.error(f"處理 /ingest 請求時發生未預期的錯誤: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"內部伺服器錯誤: {e}")
 
+# JULES: 端點 2: /analyze-document (新功能)
+@app.post("/analyze-document", response_model=AnalyzeDocumentResponse, tags=["文件圖文分析"])
+async def analyze_document(request: AnalyzeDocumentRequest, background_tasks: BackgroundTasks):
+    """
+    接收文件 URL，並在背景啟動一個完整的「下載 -> 拆解 -> 分析 -> 保存」工作流程。
+    """
+    log.info(f"接收到 /analyze-document 請求，URL: {request.source_url}")
+    if not request.source_url or not request.source_url.strip():
+        log.warning("請求的 source_url 為空。")
+        raise HTTPException(status_code=400, detail="source_url 不可為空。")
+
+    # 將耗時的處理任務交由背景執行，API 立即回傳
+    background_tasks.add_task(process_document_url, request.source_url)
+
+    log.info(f"已將 URL '{request.source_url}' 的分析任務加入背景佇列。")
+
+    return AnalyzeDocumentResponse(
+        message="文件分析任務已成功排程，正在背景處理中。",
+        task_url=request.source_url
+    )
+
+
 # --- 啟動配置 ---
 if __name__ == "__main__":
     log.info("準備以獨立模式啟動「小作文擷取服務」...")
+    # JULES: 端口號建議更改以避免與其他服務衝突，但暫時維持 8001
     uvicorn.run(app, host="0.0.0.0", port=8001)
