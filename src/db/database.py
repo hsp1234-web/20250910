@@ -958,6 +958,33 @@ def add_new_urls(parsed_data: list[dict], source_text: str) -> int:
             conn.close()
 
 
+def get_urls_by_url_list(url_list: list[str]) -> list[dict]:
+    """
+    (Jules @ 2025-10-08) 新增：根據 URL 列表獲取所有紀錄的詳細資訊。
+    """
+    if not url_list:
+        return []
+
+    conn = get_db_connection()
+    if not conn: return []
+
+    try:
+        # 為 IN 子句建立正確數量的佔位符
+        placeholders = ','.join(['?'] * len(url_list))
+        # 查詢所有相關欄位以回傳給前端
+        sql = f"SELECT id, url, author, message_date, title FROM extracted_urls WHERE url IN ({placeholders})"
+
+        cursor = conn.cursor()
+        cursor.execute(sql, url_list)
+        rows = cursor.fetchall()
+        return [dict(row) for row in rows]
+    except sqlite3.Error as e:
+        log.error(f"❌ 根據 URL 列表 {url_list} 查詢時發生錯誤: {e}", exc_info=True)
+        return []
+    finally:
+        if conn:
+            conn.close()
+
 def get_filtered_urls(start_date: str = None, end_date: str = None) -> list[dict]:
     """
     (V4 優化新增) 根據日期範圍獲取 URL 紀錄。

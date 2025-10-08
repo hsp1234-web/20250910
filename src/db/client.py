@@ -167,6 +167,12 @@ class DBClient:
         """(V4 優化新增) 根據日期範圍獲取 URL 紀錄。"""
         return self._send_request("get_filtered_urls", {"start_date": start_date, "end_date": end_date})
 
+    def get_urls_by_url_list(self, url_list: list[str]) -> list[dict]:
+        """
+        (Jules @ 2025-10-08) 新增：根據 URL 列表獲取詳細資訊。
+        """
+        return self._send_request("get_urls_by_url_list", {"url_list": url_list})
+
     def get_system_logs(self, levels: list[str] = None, sources: list[str] = None) -> list[dict]:
         return self._send_request("get_system_logs", {
             "levels": levels or [],

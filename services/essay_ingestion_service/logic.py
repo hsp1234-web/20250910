@@ -73,7 +73,7 @@ def parse_chat_log(text: str) -> List[Dict]:
 
 def save_parsed_data_to_db(parsed_data: List[Dict], source_text: str) -> List[Dict]:
     """
-    [V2 - 修正後版本] 將解析後的資料透過 DBClient 傳送給 db_manager 服務進行儲存。
+    [V4] 將解析後的資料存入資料庫，並查詢存入的詳細資訊後回傳。
     """
     if not parsed_data:
         log.info("沒有要儲存的資料。")
@@ -81,26 +81,36 @@ def save_parsed_data_to_db(parsed_data: List[Dict], source_text: str) -> List[Di
 
     log.info(f"準備將 {len(parsed_data)} 筆解析資料透過 DBClient 傳送至中央資料庫...")
 
-    # (Jules) 修正：現在 data_to_send 的格式是 DBClient.add_new_urls 所期望的
+    # 準備要寫入的資料
     data_to_send = [
         {
             "url": item['url'],
             "title": item['title'],
             "author": item['author'],
-            "message_date": item['date'],
-            "message_time": item['time'],
+            "date": item['date'],
+            "time": item['time'],
             "source": "essay_performance"
         }
         for item in parsed_data
     ]
 
+    # 提取所有 URL，以便後續查詢
+    url_list = [item['url'] for item in parsed_data]
+
     try:
         db_client = DBClient()
-        # (Jules) 修正：呼叫正確的方法 `add_new_urls` 並傳遞必要的 `source_text` 參數
-        inserted_items = db_client.add_new_urls(parsed_data=data_to_send, source_text=source_text)
+        inserted_count = db_client.add_new_urls(parsed_data=data_to_send, source_text=source_text)
 
-        log.info(f"成功透過 db_manager 儲存了 {len(inserted_items)} 筆新資料。")
-        return inserted_items
+        if inserted_count > 0:
+            log.info(f"成功透過 db_manager 儲存了 {inserted_count} 筆新資料。")
+            # 儲存後，立即查詢這些資料的詳細資訊
+            log.info(f"正在查詢剛存入的 {len(url_list)} 筆資料的詳細資訊...")
+            inserted_items_details = db_client.get_urls_by_url_list(url_list)
+            log.info(f"成功查詢到 {len(inserted_items_details)} 筆詳細資訊。")
+            return inserted_items_details
+        else:
+            log.info("沒有新增任何資料（可能均為重複項）。")
+            return []
 
     except Exception as e:
         log.error(f"呼叫 DBClient 時發生嚴重錯誤: {e}", exc_info=True)

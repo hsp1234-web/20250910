@@ -43,7 +43,7 @@ app = FastAPI(
 class IngestRequest(BaseModel):
     text: str
 
-# (Jules @ 2025-10-07) 新增：定義回傳的單個項目模型
+# (Jules @ 2025-10-08) 恢復：定義回傳的單個項目模型
 class InsertedItem(BaseModel):
     id: int
     url: str
@@ -51,7 +51,7 @@ class InsertedItem(BaseModel):
     author: Optional[str] = None
     message_date: Optional[str] = None
 
-# (Jules @ 2025-10-07) 修改：更新 API 回應模型以包含項目列表
+# (Jules @ 2025-10-08) 恢復：更新 API 回應模型以包含項目列表
 class IngestResponse(BaseModel):
     message: str
     inserted_count: int
@@ -76,10 +76,10 @@ async def ingest_text(request: IngestRequest):
             return IngestResponse(message="未解析出有效資料。", inserted_count=0, inserted_items=[])
 
         log.info(f"解析出 {len(parsed_data)} 筆資料，準備存入資料庫...")
-        # (Jules) 修正：將 request.text 作為 source_text 傳遞給儲存函式
+        # save_parsed_data_to_db 現在返回一個詳細的字典列表
         inserted_items = save_parsed_data_to_db(parsed_data, source_text=request.text)
         inserted_count = len(inserted_items)
-        log.info(f"成功儲存 {inserted_count} 筆新資料。")
+        # 相關日誌記錄已在 logic.py 中處理
 
         return IngestResponse(
             message=f"處理完成，成功新增 {inserted_count} 筆資料。",
