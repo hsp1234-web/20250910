@@ -43,25 +43,16 @@ app = FastAPI(
 class IngestRequest(BaseModel):
     text: str
 
-# (Jules @ 2025-10-07) 新增：定義回傳的單個項目模型
-class InsertedItem(BaseModel):
-    id: int
-    url: str
-    title: Optional[str] = None
-    author: Optional[str] = None
-    message_date: Optional[str] = None
-
-# (Jules @ 2025-10-07) 修改：更新 API 回應模型以包含項目列表
+# (Jules @ 2025-10-08) 修正：簡化回應模型，不再回傳項目列表
 class IngestResponse(BaseModel):
     message: str
     inserted_count: int
-    inserted_items: List[InsertedItem]
 
 # --- API 端點 ---
 @app.post("/ingest", response_model=IngestResponse)
 async def ingest_text(request: IngestRequest):
     """
-    接收文字，解析後存入資料庫，並回傳新增的項目列表。
+    接收文字，解析後存入資料庫，並回傳新增的筆數。
     """
     log.info("接收到 /ingest 請求。")
     if not request.text or not request.text.strip():
@@ -73,18 +64,16 @@ async def ingest_text(request: IngestRequest):
         parsed_data = parse_chat_log(request.text)
         if not parsed_data:
             log.info("從文字中未解析出任何有效資料。")
-            return IngestResponse(message="未解析出有效資料。", inserted_count=0, inserted_items=[])
+            return IngestResponse(message="未解析出有效資料。", inserted_count=0)
 
         log.info(f"解析出 {len(parsed_data)} 筆資料，準備存入資料庫...")
-        # (Jules) 修正：將 request.text 作為 source_text 傳遞給儲存函式
-        inserted_items = save_parsed_data_to_db(parsed_data, source_text=request.text)
-        inserted_count = len(inserted_items)
-        log.info(f"成功儲存 {inserted_count} 筆新資料。")
+        # save_parsed_data_to_db 現在返回一個整數計數
+        inserted_count = save_parsed_data_to_db(parsed_data, source_text=request.text)
+        # 日誌記錄已移至 logic.py，此處無需重複
 
         return IngestResponse(
             message=f"處理完成，成功新增 {inserted_count} 筆資料。",
-            inserted_count=inserted_count,
-            inserted_items=inserted_items
+            inserted_count=inserted_count
         )
 
     except Exception as e:

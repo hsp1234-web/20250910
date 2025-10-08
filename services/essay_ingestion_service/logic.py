@@ -71,24 +71,23 @@ def parse_chat_log(text: str) -> List[Dict]:
     log.info(f"從聊天紀錄中解析出 {len(results)} 筆結構化資料。")
     return results
 
-def save_parsed_data_to_db(parsed_data: List[Dict], source_text: str) -> List[Dict]:
+def save_parsed_data_to_db(parsed_data: List[Dict], source_text: str) -> int:
     """
-    [V2 - 修正後版本] 將解析後的資料透過 DBClient 傳送給 db_manager 服務進行儲存。
+    [V3] 將解析後的資料透過 DBClient 傳送給 db_manager 服務進行儲存，並返回新增筆數。
     """
     if not parsed_data:
         log.info("沒有要儲存的資料。")
-        return []
+        return 0
 
     log.info(f"準備將 {len(parsed_data)} 筆解析資料透過 DBClient 傳送至中央資料庫...")
 
-    # (Jules) 修正：現在 data_to_send 的格式是 DBClient.add_new_urls 所期望的
     data_to_send = [
         {
             "url": item['url'],
             "title": item['title'],
             "author": item['author'],
-            "message_date": item['date'],
-            "message_time": item['time'],
+            "date": item['date'],
+            "time": item['time'],
             "source": "essay_performance"
         }
         for item in parsed_data
@@ -96,12 +95,13 @@ def save_parsed_data_to_db(parsed_data: List[Dict], source_text: str) -> List[Di
 
     try:
         db_client = DBClient()
-        # (Jules) 修正：呼叫正確的方法 `add_new_urls` 並傳遞必要的 `source_text` 參數
-        inserted_items = db_client.add_new_urls(parsed_data=data_to_send, source_text=source_text)
+        # db_client.add_new_urls 現在會回傳一個整數 (新增的筆數)
+        inserted_count = db_client.add_new_urls(parsed_data=data_to_send, source_text=source_text)
 
-        log.info(f"成功透過 db_manager 儲存了 {len(inserted_items)} 筆新資料。")
-        return inserted_items
+        # 修正日誌記錄，直接使用回傳的計數
+        log.info(f"成功透過 db_manager 儲存了 {inserted_count} 筆新資料。")
+        return inserted_count
 
     except Exception as e:
         log.error(f"呼叫 DBClient 時發生嚴重錯誤: {e}", exc_info=True)
-        return []
+        return 0
