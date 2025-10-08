@@ -70,6 +70,7 @@ ACTION_MAP = {
     "get_urls_by_statuses": database.get_urls_by_statuses, # V4 優化 (2025-09-18)
     "add_new_urls": database.add_new_urls, # V4 優化 (2025-09-18)
     "get_filtered_urls": database.get_filtered_urls, # V4 優化 (2025-09-18)
+    "get_urls_by_url_list": database.get_urls_by_url_list, # (Jules @ 2025-10-08) 新增
 
     # For testing:
     "clear_all_tasks": database.clear_all_tasks,

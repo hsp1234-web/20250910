@@ -11,6 +11,7 @@
 import json
 import logging
 import os
+import httpx
 
 # --- 日誌設定 ---
 log = logging.getLogger('DBClient')
