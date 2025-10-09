@@ -16,9 +16,18 @@ except ImportError:
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent.parent))
     from src.api.api_server import app
 
-# --- 全域測試客戶端 ---
-# 既然我們將直接 mock httpx，就不再需要為每個測試重新建立 TestClient
-client = TestClient(app)
+# --- 測試客戶端 Fixture ---
+@pytest.fixture
+def client():
+    """
+    建立一個 TestClient 實例。
+    透過在 fixture 內部延遲 TestClient 的實例化，
+    我們確保 conftest.py 中的 autouse mocks 已經生效。
+    """
+    # 延遲匯入和實例化，確保 mock 已被應用
+    from src.api.api_server import app
+    with TestClient(app) as test_client:
+        yield test_client
 
 
 @pytest.fixture
@@ -47,7 +56,7 @@ def mock_httpx_post(mocker):
     return mock_post_method
 
 
-def test_proxy_ingest_text_success(mock_httpx_post: AsyncMock):
+def test_proxy_ingest_text_success(client: TestClient, mock_httpx_post: AsyncMock):
     """
     測試代理端點在成功情況下的行為。
     """
@@ -72,7 +81,7 @@ def test_proxy_ingest_text_success(mock_httpx_post: AsyncMock):
     )
 
 
-def test_proxy_ingest_text_service_unavailable(mock_httpx_post: AsyncMock):
+def test_proxy_ingest_text_service_unavailable(client: TestClient, mock_httpx_post: AsyncMock):
     """
     測試當微服務無法連線時，代理端點是否回傳 503。
     """
@@ -88,7 +97,7 @@ def test_proxy_ingest_text_service_unavailable(mock_httpx_post: AsyncMock):
     assert "後端擷取服務目前無法使用" in response.json()["detail"]
 
 
-def test_proxy_ingest_text_service_returns_error(mock_httpx_post: AsyncMock):
+def test_proxy_ingest_text_service_returns_error(client: TestClient, mock_httpx_post: AsyncMock):
     """
     測試當微服務本身回傳一個錯誤狀態碼時，代理端點是否能正確轉發。
     """
@@ -108,3 +117,22 @@ def test_proxy_ingest_text_service_returns_error(mock_httpx_post: AsyncMock):
     # 3. 進行斷言
     assert response.status_code == 400
     assert response.json()["detail"] == {"detail": "微服務說你的請求格式錯誤"}
+
+
+def test_start_download_no_ids(client: TestClient):
+    """
+    測試當請求的 ID 列表為空時，/start_download 是否回傳 400 錯誤。
+    """
+    response = client.post("/api/essay_performance/start_download", json={"ids": []})
+    assert response.status_code == 400
+    assert "ID列表不可為空" in response.json()["detail"]
+
+
+def test_get_status_not_found(client: TestClient):
+    """
+    測試查詢一個不存在的任務 ID 時，/status/{task_id} 是否回傳 404 錯誤。
+    """
+    non_existent_task_id = "this-task-does-not-exist"
+    response = client.get(f"/api/essay_performance/status/{non_existent_task_id}")
+    assert response.status_code == 404
+    assert f"找不到任務ID: {non_existent_task_id}" in response.json()["detail"]

@@ -228,7 +228,9 @@ def initialize_database(conn: sqlite3.Connection = None):
                 "extracted_image_paths": "TEXT",
                 "extracted_text": "TEXT",
                 "retry_count": "INTEGER DEFAULT 0", # 為重試機制新增
-                "last_error_details": "TEXT" # 為重試機制新增
+                "last_error_details": "TEXT", # 為重試機制新增
+                "ocr_status": "TEXT DEFAULT 'pending'",
+                "ai_status": "TEXT DEFAULT 'pending'"
             }
             for col, col_type in url_migrations.items():
                 try:
@@ -806,7 +808,8 @@ def get_urls_by_statuses(statuses: list[str]) -> list[dict]:
             SELECT
                 id, url, created_at, status, status_message, local_path,
                 file_hash, extracted_image_paths, extracted_text, author,
-                message_date, message_time, title, retry_count, last_error_details
+                message_date, message_time, title, retry_count, last_error_details,
+                ocr_status, ai_status
             FROM
                 extracted_urls
             WHERE
@@ -991,7 +994,8 @@ def get_filtered_urls(start_date: str = None, end_date: str = None) -> list[dict
     (Jules @ 2025-09-17) 修改以回傳卡片所需的所有欄位。
     """
     # Jules @ 2025-09-17: 新增 title, message_time, 和 status 欄位以支援卡片模式
-    query = "SELECT id, url, author, message_date, message_time, title, status FROM extracted_urls"
+    # Jules @ 2025-10-09: 新增 ocr_status 和 ai_status 欄位
+    query = "SELECT id, url, author, message_date, message_time, title, status, ocr_status, ai_status FROM extracted_urls"
     filters = []
     params = []
 

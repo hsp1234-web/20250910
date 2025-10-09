@@ -17,6 +17,7 @@ log = logging.getLogger(__name__)
 
 def parse_chat_log(text: str) -> List[Dict]:
     """
+    (Jules @ 2025-10-09) 重構以支援多網址和更精確的標題提取。
     從給定的 LINE 聊天紀錄文字中，解析出日期、時間、作者、標題和連結。
     """
     results = []
@@ -25,9 +26,13 @@ def parse_chat_log(text: str) -> List[Dict]:
     i = 0
     date_pattern = re.compile(r'(\d{4}[./]\d{1,2}[./]\d{1,2}).*')
     message_pattern = re.compile(r'^(\d{2}:\d{2})[\t\s]+([^\t\s].*?)[\t\s]+(.*)$')
-    url_pattern = re.compile(r'https?://\S+')
+    # 修正後的 URL 樣式，能更好地處理各種網址
+    url_pattern = re.compile(r'https?://(?:www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b(?:[-a-zA-Z0-9()@:%_\+.~#?&/=]*)')
+
     while i < len(lines):
         line = lines[i].strip()
+
+        # 處理日期行
         date_match = date_pattern.match(line)
         if date_match:
             raw_date_str = date_match.group(1)
@@ -36,38 +41,72 @@ def parse_chat_log(text: str) -> List[Dict]:
             current_date = f"{date_parts[0]}-{int(date_parts[1]):02d}-{int(date_parts[2]):02d}"
             i += 1
             continue
+
         if not current_date:
             i += 1
             continue
+
+        # 處理訊息行
         message_match = message_pattern.match(line)
         if message_match:
             time, author, first_line_content = message_match.groups()
             author = author.strip()
+
+            # 過濾掉無關訊息，例如系統訊息或收回的訊息
             if any(keyword in author for keyword in ["加入聊天", "退出聊天"]) or "已收回訊息" in first_line_content:
                 i += 1
                 continue
-            content_parts = [first_line_content.strip()]
+
+            # 收集屬於同一個使用者發送的連續行
+            content_lines = [first_line_content.strip()]
             j = i + 1
             while j < len(lines):
                 next_line = lines[j].strip()
+                # 如果下一行是新的日期或新的訊息，則當前訊息塊結束
                 if date_pattern.match(next_line) or message_pattern.match(next_line):
                     break
                 if next_line:
-                    content_parts.append(next_line)
+                    content_lines.append(next_line)
                 j += 1
-            full_content_str = " ".join(content_parts)
-            url_match = url_pattern.search(full_content_str)
-            if url_match:
-                url = url_match.group(0)
-                title_raw = full_content_str[:url_match.start()]
-                title = re.sub(r'\s+', ' ', title_raw).strip() or "無標題"
-                if "提醒小作文標題格式" in title:
-                    i = j
-                    continue
-                results.append({'date': current_date, 'time': time, 'author': author, 'title': title, 'url': url})
-            i = j
+
+            # 處理收集到的訊息塊
+            potential_title = "無標題"
+            for content_line in content_lines:
+                url_matches = list(url_pattern.finditer(content_line))
+
+                if url_matches:
+                    # 如果該行包含 URL
+                    last_pos = 0
+                    for match in url_matches:
+                        url = match.group(0)
+
+                        # 標題邏輯：優先使用同一行 URL 前的文字，如果沒有，則使用上一行的內容
+                        title_on_line = content_line[last_pos:match.start()].strip()
+                        final_title = title_on_line or potential_title
+                        final_title = re.sub(r'\s+', ' ', final_title).strip() or "無標題"
+
+                        if "提醒小作文標題格式" in final_title:
+                            continue
+
+                        results.append({
+                            'date': current_date,
+                            'time': time,
+                            'author': author,
+                            'title': final_title,
+                            'url': url
+                        })
+                        last_pos = match.end()
+
+                    # 如果該行包含 URL，它本身不能作為下一行的標題
+                    potential_title = "無標題"
+                else:
+                    # 如果該行不含 URL，則將其視為下一行的潛在標題
+                    potential_title = content_line if content_line else "無標題"
+
+            i = j # 將主迴圈的索引推進到下一個訊息塊
         else:
             i += 1
+
     log.info(f"從聊天紀錄中解析出 {len(results)} 筆結構化資料。")
     return results
 
