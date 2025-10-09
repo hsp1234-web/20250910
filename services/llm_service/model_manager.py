@@ -2,6 +2,7 @@
 
 import ollama
 import asyncio
+import base64
 
 class ModelManager:
     """
@@ -100,3 +101,36 @@ class ModelManager:
         except Exception as e:
             print(f"使用模型 '{model_name}' 生成文字時發生錯誤: {e}")
             raise RuntimeError(f"模型推論失敗。") from e
+
+    async def analyze_image(self, model_name: str, prompt: str, image_base64: str):
+        """
+        使用指定的多模態模型分析圖像。
+        在分析前，會先確保模型已經準備就緒。
+        """
+        if not self.client:
+            raise ConnectionError("無法連接到 Ollama 服務。")
+
+        # 確保模型可用（懶加載）
+        await self.ensure_model_is_ready(model_name)
+
+        print(f"正在使用模型 '{model_name}' 分析圖片...")
+        try:
+            # 異步執行阻塞的 chat 呼叫
+            loop = asyncio.get_event_loop()
+            response = await loop.run_in_executor(
+                None,
+                lambda: self.client.chat(
+                    model=model_name,
+                    messages=[
+                        {
+                            'role': 'user',
+                            'content': prompt,
+                            'images': [image_base64]
+                        }
+                    ]
+                )
+            )
+            return response['message']['content']
+        except Exception as e:
+            print(f"使用模型 '{model_name}' 分析圖片時發生錯誤: {e}")
+            raise RuntimeError(f"圖片分析的模型推論失敗。") from e

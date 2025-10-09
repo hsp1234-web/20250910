@@ -27,6 +27,16 @@ class ModelInfo(BaseModel):
     modified_at: str
     size: int
 
+# (Jules) 新增圖片分析的請求與回應模型
+class AnalyzeImageRequest(BaseModel):
+    model: str = "llava:latest"
+    prompt: str
+    image_base64: str # 圖片的 Base64 編碼字串
+
+class AnalyzeImageResponse(BaseModel):
+    model: str
+    response_text: str
+
 # --- 非同步生命週期管理器 ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -117,3 +127,68 @@ async def generate_text_endpoint(request: GenerateRequest):
     except Exception as e:
         # 捕捉所有其他未預期的錯誤
         raise HTTPException(status_code=500, detail=f"處理請求時發生未預期錯誤: {e}")
+
+
+# (Jules) 新增的圖片分析端點
+@app.post("/analyze_image", response_model=AnalyzeImageResponse)
+async def analyze_image_endpoint(request: AnalyzeImageRequest):
+    """
+    接收圖片（Base64）、提示詞和模型名稱，生成並返回分析結果。
+    如果指定的模型不在本地，會自動觸發下載。
+    """
+    if not model_manager:
+        raise HTTPException(status_code=503, detail="ModelManager 未初始化。")
+
+    try:
+        # 呼叫模型管理器的圖片分析功能
+        response_text = await model_manager.analyze_image(
+            model_name=request.model,
+            prompt=request.prompt,
+            image_base64=request.image_base64
+        )
+
+        # 返回一個結構化的回應
+        return AnalyzeImageResponse(
+            model=request.model,
+            response_text=response_text
+        )
+    except ConnectionError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    except IOError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"處理圖片分析請求時發生未預期錯誤: {e}")
+
+# (Jules) 新增的圖片分析端點
+@app.post("/analyze_image", response_model=AnalyzeImageResponse)
+async def analyze_image_endpoint(request: AnalyzeImageRequest):
+    """
+    接收圖片（Base64）、提示詞和模型名稱，生成並返回分析結果。
+    如果指定的模型不在本地，會自動觸發下載。
+    """
+    if not model_manager:
+        raise HTTPException(status_code=503, detail="ModelManager 未初始化。")
+
+    try:
+        # 呼叫模型管理器的圖片分析功能
+        response_text = await model_manager.analyze_image(
+            model_name=request.model,
+            prompt=request.prompt,
+            image_base64=request.image_base64
+        )
+
+        # 返回一個結構化的回應
+        return AnalyzeImageResponse(
+            model=request.model,
+            response_text=response_text
+        )
+    except ConnectionError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    except IOError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"處理圖片分析請求時發生未預期錯誤: {e}")
