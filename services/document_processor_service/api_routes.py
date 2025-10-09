@@ -2,10 +2,10 @@ import logging
 from fastapi import APIRouter, HTTPException, BackgroundTasks, Response
 from pydantic import BaseModel, HttpUrl
 
-# --- 本地模組匯入 (使用絕對路徑) ---
+# --- 本地模組匯入 (使用相對路徑) ---
 # 匯入我們在 repository 和 processor 中建立的函式
-from services.document_processor_service.repository import create_processing_task
-from services.document_processor_service.processor import process_document_url
+from .repository import create_processing_task, get_processing_status_by_url
+from .processor import process_document_url
 
 # --- 日誌設定 ---
 log = logging.getLogger(__name__)
@@ -48,6 +48,24 @@ async def process_document_endpoint(
         # 修正：明確地將狀態碼設為 200 OK
         response.status_code = 200
         return {"message": "文件處理任務已存在，無需重複加入。", "url": source_url}
+
+
+@router.get("/api/process_document/status", summary="查詢文件處理的詳細狀態")
+async def get_document_status_endpoint(url: HttpUrl):
+    """
+    根據提供的 URL，查詢特定文件處理任務的詳細狀態，包括各個子任務的進度。
+    """
+    source_url = str(url)
+    log.info(f"接收到查詢任務狀態的請求，URL: {source_url}")
+
+    # 使用 to_thread 在背景執行緒中運行同步的資料庫查詢，避免阻塞事件循環
+    status_data = await asyncio.to_thread(get_processing_status_by_url, source_url)
+
+    if status_data:
+        return status_data
+    else:
+        raise HTTPException(status_code=404, detail=f"找不到 URL '{source_url}' 對應的處理任務。")
+
 
 @router.get("/health", status_code=200)
 async def health_check():

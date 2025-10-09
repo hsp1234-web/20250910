@@ -7,15 +7,8 @@ import sys
 from pathlib import Path
 from typing import Dict, Any
 
-# --- 路徑修正 ---
-# 為了能從 services 目錄中，匯入位於 src 目錄的工具模組
-# 我們需要將專案的根目錄加入到 Python 的搜尋路徑中
-# services/document_processor_service/ -> services/ -> . (root)
-PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-sys.path.insert(0, str(PROJECT_ROOT))
-
 # --- 本地與專案模組匯入 ---
-from services.document_processor_service.repository import update_task_status, save_successful_analysis
+from .repository import update_task_status, save_successful_analysis, update_subtask_status
 from src.tools.universal_downloader import download_file
 from src.tools.content_extractor import extract_content
 from .stock_id_extractor import extract_stock_ids
@@ -126,8 +119,10 @@ async def process_document_url(source_url: str):
     log.info(f"開始處理新文件，來源 URL: {source_url}")
     downloaded_path_str = None
     try:
-        # 步驟 0: 更新任務狀態為處理中
+        # 步驟 0: 更新整體任務狀態為「處理中」
         await asyncio.to_thread(update_task_status, source_url, 'processing')
+        # 立即更新圖片 OCR 狀態，因為此功能尚不適用
+        await asyncio.to_thread(update_subtask_status, source_url, 'status_image_ocr', 'not_applicable')
 
         # 步驟 1: 下載文件
         log.info(f"步驟 1/5: 正在從 {source_url} 下載文件...")
@@ -142,23 +137,26 @@ async def process_document_url(source_url: str):
         log.info(f"步驟 2/5: 正在從 {downloaded_path_str} 提取內容...")
         content_data = await asyncio.to_thread(extract_content, downloaded_path_str, str(DOWNLOAD_DIR))
         if not content_data or not content_data.get("text"):
+            await asyncio.to_thread(update_subtask_status, source_url, 'status_text_extraction', 'failed')
             raise ValueError("文件內容提取失敗或文件內沒有文字。")
+        await asyncio.to_thread(update_subtask_status, source_url, 'status_text_extraction', 'completed')
         log.info(f"成功提取 {len(content_data['text'])} 字元的文字內容。")
 
         # 步驟 3: 預先提取股票代號
         log.info("步驟 3/5: 正在使用規則提取器提取股票代號...")
-        # extract_stock_ids 是 CPU-bound 的，使用 to_thread 避免阻塞事件循環
         stock_ids = await asyncio.to_thread(extract_stock_ids, content_data["text"])
         log.info(f"已提取出 {len(stock_ids)} 個有效的股票代號: {stock_ids}")
 
         # 步驟 4: 使用本地 LLM 結合已提取的代號進行分析
         log.info("步驟 4/5: 正在使用本地 LLM 分析文件內容...")
         analysis_result = await analyze_text_with_llm(content_data["text"], stock_ids)
+        await asyncio.to_thread(update_subtask_status, source_url, 'status_ai_summary', 'completed')
         log.info("文件內容分析完成。")
 
-        # 步驟 5: 將成功結果保存到資料庫
+        # 步驟 5: 將成功結果保存到資料庫，並將整體狀態設為 'completed'
         log.info("步驟 5/5: 正在將分析結果保存到資料庫...")
         await asyncio.to_thread(save_successful_analysis, source_url, analysis_result)
+        await asyncio.to_thread(update_task_status, source_url, 'completed')
         log.info(f"文件處理流程已成功完成: {source_url}")
 
     except Exception as e:

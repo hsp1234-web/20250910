@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from pydantic import BaseModel
 
 # 從我們的模組導入模型管理器
-from model_manager import ModelManager
+from .model_manager import ModelManager
 
 # --- 全域變數 ---
 # 這個變數將在服務啟動時被賦值

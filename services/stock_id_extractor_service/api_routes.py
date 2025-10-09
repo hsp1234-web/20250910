@@ -3,8 +3,8 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 from typing import List
 
-# --- 本地模組匯入 (使用絕對路徑) ---
-from services.stock_id_extractor_service.extractor import extract_stock_ids
+# --- 本地模組匯入 (使用相對路徑) ---
+from .extractor import extract_stock_ids
 
 # --- 日誌設定 ---
 log = logging.getLogger(__name__)

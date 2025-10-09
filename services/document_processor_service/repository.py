@@ -44,12 +44,32 @@ def initialize_database():
                     is_trade_related TEXT,
                     status TEXT NOT NULL DEFAULT 'pending',
                     error_message TEXT,
+                    status_text_extraction TEXT NOT NULL DEFAULT 'pending',
+                    status_image_ocr TEXT NOT NULL DEFAULT 'pending',
+                    status_ai_summary TEXT NOT NULL DEFAULT 'pending',
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
             """)
             # 建立索引以加速 source_url 的查詢
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_source_url ON processed_documents (source_url);")
+
+            # 檢查並新增子任務狀態欄位 (確保向後相容)
+            table_info = cursor.execute("PRAGMA table_info(processed_documents);").fetchall()
+            column_names = [info['name'] for info in table_info]
+
+            new_columns = {
+                "status_text_extraction": "TEXT NOT NULL DEFAULT 'pending'",
+                "status_image_ocr": "TEXT NOT NULL DEFAULT 'pending'",
+                "status_ai_summary": "TEXT NOT NULL DEFAULT 'pending'"
+            }
+
+            for col, col_type in new_columns.items():
+                if col not in column_names:
+                    log.info(f"在 `processed_documents` 表中找不到 `{col}` 欄位，正在新增...")
+                    cursor.execute(f"ALTER TABLE processed_documents ADD COLUMN {col} {col_type}")
+                    log.info(f"`{col}` 欄位已成功新增。")
+
             log.info("資料庫 `processed_documents` 資料表已成功初始化。")
     except sqlite3.Error as e:
         log.error(f"初始化資料庫時發生錯誤: {e}", exc_info=True)
@@ -83,6 +103,80 @@ def create_processing_task(source_url: str) -> bool:
     except sqlite3.Error as e:
         log.error(f"為 '{source_url}' 建立處理任務時發生錯誤: {e}", exc_info=True)
         return False
+    finally:
+        if conn:
+            conn.close()
+
+def get_processing_status_by_url(source_url: str) -> Optional[Dict[str, Any]]:
+    """
+    根據 URL 查詢特定任務的詳細處理狀態。
+
+    :param source_url: 任務的 URL。
+    :return: 一個包含所有狀態欄位的字典，如果找不到任務則回傳 None。
+    """
+    log.info(f"正在查詢 '{source_url}' 的詳細處理狀態...")
+    conn = get_db_connection()
+    if not conn:
+        return None
+
+    try:
+        with conn:
+            cursor = conn.cursor()
+            # 查詢所有與狀態和結果相關的欄位
+            cursor.execute("""
+                SELECT
+                    status,
+                    status_text_extraction,
+                    status_image_ocr,
+                    status_ai_summary,
+                    summary,
+                    error_message,
+                    updated_at
+                FROM processed_documents
+                WHERE source_url = ?
+            """, (source_url,))
+            row = cursor.fetchone()
+            if row:
+                log.info(f"成功查詢到 '{source_url}' 的狀態。")
+                # 將 sqlite3.Row 物件轉換為標準字典
+                return dict(row)
+            else:
+                log.warning(f"在資料庫中找不到 '{source_url}' 的任務。")
+                return None
+    except sqlite3.Error as e:
+        log.error(f"查詢 '{source_url}' 的狀態時發生錯誤: {e}", exc_info=True)
+        return None
+    finally:
+        if conn:
+            conn.close()
+
+def update_subtask_status(source_url: str, subtask_name: str, status: str):
+    """
+    安全地更新指定 URL 的單個子任務狀態。
+
+    :param source_url: 任務的 URL。
+    :param subtask_name: 要更新的狀態欄位名稱 (e.g., 'status_text_extraction')。
+    :param status: 新的狀態 (e.g., 'completed', 'failed', 'not_applicable')。
+    """
+    # 建立一個允許更新的欄位白名單，以防止 SQL 注入
+    allowed_columns = ["status_text_extraction", "status_image_ocr", "status_ai_summary"]
+    if subtask_name not in allowed_columns:
+        log.error(f"偵測到無效的子任務欄位名稱 '{subtask_name}'，更新操作已中止。")
+        return
+
+    log.info(f"正在將 '{source_url}' 的子任務 '{subtask_name}' 狀態更新為 '{status}'...")
+    conn = get_db_connection()
+    if not conn:
+        return
+
+    try:
+        with conn:
+            # 使用 f-string 插入經過驗證的欄位名稱是安全的
+            query = f"UPDATE processed_documents SET {subtask_name} = ?, updated_at = CURRENT_TIMESTAMP WHERE source_url = ?"
+            conn.execute(query, (status, source_url))
+        log.info(f"成功更新 '{source_url}' 的子任務 '{subtask_name}' 狀態。")
+    except sqlite3.Error as e:
+        log.error(f"更新子任務 '{subtask_name}' 狀態時發生錯誤: {e}", exc_info=True)
     finally:
         if conn:
             conn.close()
