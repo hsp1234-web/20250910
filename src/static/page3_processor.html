@@ -58,6 +58,10 @@
                 <div class="action-group">
                     <button id="retry-selected-btn">🔄 將選中項目移回待處理</button>
                 </div>
+                <div class="action-group">
+                    <button id="run-ocr-btn" class="primary-action">🔍 執行 OCR</button>
+                    <button id="run-ai-btn" class="primary-action">🧠 執行 AI 分析</button>
+                </div>
             </div>
             <div id="terminal-cards-container" class="card-grid">
                 <p>正在載入已處理/失敗的檔案...</p>
@@ -84,6 +88,8 @@
             const selectAllTerminalBtn = document.getElementById('select-all-terminal-button');
             const deselectAllTerminalBtn = document.getElementById('deselect-all-terminal-button');
             const retrySelectedBtn = document.getElementById('retry-selected-btn');
+            const runOcrBtn = document.getElementById('run-ocr-btn');
+            const runAiBtn = document.getElementById('run-ai-btn');
             const statusArea = document.getElementById('status-area');
             const copyLogButton = document.getElementById('copy-log-button');
 
@@ -114,6 +120,43 @@
                 const statusClass = status || 'pending';
                 return `<span class="status-badge status-${statusClass}">${statusText}</span>`;
             };
+
+            // (Jules @ 2025-10-08) 新增：產生子任務狀態的 HTML
+            const getSubtaskStatusHTML = (subtaskName, status) => {
+                const iconMap = {
+                    'completed': '✅',
+                    'pending': '🕒',
+                    'failed': '❌',
+                    'processing': '⚙️',
+                    'n_a': '➖' // Not applicable
+                };
+                const statusTextMap = {
+                    'completed': '已完成',
+                    'pending': '未完成',
+                    'failed': '失敗',
+                    'processing': '處理中',
+                    'n_a': '不適用'
+                };
+                const statusClassMap = {
+                    'completed': 'status-completed',
+                    'pending': 'status-pending-subtask', // 使用特定 class 以便套用灰色樣式
+                    'failed': 'status-failed',
+                    'processing': 'status-processing',
+                    'n_a': 'status-na'
+                };
+
+                const currentStatus = status || 'pending'; // 若狀態為 null 或 undefined，預設為 'pending'
+                const icon = iconMap[currentStatus] || '❓';
+                const text = statusTextMap[currentStatus] || '未知';
+                const className = statusClassMap[currentStatus] || 'status-unknown';
+
+                // 使用 info-item 保持樣式一致性
+                return `<div class="info-item subtask-item ${className}">
+                            <strong>${subtaskName}:</strong>
+                            <span class="subtask-status-text">${icon} ${text}</span>
+                        </div>`;
+            };
+
 
             const fetchAndRenderPendingFiles = async () => {
                 try {
@@ -188,6 +231,15 @@
                         const messageDate = file.message_date ? new Date(file.message_date).toLocaleString('zh-TW', { hour12: false, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : 'N/A';
                         const urlLink = file.url ? `<a href="${escapeHtml(file.url)}" target="_blank" title="${escapeHtml(file.url)}">${escapeHtml(file.url)}</a>` : '無';
 
+                        // (Jules @ 2025-10-08) 產生子任務狀態的 HTML
+                        const subtaskStatusHTML = `
+                            <div class="subtask-grid">
+                                ${getSubtaskStatusHTML('文字提取', file.status_text_extraction)}
+                                ${getSubtaskStatusHTML('圖片 OCR', file.status_image_ocr)}
+                                ${getSubtaskStatusHTML('AI 摘要', file.status_ai_summary)}
+                            </div>
+                        `;
+
                         card.innerHTML = `
                              <div class="card-header">
                                 <input type="checkbox" class="terminal-checkbox" value="${file.id}">
@@ -201,6 +253,8 @@
                                     <div class="info-item"><strong>時間:</strong> ${escapeHtml(messageDate)}</div>
                                     <div class="info-item"><strong>連結:</strong> ${urlLink}</div>
                                 </div>
+                                <hr class="card-divider">
+                                ${subtaskStatusHTML}
                                 <div class="error-log-container" style="${file.status === 'processing_failed' ? '' : 'display: none;'}">
                                     <strong class="error-title">錯誤日誌:</strong>
                                     <pre class="error-log">${escapeHtml(file.status_message)}</pre>
@@ -277,6 +331,31 @@
                 }
             });
 
+            // (Jules @ 2025-10-08) 新增：觸發子任務的通用函式
+            const triggerSubtask = async (taskType, taskName) => {
+                const selectedIds = Array.from(document.querySelectorAll('.terminal-checkbox:checked')).map(cb => parseInt(cb.value));
+                if (selectedIds.length === 0) {
+                    alert(`請至少選擇一個要執行 ${taskName} 的項目。`);
+                    return;
+                }
+                logStatus(`正在為 ${selectedIds.length} 個項目發送 ${taskName} 請求...`);
+                try {
+                    const response = await fetch(`/api/processor/start_${taskType}`, {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({ ids: selectedIds })
+                    });
+                    const result = await response.json();
+                    if (!response.ok) throw new Error(result.detail || `啟動 ${taskName} 時發生未知錯誤。`);
+                    logStatus(result.message, 'green');
+                    // 刷新列表以顯示更新後的狀態
+                    fetchAndRenderTerminalFiles();
+                } catch (error) {
+                    logStatus(`請求失敗：${error.message}`, 'red');
+                }
+            };
+
+
             // --- WebSocket Setup ---
             const setupWebSocket = () => {
                 const ws = new WebSocket(`${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/api/ws`);
@@ -302,6 +381,10 @@
             selectAllTerminalBtn.addEventListener('click', () => document.querySelectorAll('.terminal-checkbox').forEach(cb => cb.checked = true));
             deselectAllTerminalBtn.addEventListener('click', () => document.querySelectorAll('.terminal-checkbox').forEach(cb => cb.checked = false));
             copyLogButton.addEventListener('click', () => navigator.clipboard.writeText(statusArea.innerText));
+
+            // (Jules @ 2025-10-08) 為新按鈕綁定事件
+            runOcrBtn.addEventListener('click', () => triggerSubtask('ocr', 'OCR'));
+            runAiBtn.addEventListener('click', () => triggerSubtask('ai_analysis', 'AI 分析'));
 
             refreshAllLists();
             setupWebSocket();

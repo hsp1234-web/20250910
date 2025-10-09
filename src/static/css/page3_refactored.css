@@ -238,6 +238,67 @@ body {
     border-color: #0056b3;
 }
 
+/* --- (Jules @ 2025-10-08) 新增：子任務與卡片細節樣式 --- */
+.card-divider {
+    border: 0;
+    height: 1px;
+    background-color: #e9ecef;
+    margin: 15px 0;
+}
+
+.subtask-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 12px;
+}
+
+.subtask-item {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 0.9em;
+}
+
+.subtask-item strong {
+    color: #6c757d;
+    font-weight: 500;
+}
+
+.subtask-status-text {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+/* 為未完成的子任務設定灰色且較不明顯的樣式 */
+.status-pending-subtask .subtask-status-text {
+    color: #6c757d;
+    font-style: italic;
+}
+
+.error-log-container {
+    margin-top: 15px;
+}
+
+.error-title {
+    color: var(--p3-error-bg);
+    font-weight: bold;
+}
+
+.error-log {
+    background-color: #fbeae_c;
+    color: #58151c;
+    padding: 10px;
+    border-radius: 4px;
+    font-family: 'Courier New', Courier, monospace;
+    white-space: pre-wrap;
+    word-break: break-all;
+    margin-top: 8px;
+    border: 1px solid #f5c6cb;
+    font-size: 0.85em;
+}
+
+
 /* --- 響應式設計：針對行動裝置 (寬度小於 600px) --- */
 @media (max-width: 600px) {
     .action-bar {

@@ -348,6 +348,23 @@ def initialize_database(conn: sqlite3.Connection = None):
                         raise # 其他錯誤則需拋出
             # --- 結束 ---
 
+            # --- (Jules @ 2025-10-08) 為 'extracted_urls' 新增子任務狀態欄位 ---
+            subtask_status_migrations = {
+                "status_text_extraction": "VARCHAR(20) DEFAULT 'pending'",
+                "status_image_ocr": "VARCHAR(20) DEFAULT 'pending'",
+                "status_ai_summary": "VARCHAR(20) DEFAULT 'pending'"
+            }
+            for col, col_type in subtask_status_migrations.items():
+                try:
+                    cursor.execute(f"ALTER TABLE extracted_urls ADD COLUMN {col} {col_type}")
+                    log.info(f"欄位 '{col}' 已成功新增至 'extracted_urls' 資料表。")
+                except sqlite3.OperationalError as e:
+                    if "duplicate column name" in str(e):
+                        pass # 欄位已存在，是正常情況
+                    else:
+                        raise # 其他錯誤則需拋出
+            # --- 結束 ---
+
         log.info("✅ 資料庫初始化完成。`tasks`, `system_logs`, `app_state`, `extracted_urls`, `reports`, `analysis_tasks` 資料表已存在。")
     except sqlite3.Error as e:
         log.error(f"初始化資料庫時發生錯誤: {e}")
@@ -801,12 +818,13 @@ def get_urls_by_statuses(statuses: list[str]) -> list[dict]:
         # 為 IN 子句建立一個佔位符字串
         placeholders = ','.join(['?'] * len(statuses))
         # 2025-09-18 V4 優化：查詢所有欄位以滿足不同頁面的需求
-        # 2025-09-17 Jules 修正：明確指定欄位，排除大型的 source_text 欄位以優化效能
+        # (Jules @ 2025-10-08) 新增子任務狀態欄位
         sql = f"""
             SELECT
                 id, url, created_at, status, status_message, local_path,
                 file_hash, extracted_image_paths, extracted_text, author,
-                message_date, message_time, title, retry_count, last_error_details
+                message_date, message_time, title, retry_count, last_error_details,
+                status_text_extraction, status_image_ocr, status_ai_summary
             FROM
                 extracted_urls
             WHERE

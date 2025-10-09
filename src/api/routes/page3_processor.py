@@ -321,3 +321,149 @@ async def start_processing(
     except Exception as e:
         log.error(f"API: 啟動處理任務時發生錯誤: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="啟動處理任務時發生伺服器內部錯誤。")
+
+
+# --- (Jules @ 2025-10-08) 新增子任務處理功能 ---
+
+def _run_subtask_blocking_task(url_id: int, db_client: DBClient, queue: asyncio.Queue, loop: asyncio.AbstractEventLoop, task_type: str):
+    """這是在背景執行的子任務的同步阻塞部分 (例如 OCR, AI 分析)。"""
+    log.info(f"背景子任務：開始為 URL ID {url_id} 執行 '{task_type}'...")
+
+    status_field_map = {
+        "ocr": "status_image_ocr",
+        "ai_analysis": "status_ai_summary"
+    }
+    status_field = status_field_map.get(task_type)
+    if not status_field:
+        log.error(f"未知的子任務類型: {task_type} for URL ID {url_id}")
+        return
+
+    final_status = 'failed' # 預設為失敗
+    try:
+        # 1. 更新狀態為 'processing'
+        db_client.update_url(url_id, {status_field: "processing"})
+        log.info(f"背景子任務：已更新 URL ID {url_id} 的狀態為 '{task_type} processing'")
+
+        # 2. 執行實際任務 (此處為模擬)
+        if task_type == "ocr":
+            # TODO: 實際的 OCR 邏輯應在此處實現。
+            # 1. 從 db_client.get_url_by_id(url_id) 獲取 image_paths
+            # 2. 呼叫 OCR 工具處理圖片
+            # 3. 將 OCR 結果附加到 extracted_text 欄位
+            time.sleep(5) # 模擬 OCR 處理耗時
+            log.info(f"背景子任務：URL ID {url_id} 的 OCR 處理完成。")
+
+        elif task_type == "ai_analysis":
+            # TODO: 實際的 AI 分析邏輯應在此處實現。
+            # 1. db_client.get_analysis_task_by_file_id(url_id) 獲取分析任務
+            # 2. 獲取 file_content_for_analysis
+            # 3. 呼叫 AI 服務 (例如 core.analyzer)
+            # 4. 將結果更新到 analysis_tasks 表的 summary_content
+            time.sleep(10) # 模擬 AI 分析耗時
+            log.info(f"背景子任務：URL ID {url_id} 的 AI 分析處理完成。")
+
+        # 3. 更新狀態為 'completed'
+        db_client.update_url(url_id, {status_field: "completed"})
+        final_status = 'completed'
+        log.info(f"背景子任務：已更新 URL ID {url_id} 的狀態為 '{task_type} completed'")
+
+    except Exception as e:
+        log.error(f"背景子任務：處理 URL ID {url_id} 的 '{task_type}' 時發生嚴重錯誤: {e}", exc_info=True)
+        error_message = str(e)
+        db_client.update_url(url_id, {status_field: "failed", "status_message": error_message})
+        final_status = 'failed'
+    finally:
+        # 4. 發送 WebSocket 通知
+        final_record = db_client.get_url_by_id(url_id)
+        notification_msg = {
+            "type": "task_update",
+            "task_type": "processing", # 保持此類型以觸發前端列表刷新
+            "task_id": str(url_id),
+            "status": final_status, # 'completed' 或 'failed'
+            "result": final_record # 包含更新後的子任務狀態
+        }
+        asyncio.run_coroutine_threadsafe(queue.put(notification_msg), loop)
+        log.info(f"背景子任務：已為 URL ID {url_id} 發送 '{task_type}' 完成通知至佇列。")
+
+@router.post("/start_ocr")
+async def start_ocr(
+    payload: ProcessRequest,
+    background_tasks: BackgroundTasks,
+    request: Request,
+    db: DBClient = Depends(get_db)
+):
+    """接收要執行 OCR 的檔案 ID 列表，並建立背景任務。"""
+    url_ids = payload.ids
+    if not url_ids:
+        raise HTTPException(status_code=400, detail="未提供要處理的檔案 ID。")
+
+    log.info(f"API: 收到 {len(url_ids)} 個項目的 OCR 處理請求。")
+
+    semaphore = request.app.state.processing_semaphore
+    queue = request.app.state.notification_queue
+    loop = asyncio.get_running_loop()
+
+    if not all([semaphore, queue, loop]):
+        raise HTTPException(status_code=500, detail="伺服器狀態未完全初始化（缺少佇列、信號量或事件循環）。")
+
+    try:
+        for url_id in url_ids:
+            background_tasks.add_task(
+                run_task_wrapper,
+                task_id=url_id,
+                semaphore=semaphore,
+                blocking_func=_run_subtask_blocking_task,
+                queue=queue,
+                loop=loop,
+                db_client=db,
+                task_type="ocr"
+            )
+
+        return JSONResponse(
+            content={"message": f"已成功為 {len(url_ids)} 個項目建立背景 OCR 任務。"}
+        )
+    except Exception as e:
+        log.error(f"API: 啟動 OCR 任務時發生錯誤: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="啟動 OCR 任務時發生伺服器內部錯誤。")
+
+
+@router.post("/start_ai_analysis")
+async def start_ai_analysis(
+    payload: ProcessRequest,
+    background_tasks: BackgroundTasks,
+    request: Request,
+    db: DBClient = Depends(get_db)
+):
+    """接收要執行 AI 分析的檔案 ID 列表，並建立背景任務。"""
+    url_ids = payload.ids
+    if not url_ids:
+        raise HTTPException(status_code=400, detail="未提供要處理的檔案 ID。")
+
+    log.info(f"API: 收到 {len(url_ids)} 個項目的 AI 分析處理請求。")
+
+    semaphore = request.app.state.processing_semaphore
+    queue = request.app.state.notification_queue
+    loop = asyncio.get_running_loop()
+
+    if not all([semaphore, queue, loop]):
+        raise HTTPException(status_code=500, detail="伺服器狀態未完全初始化（缺少佇列、信號量或事件循環）。")
+
+    try:
+        for url_id in url_ids:
+            background_tasks.add_task(
+                run_task_wrapper,
+                task_id=url_id,
+                semaphore=semaphore,
+                blocking_func=_run_subtask_blocking_task,
+                queue=queue,
+                loop=loop,
+                db_client=db,
+                task_type="ai_analysis"
+            )
+
+        return JSONResponse(
+            content={"message": f"已成功為 {len(url_ids)} 個項目建立背景 AI 分析任務。"}
+        )
+    except Exception as e:
+        log.error(f"API: 啟動 AI 分析任務時發生錯誤: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="啟動 AI 分析任務時發生伺服器內部錯誤。")
