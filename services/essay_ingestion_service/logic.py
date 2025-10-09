@@ -1,7 +1,7 @@
 # services/essay_ingestion_service/logic.py
 import re
 import logging
-from typing import List, Dict
+from typing import List, Dict, Optional
 import sys
 from pathlib import Path
 
@@ -15,61 +15,105 @@ from src.db.client import DBClient
 # --- 日誌設定 ---
 log = logging.getLogger(__name__)
 
-def parse_chat_log(text: str) -> List[Dict]:
+def parse_chat_log(text: str) -> List[Dict[str, Optional[str]]]:
     """
-    從給定的 LINE 聊天紀錄文字中，解析出日期、時間、作者、標題和連結。
+    (Jules @ 2025-10-09) 方案 A v4: 最終修正版解析器。
+    解決了無日期開頭的邊界情況，並確保上下文狀態被正確管理。
     """
-    results = []
-    current_date = None
+    results: List[Dict[str, Optional[str]]] = []
+
+    # 正規表示式定義
+    date_pattern = re.compile(r'^\d{4}[./]\d{1,2}[./]\d{1,2}')
+    # 匹配 "時間<Tab>作者" 或 "時間 作者"
+    message_header_pattern = re.compile(r'^(\d{2}:\d{2})\s+(.*?)$')
+    url_pattern = re.compile(r'https?://[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b(?:[-a-zA-Z0-9()@:%_\+.~#?&/=]*)')
+
+    # 狀態機變數
+    current_date: Optional[str] = None
+    last_author: Optional[str] = None
+    last_time: Optional[str] = None
+    potential_title: str = ""
+
     lines = text.split('\n')
-    i = 0
-    date_pattern = re.compile(r'(\d{4}[./]\d{1,2}[./]\d{1,2}).*')
-    message_pattern = re.compile(r'^(\d{2}:\d{2})[\t\s]+([^\t\s].*?)[\t\s]+(.*)$')
-    url_pattern = re.compile(r'https?://\S+')
-    while i < len(lines):
-        line = lines[i].strip()
+
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+
+        # 1. 檢查是否為日期行
         date_match = date_pattern.match(line)
         if date_match:
-            raw_date_str = date_match.group(1)
+            raw_date_str = date_match.group(0).split(' ')[0]
             normalized_date_str = re.sub(r'[./]', '-', raw_date_str)
             date_parts = normalized_date_str.split('-')
             current_date = f"{date_parts[0]}-{int(date_parts[1]):02d}-{int(date_parts[2]):02d}"
-            i += 1
+            last_author = None
+            last_time = None
+            potential_title = ""
             continue
-        if not current_date:
-            i += 1
-            continue
-        message_match = message_pattern.match(line)
-        if message_match:
-            time, author, first_line_content = message_match.groups()
-            author = author.strip()
-            if any(keyword in author for keyword in ["加入聊天", "退出聊天"]) or "已收回訊息" in first_line_content:
-                i += 1
-                continue
-            content_parts = [first_line_content.strip()]
-            j = i + 1
-            while j < len(lines):
-                next_line = lines[j].strip()
-                if date_pattern.match(next_line) or message_pattern.match(next_line):
-                    break
-                if next_line:
-                    content_parts.append(next_line)
-                j += 1
-            full_content_str = " ".join(content_parts)
-            url_match = url_pattern.search(full_content_str)
-            if url_match:
-                url = url_match.group(0)
-                title_raw = full_content_str[:url_match.start()]
-                title = re.sub(r'\s+', ' ', title_raw).strip() or "無標題"
-                if "提醒小作文標題格式" in title:
-                    i = j
-                    continue
-                results.append({'date': current_date, 'time': time, 'author': author, 'title': title, 'url': url})
-            i = j
+
+        # 2. 嘗試解析 "作者<Tab>內容" 或 "時間<Tab>作者<Tab>內容"
+        parts = line.split('\t')
+        header_found = False
+
+        # 檢查是否為 "時間<Tab>作者..."
+        if len(parts) >= 2 and re.match(r'^\d{2}:\d{2}$', parts[0]):
+            header_found = True
+            last_time = parts[0]
+            last_author = parts[1].strip()
+            line_content = parts[2].strip() if len(parts) > 2 else ""
+        # 檢查是否為 "作者<Tab>內容"
+        elif len(parts) >= 2:
+            # 為了避免誤判，這裡可以加入一些啟發式規則，例如作者不能包含網址
+            if not url_pattern.search(parts[0]):
+                 header_found = True
+                 last_author = parts[0].strip()
+                 last_time = None # 新作者發言，但沒有時間，重置時間
+                 line_content = parts[1].strip()
+            else:
+                line_content = line
         else:
-            i += 1
+            line_content = line
+
+        # 過濾系統訊息
+        if header_found and last_author and (any(keyword in last_author for keyword in ["加入聊天", "退出聊天"]) or "已收回訊息" in line_content):
+            continue
+
+        # 3. 在當前行內容中尋找網址
+        urls_found = list(url_pattern.finditer(line_content))
+
+        if urls_found:
+            if not last_author:
+                continue
+
+            last_pos = 0
+            for match in urls_found:
+                url = match.group(0)
+
+                title_on_line = line_content[last_pos:match.start()].strip()
+                title = title_on_line or potential_title
+                title = re.sub(r'\s+', ' ', title).strip() or "無標題"
+
+                if "提醒小作文標題格式" in title:
+                    continue
+
+                results.append({
+                    'date': current_date,
+                    'time': last_time,
+                    'author': last_author,
+                    'title': title,
+                    'url': url
+                })
+                last_pos = match.end()
+
+            potential_title = ""
+        elif line_content:
+            potential_title = line_content
+
     log.info(f"從聊天紀錄中解析出 {len(results)} 筆結構化資料。")
     return results
+
 
 def save_parsed_data_to_db(parsed_data: List[Dict], source_text: str) -> List[Dict]:
     """
@@ -81,21 +125,19 @@ def save_parsed_data_to_db(parsed_data: List[Dict], source_text: str) -> List[Di
 
     log.info(f"準備將 {len(parsed_data)} 筆解析資料透過 DBClient 傳送至中央資料庫...")
 
-    # 準備要寫入的資料
     data_to_send = [
         {
             "url": item['url'],
             "title": item['title'],
             "author": item['author'],
-            "date": item['date'],
-            "time": item['time'],
+            "date": item.get('date'),
+            "time": item.get('time'),
             "source": "essay_performance"
         }
         for item in parsed_data
     ]
 
-    # 提取所有 URL，以便後續查詢
-    url_list = [item['url'] for item in parsed_data]
+    url_list = [item['url'] for item in parsed_data if item.get('url')]
 
     try:
         db_client = DBClient()
@@ -103,7 +145,6 @@ def save_parsed_data_to_db(parsed_data: List[Dict], source_text: str) -> List[Di
 
         if inserted_count > 0:
             log.info(f"成功透過 db_manager 儲存了 {inserted_count} 筆新資料。")
-            # 儲存後，立即查詢這些資料的詳細資訊
             log.info(f"正在查詢剛存入的 {len(url_list)} 筆資料的詳細資訊...")
             inserted_items_details = db_client.get_urls_by_url_list(url_list)
             log.info(f"成功查詢到 {len(inserted_items_details)} 筆詳細資訊。")

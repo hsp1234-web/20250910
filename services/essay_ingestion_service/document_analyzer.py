@@ -8,8 +8,7 @@ from pathlib import Path
 from typing import Dict, Any
 
 # --- 本地與專案模組匯入 ---
-# JULES: 這些將指向服務內部的本地副本
-from .document_repository import update_task_status, save_successful_analysis
+# JULES: 移除對本地資料庫 repository 的依賴
 from .universal_downloader import download_file
 from .content_extractor import extract_content
 # JULES: 暫時移除 stock_id_extractor 以簡化初始整合
@@ -92,71 +91,51 @@ async def analyze_text_with_llm(text_content: str) -> Dict[str, Any]:
             log.error(f"無法解析來自 llm_service 的回應: {analysis_text}", exc_info=True)
             raise ValueError(f"llm_service 回傳的不是有效的 JSON: {e}")
 
-async def process_document_url(source_url: str):
+# (Jules @ 2025-10-09) 重構，移除所有本地資料庫操作，使此服務成為一個純粹的分析引擎。
+async def _perform_analysis(file_path: str) -> Dict[str, Any]:
     """
-    執行完整的下載, 拆解, 分析, 保存工作流程.
-    這是一個為新服務定製的, 獨立的非同步函式.
+    (內部核心函式) 負責執行分析的核心步驟：提取、分析、並回傳結果。
+    此函式不處理資料庫操作或文件清理，僅專注於分析。
     """
-    log.info(f"開始處理新文件，來源 URL: {source_url}")
-    downloaded_path_str = None
+    log.info(f"核心分析：正在從 {file_path} 提取內容...")
+    content_data = await asyncio.to_thread(extract_content, file_path, str(DOWNLOAD_DIR))
+    text_content = content_data.get("text", "") if content_data else ""
+    image_paths = content_data.get("image_paths", []) if content_data else []
+
+    if not text_content:
+        log.warning("核心分析：文件內容提取成功，但未發現文字內容。")
+    log.info(f"核心分析：成功提取 {len(text_content)} 字元的文字和 {len(image_paths)} 張圖片。")
+
+    analysis_result_data = {}
+    if text_content:
+        log.info("核心分析：正在使用本地 LLM 分析文件內容...")
+        analysis_result_data = await analyze_text_with_llm(text_content)
+        log.info("核心分析：文件內容分析完成。")
+    else:
+        log.info("核心分析：跳過 LLM 分析，因為沒有文字內容。")
+
+    # 組合並回傳一個包含所有分析產物的字典，以便 API 閘道進行後續處理
+    return {
+        "analysis_data": analysis_result_data,
+        "image_paths": image_paths,
+        "extracted_text": text_content
+    }
+
+async def process_local_document(file_path: str) -> Dict[str, Any]:
+    """
+    【由本地檔案觸發】執行拆解、分析、並回傳結果。
+    此版本不會刪除傳入的 file_path，並會在發生錯誤時向上拋出異常，由呼叫者處理。
+    """
+    log.info(f"開始處理本地文件，路徑: {file_path}")
+    if not Path(file_path).exists():
+        err_msg = f"檔案不存在: {file_path}"
+        log.error(err_msg)
+        raise FileNotFoundError(err_msg)
+
     try:
-        # 步驟 0: 在新資料庫中建立任務並標記為處理中
-        await asyncio.to_thread(update_task_status, source_url, 'processing')
-
-        # 步驟 1: 下載文件
-        log.info(f"步驟 1/4: 正在從 {source_url} 下載文件...")
-        # JULES: download_file 將是本地副本
-        success, downloaded_path_str, message = await asyncio.to_thread(
-            download_file, source_url, str(DOWNLOAD_DIR)
-        )
-        if not success:
-            raise IOError(f"文件下載失敗: {message}")
-        log.info(f"文件已成功下載至: {downloaded_path_str}")
-
-        # 步驟 2: 拆解文件，提取文字和圖片
-        log.info(f"步驟 2/4: 正在從 {downloaded_path_str} 提取內容...")
-        # JULES: extract_content 將是本地副本
-        content_data = await asyncio.to_thread(extract_content, downloaded_path_str, str(DOWNLOAD_DIR))
-
-        text_content = content_data.get("text") if content_data else ""
-        image_paths = content_data.get("image_paths") if content_data else []
-
-        if not text_content:
-            # 即使沒有文字，但有圖片，也可能需要保存
-            log.warning("文件內容提取成功，但未發現文字內容。")
-
-        log.info(f"成功提取 {len(text_content)} 字元的文字和 {len(image_paths)} 張圖片。")
-
-        # 步驟 3: 使用本地 LLM 進行分析 (僅分析文字部分)
-        analysis_result = {}
-        if text_content:
-            log.info("步驟 3/4: 正在使用本地 LLM 分析文件內容...")
-            analysis_result = await analyze_text_with_llm(text_content)
-            log.info("文件內容分析完成。")
-        else:
-            log.info("步驟 3/4: 跳過 LLM 分析，因為沒有文字內容。")
-
-
-        # 步驟 4: 將成功結果（包括圖片路徑）保存到資料庫
-        log.info("步驟 4/4: 正在將分析結果和圖片路徑保存到資料庫...")
-        await asyncio.to_thread(save_successful_analysis, source_url, analysis_result, image_paths)
-        log.info(f"文件處理流程已成功完成: {source_url}")
-
+        # 呼叫核心分析邏輯並直接回傳結果
+        return await _perform_analysis(file_path)
     except Exception as e:
-        log.error(f"處理 {source_url} 的過程中發生無法預期的錯誤: {e}", exc_info=True)
-        await asyncio.to_thread(update_task_status, source_url, 'failed', str(e))
-    finally:
-        # 清理下載的檔案和提取的圖片
-        if downloaded_path_str and os.path.exists(downloaded_path_str):
-            try:
-                if os.path.isdir(downloaded_path_str):
-                    import shutil
-                    shutil.rmtree(downloaded_path_str)
-                else:
-                    os.remove(downloaded_path_str)
-                log.info(f"已成功清理臨時下載檔案/目錄: {downloaded_path_str}")
-            except OSError as e:
-                log.error(f"清理臨時下載檔案 {downloaded_path_str} 時發生錯誤: {e}", exc_info=True)
-
-        # JULES: 也需要清理提取出來的圖片
-        # (此邏輯應在更上層或由一個單獨的清理任務處理，暫時保留)
+        log.error(f"處理本地文件 {file_path} 的過程中發生錯誤: {e}", exc_info=True)
+        # 將異常向上拋出，以便 API 端點可以捕獲它並回傳 500 錯誤給 API 閘道
+        raise
