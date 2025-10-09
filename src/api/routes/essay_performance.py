@@ -114,6 +114,13 @@ class StartDownloadRequest(BaseModel):
 class StartDownloadResponse(BaseModel):
     task_id: str = Field(..., description="用於追蹤下載進度的唯一任務ID")
 
+# Jules: 為分析流程新增資料模型
+class StartAnalysisRequest(BaseModel):
+    ids: List[int] = Field(..., description="要進行分析的項目ID列表")
+
+class StartAnalysisResponse(BaseModel):
+    task_id: str = Field(..., description="用於追蹤分析進度的唯一任務ID")
+
 # --- 依賴注入 ---
 # 這些函式會被 FastAPI 用來提供共享的資源實例給 API 端點
 
@@ -180,7 +187,64 @@ def run_download_pipeline(task_id: str, item_ids: List[int], db_client: DBClient
     log.info(f"[任務 {task_id}] 所有項目處理完畢，管線結束。")
 
 
-# --- 新增的 API 端點 ---
+# --- 背景任務邏輯 (分析) ---
+def run_analysis_pipeline(task_id: str, item_ids: List[int], db_client: DBClient, task_manager):
+    """
+    在背景執行緒中運行的分析管線。
+    """
+    log.info(f"[任務 {task_id}] 背景分析管線已啟動，共 {len(item_ids)} 個項目。")
+
+    try:
+        # 取得 essay_ingestion_service 的 URL，如果失敗則直接中止
+        service_base_url = get_service_url(SERVICE_NAME)
+        target_url = f"{service_base_url}/process-local-document"
+        log.info(f"[任務 {task_id}] 將使用擷取服務端點: {target_url}")
+    except HTTPException as e:
+        log.error(f"[任務 {task_id}] 無法啟動分析管線，因為找不到擷取服務: {e.detail}")
+        # 將所有項目的狀態都標記為失敗
+        for item_id in item_ids:
+            task_manager.update_item_status(task_id, item_id, "FAILED", details={"error_message": "分析服務不可用"})
+        task_manager.complete_task(task_id)
+        return
+
+    # 使用同步的 httpx Client，因為此函式本身就在背景執行緒中運行
+    with httpx.Client(timeout=600.0) as client:
+        for item_id in item_ids:
+            try:
+                # 1. 從資料庫查詢項目詳情，特別是本地路徑
+                url_record = db_client.get_url_by_id(item_id)
+                if not url_record or not url_record.get('local_path'):
+                    raise ValueError(f"ID {item_id} 的紀錄不完整或尚未下載 (缺少 local_path)。")
+
+                local_path = url_record['local_path']
+                source_url = url_record['url']
+                log.info(f"[任務 {task_id}] 正在處理項目 ID: {item_id}，檔案路徑: {local_path}")
+
+                # 2. 更新資料庫和任務狀態為「處理中」
+                db_client.update_url(item_id, {"ocr_status": "processing", "ai_status": "processing"})
+                # 使用一個新的狀態名稱以和下載流程區分
+                task_manager.update_item_status(task_id, item_id, "PROCESSING_ANALYSIS")
+
+                # 3. 呼叫擷取服務進行分析
+                response = client.post(target_url, json={"source_url": source_url, "file_path": local_path})
+                response.raise_for_status() # 如果狀態碼不是 2xx，會拋出異常
+
+                # 4. 分析成功，更新資料庫和任務狀態
+                log.info(f"[任務 {task_id}] 項目 {item_id} 分析成功。")
+                db_client.update_url(item_id, {"ocr_status": "completed", "ai_status": "completed"})
+                task_manager.update_item_status(task_id, item_id, "COMPLETED_ANALYSIS")
+
+            except Exception as e:
+                error_msg = str(e)
+                log.error(f"[任務 {task_id}] 處理項目 {item_id} 的分析時發生錯誤: {error_msg}", exc_info=True)
+                db_client.update_url(item_id, {"ocr_status": "failed", "ai_status": "failed", "last_error_details": error_msg})
+                task_manager.update_item_status(task_id, item_id, "FAILED", details={"error_message": error_msg})
+
+    task_manager.complete_task(task_id)
+    log.info(f"[任務 {task_id}] 所有分析項目處理完畢，管線結束。")
+
+
+# --- API 端點 ---
 @router.post("/start_download", response_model=StartDownloadResponse, summary="啟動非同步文件下載")
 async def start_download(
     request: StartDownloadRequest,
@@ -207,19 +271,69 @@ async def start_download(
     return {"task_id": task_id}
 
 
-@router.get("/download_status/{task_id}", summary="查詢下載任務狀態")
-async def get_download_status(
-    task_id: str,
+@router.post("/start_analysis", response_model=StartAnalysisResponse, summary="啟動非同步文件分析")
+async def start_analysis(
+    request: StartAnalysisRequest,
+    background_tasks: BackgroundTasks,
+    db_client: DBClient = Depends(get_db_client),
     task_manager = Depends(get_task_manager)
 ):
     """
-    根據任務ID，查詢並回傳一個下載任務的當前狀態。
-    - 如果任務ID不存在，回傳 404 Not Found。
-    - 回傳的資料包含整個任務的總體狀態以及每個子項目的詳細狀態。
+    接收一個包含多個ID的列表，為這些ID啟動一個背景分析任務。
     """
-    log.debug(f"收到對任務 {task_id} 的狀態查詢請求。")
+    if not request.ids:
+        raise HTTPException(status_code=400, detail="ID列表不可為空。")
+
+    log.info(f"收到 /start_analysis 請求，包含 {len(request.ids)} 個ID。")
+    task_id = task_manager.create_task(request.ids)
+    log.info(f"已為分析請求建立任務，Task ID: {task_id}")
+
+    # 將耗時的分析工作新增到背景任務佇列中
+    background_tasks.add_task(run_analysis_pipeline, task_id, request.ids, db_client, task_manager)
+
+    return {"task_id": task_id}
+
+
+@router.get("/status/{task_id}", summary="查詢通用任務狀態")
+async def get_task_status(
+    task_id: str,
+    db_client: DBClient = Depends(get_db_client),
+    task_manager = Depends(get_task_manager)
+):
+    """
+    根據任務ID，查詢並回傳一個任務的當前狀態。
+    - 如果任務ID不存在，回傳 404 Not Found。
+    - 回傳的資料包含整個任務的總體狀態以及每個子項目的詳細狀態，
+      並會從資料庫補充 OCR 和 AI 分析狀態等永久性資料。
+    """
+    log.debug(f"收到對任務 {task_id} 的通用狀態查詢請求。")
     status = task_manager.get_task_status(task_id)
     if status is None:
         log.warning(f"查詢了不存在的任務ID: {task_id}")
         raise HTTPException(status_code=404, detail=f"找不到任務ID: {task_id}")
+
+    # 從資料庫獲取永久性狀態並合併到回應中
+    if status.get('items'):
+        for item_id_str, item_data in status['items'].items():
+            try:
+                item_id = int(item_id_str)
+                db_record = db_client.get_url_by_id(item_id)
+                if db_record:
+                    # 合併資料庫中的狀態
+                    item_data['ocr_status'] = db_record.get('ocr_status', 'pending')
+                    item_data['ai_status'] = db_record.get('ai_status', 'pending')
+
+                    # 確保即使任務管理器中沒有，也能從資料庫填充基本資訊
+                    item_data.setdefault('title', db_record.get('title', '讀取中...'))
+                    item_data.setdefault('author', db_record.get('author', '未知作者'))
+                    item_data.setdefault('message_date', db_record.get('message_date', ''))
+                    item_data.setdefault('message_time', db_record.get('message_time', ''))
+                else:
+                    item_data['ocr_status'] = 'unknown'
+                    item_data['ai_status'] = 'unknown'
+            except (ValueError, TypeError):
+                log.warning(f"處理項目 {item_id_str} 時遇到無效的 ID。")
+                item_data['ocr_status'] = 'error'
+                item_data['ai_status'] = 'error'
+
     return status

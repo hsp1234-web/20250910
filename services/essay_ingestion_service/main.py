@@ -14,7 +14,7 @@ from .logic import parse_chat_log, save_parsed_data_to_db
 
 # JULES: 新增的文件分析邏輯
 # 使用相對匯入
-from .document_analyzer import process_document_url
+from .document_analyzer import process_document_url, process_local_document
 from .document_repository import initialize_database as initialize_document_db
 
 
@@ -67,6 +67,16 @@ class AnalyzeDocumentRequest(BaseModel):
 class AnalyzeDocumentResponse(BaseModel):
     message: str
     task_url: str
+
+# Jules: 新增的模型 for /process-local-document
+class ProcessLocalDocumentRequest(BaseModel):
+    source_url: str
+    file_path: str
+
+class ProcessLocalDocumentResponse(BaseModel):
+    message: str
+    source_url: str
+    analysis_status: str
 
 
 # --- API 端點 ---
@@ -123,6 +133,35 @@ async def analyze_document(request: AnalyzeDocumentRequest, background_tasks: Ba
         message="文件分析任務已成功排程，正在背景處理中。",
         task_url=request.source_url
     )
+
+# Jules: 新增的端點，用於處理本地端已存在的檔案
+@app.post("/process-local-document", response_model=ProcessLocalDocumentResponse, tags=["文件圖文分析"])
+async def process_local_document_endpoint(request: ProcessLocalDocumentRequest):
+    """
+    接收一個本地檔案路徑和對應的 URL，直接對該檔案進行分析。
+    這是一個同步端點，會等待分析完成後才回傳結果。
+    """
+    log.info(f"接收到 /process-local-document 請求，URL: {request.source_url}, 路徑: {request.file_path}")
+
+    try:
+        # 直接呼叫處理本地檔案的函式，並等待其完成
+        await process_local_document(source_url=request.source_url, file_path=request.file_path)
+
+        # 如果 process_local_document 順利完成，沒有拋出異常，就代表成功
+        return ProcessLocalDocumentResponse(
+            message="文件分析成功完成。",
+            source_url=request.source_url,
+            analysis_status="completed"
+        )
+
+    except FileNotFoundError as e:
+        log.error(f"檔案未找到錯誤: {e}", exc_info=True)
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        # process_local_document 內部會處理自身的資料庫狀態更新，
+        # 在這裡我們只需要捕捉異常，並回傳一個通用的 500 錯誤給呼叫者 (API 閘道)。
+        log.error(f"處理本地文件時發生未預期錯誤: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"分析文件時發生內部伺服器錯誤: {e}")
 
 
 # --- 啟動配置 ---
