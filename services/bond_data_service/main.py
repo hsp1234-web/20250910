@@ -8,9 +8,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 # 匯入重構後的新架構
-import api_routes
-from repository import FinancialDataRepository, initialize_database
-from service import StressIndexService
+from . import api_routes
+from .repository import FinancialDataRepository, initialize_database
+from .service import StressIndexService
 
 # --- 日誌設定 ---
 logging.basicConfig(level=logging.INFO)

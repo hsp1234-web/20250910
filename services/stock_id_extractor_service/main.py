@@ -3,14 +3,8 @@ import sys
 from pathlib import Path
 from fastapi import FastAPI
 
-# --- 路徑修正，確保能找到服務模組 ---
-# 將專案根目錄加入到 Python 的搜尋路徑中，以解決在協調器環境下的相對匯入問題。
-# services/stock_id_extractor_service/ -> services/ -> . (root)
-PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-sys.path.insert(0, str(PROJECT_ROOT))
-
-# --- 本地模組匯入 (使用絕對路徑) ---
-from services.stock_id_extractor_service.api_routes import router as api_router
+# --- 本地模組匯入 (使用相對路徑) ---
+from .api_routes import router as api_router
 
 # --- 日誌基礎設定 ---
 logging.basicConfig(

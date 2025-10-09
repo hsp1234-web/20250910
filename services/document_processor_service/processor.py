@@ -7,15 +7,8 @@ import sys
 from pathlib import Path
 from typing import Dict, Any
 
-# --- 路徑修正 ---
-# 為了能從 services 目錄中，匯入位於 src 目錄的工具模組
-# 我們需要將專案的根目錄加入到 Python 的搜尋路徑中
-# services/document_processor_service/ -> services/ -> . (root)
-PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-sys.path.insert(0, str(PROJECT_ROOT))
-
 # --- 本地與專案模組匯入 ---
-from services.document_processor_service.repository import update_task_status, save_successful_analysis
+from .repository import update_task_status, save_successful_analysis
 from src.tools.universal_downloader import download_file
 from src.tools.content_extractor import extract_content
 from .stock_id_extractor import extract_stock_ids

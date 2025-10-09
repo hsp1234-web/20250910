@@ -2,10 +2,10 @@ import logging
 from fastapi import APIRouter, HTTPException, BackgroundTasks, Response
 from pydantic import BaseModel, HttpUrl
 
-# --- 本地模組匯入 (使用絕對路徑) ---
+# --- 本地模組匯入 (使用相對路徑) ---
 # 匯入我們在 repository 和 processor 中建立的函式
-from services.document_processor_service.repository import create_processing_task
-from services.document_processor_service.processor import process_document_url
+from .repository import create_processing_task
+from .processor import process_document_url
 
 # --- 日誌設定 ---
 log = logging.getLogger(__name__)

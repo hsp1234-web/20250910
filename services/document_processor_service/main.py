@@ -4,14 +4,9 @@ from pathlib import Path
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
-# --- 路徑修正，確保能找到服務模組 ---
-# 將專案根目錄加入到 Python 的搜尋路徑中，以解決在協調器環境下的相對匯入問題。
-PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-sys.path.insert(0, str(PROJECT_ROOT))
-
-# --- 本地模組匯入 (使用絕對路徑) ---
-from services.document_processor_service.api_routes import router as api_router
-from services.document_processor_service.repository import initialize_database
+# --- 本地模組匯入 (使用相對路徑) ---
+from .api_routes import router as api_router
+from .repository import initialize_database
 
 # --- 日誌基礎設定 ---
 # 確保在應用程式啟動時，日誌記錄器就被設定好

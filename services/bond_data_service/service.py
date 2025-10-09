@@ -7,7 +7,7 @@ import pandas as pd
 import numpy as np
 from cachetools import TTLCache, cached
 
-from repository import FinancialDataRepository
+from .repository import FinancialDataRepository
 
 logger = logging.getLogger(__name__)
 
