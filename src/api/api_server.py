@@ -30,6 +30,7 @@ sys.path.insert(0, str(SRC_DIR))
 
 # V4 循環導入修復：從新的依賴檔案中導入
 from .dependencies import db_client
+from core import key_manager
 
 # --- JULES 於 2025-08-09 的修改：設定應用程式全域時區 ---
 # 為了確保所有日誌和資料庫時間戳都使用一致的時區，我們在應用程式啟動的
@@ -832,6 +833,7 @@ async def get_youtube_models(payload: ApiKeyPayload):
 async def process_youtube_urls(request: Request):
     """
     接收 YouTube URL，並根據前端傳來的參數，建立對應的下載和 AI 分析任務。
+    此版本已更新，支援自動從金鑰池獲取金鑰。
     """
     payload = await request.json()
     requests_list = payload.get("requests", [])
@@ -841,24 +843,36 @@ async def process_youtube_urls(request: Request):
         log.warning("偵測到舊版的 'urls' 負載格式，正在進行相容處理。")
         requests_list = [{"url": url, "filename": None} for url in payload.get("urls", [])]
 
-
     # 新的彈性參數
     model = payload.get("model")
-    tasks_to_run = payload.get("tasks", "summary,transcript") # e.g., "summary,transcript,translate"
-    output_format = payload.get("output_format", "html") # "html" or "txt"
+    tasks_to_run = payload.get("tasks", "summary,transcript")
+    output_format = payload.get("output_format", "html")
     download_only = payload.get("download_only", False)
-    download_type = payload.get("download_type", "audio") # JULES'S NEW FEATURE
-    api_key = payload.get("api_key") # 實現無狀態，從請求中直接獲取金鑰
-    timeout = payload.get("timeout", 180) # 從前端獲取超時設定，預設 180 秒
+    download_type = payload.get("download_type", "audio")
+    api_key = payload.get("api_key") # 接收臨時金鑰
+    timeout = payload.get("timeout", 180)
+
+    api_keys_list = []
+    if not download_only:
+        if api_key:
+            # 如果提供了臨時金鑰，將其包裝成列表以便統一處理
+            log.info("偵測到臨時 API 金鑰，將優先使用此金鑰。")
+            api_keys_list = [{"name": "temporary_key", "value": api_key}]
+        else:
+            # 否則，從 key_manager 獲取所有有效金鑰
+            log.info("未提供臨時金鑰，正在從資料庫的金鑰池中讀取。")
+            api_keys_list = key_manager.get_all_valid_keys_for_manager()
+
+        if not api_keys_list:
+            log.error("執行 AI 分析失敗：未提供臨時 API 金鑰，且資料庫中沒有可用的有效金鑰。")
+            raise HTTPException(status_code=401, detail="執行 AI 分析失敗：未提供臨時 API 金鑰，且資料庫中沒有可用的有效金鑰。")
+
+        log.info(f"找到 {len(api_keys_list)} 個可用金鑰準備進行 AI 分析。")
 
     if not requests_list:
-        # 在加入相容性邏輯後，更新錯誤訊息
         raise HTTPException(status_code=400, detail="請求中必須包含 'requests' 或 'urls'。")
     if not download_only and not model:
         raise HTTPException(status_code=400, detail="執行 AI 分析時必須提供 'model'。")
-    if not download_only and not api_key:
-        raise HTTPException(status_code=401, detail="執行 AI 分析時必須提供 'api_key'。")
-
 
     tasks = []
     for req_item in requests_list:
@@ -871,7 +885,6 @@ async def process_youtube_urls(request: Request):
         task_id = str(uuid.uuid4())
 
         if download_only:
-            # JULES'S NEW FEATURE: Pass download_type to payload
             task_payload = {"url": url, "output_dir": str(UPLOADS_DIR), "custom_filename": filename, "download_type": download_type}
             db_client.add_task(task_id, json.dumps(task_payload), task_type='youtube_download_only')
             tasks.append({"url": url, "task_id": task_id})
@@ -879,26 +892,23 @@ async def process_youtube_urls(request: Request):
             download_task_id = task_id
             process_task_id = str(uuid.uuid4())
 
-            # JULES'S NEW FEATURE: Pass download_type to download payload
             download_payload = {"url": url, "output_dir": str(UPLOADS_DIR), "custom_filename": filename, "download_type": download_type}
-            # 將所有新參數存入 process 任務的 payload
             process_payload = {
                 "model": model,
                 "output_dir": "transcripts",
                 "tasks": tasks_to_run,
                 "output_format": output_format,
-                "api_key": api_key, # 將金鑰存入任務酬載
-                "timeout": timeout # 將超時設定存入任務酬載
+                "api_keys": api_keys_list, # 將金鑰列表存入任務酬載
+                "timeout": timeout
             }
 
             db_client.add_task(download_task_id, json.dumps(download_payload), task_type='youtube_download')
             db_client.add_task(process_task_id, json.dumps(process_payload), task_type='gemini_process', depends_on=download_task_id)
 
-            # JULES'S FIX: Return both task IDs so the frontend can track the full chain.
             tasks.append({
                 "url": url,
-                "task_id": download_task_id, # For display and initial tracking
-                "final_task_id": process_task_id, # For listening to the final result
+                "task_id": download_task_id,
+                "final_task_id": process_task_id,
                 "task_type": "youtube_process_chain"
             })
 
@@ -1082,7 +1092,7 @@ def trigger_transcription(task_id: str, file_path: str, model_size: str, languag
 
 
 def trigger_youtube_processing(task_id: str, loop: asyncio.AbstractEventLoop):
-    """在一個單獨的執行緒中執行 YouTube 處理流程（已更新為彈性模式）。"""
+    """在一個單獨的執行緒中執行 YouTube 處理流程（已更新為支援金鑰輪換）。"""
     def _process_in_thread():
         log.info(f"🧵 [執行緒] 開始處理 YouTube 任務鏈，起始 ID: {task_id}")
 
@@ -1105,7 +1115,6 @@ def trigger_youtube_processing(task_id: str, loop: asyncio.AbstractEventLoop):
                 "payload": {"task_id": task_id, "status": "downloading", "message": f"正在下載 ({download_type}): {url}", "task_type": task_type}
             }), loop)
 
-            # JULES DEBUG (2025-08-31): 為了 E2E 測試的穩定性，新增 mock URL 判斷
             if url.startswith("mock://"):
                 downloader_script_path = ROOT_DIR / "src" / "tools" / "mock_downloader_for_test.py"
             else:
@@ -1120,46 +1129,22 @@ def trigger_youtube_processing(task_id: str, loop: asyncio.AbstractEventLoop):
                 log.info(f"發現 cookies.txt，將其用於下載。")
                 cmd_dl.extend(["--cookies-file", str(cookies_path)])
 
-            proc_env = os.environ.copy()
-            # JULES'S FIX (2025-08-30): 重構 I/O 處理以解決死鎖問題
-            # 舊的寫法是逐行讀取 stderr，但如果 stdout 的緩衝區被填滿，子程序會被阻塞，
-            # 而父程序卻在等待 stderr，從而導致死鎖。
-            #
-            # 新的寫法使用 communicate()，它會安全地讀取兩個流直到程序結束，
-            # 雖然會失去即時的進度回報，但能完全避免死鎖，確保任務能正確完成。
-            # 這是根據 POC 成功案例的模式進行的重構。
             process_dl = subprocess.Popen(
-                cmd_dl,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                encoding='utf-8',
-                env=proc_env
+                cmd_dl, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding='utf-8', env=os.environ.copy()
             )
-
-            # communicate() 會讀取所有輸出直到程序結束，並返回結果。
-            # 這能有效避免緩衝區填滿導致的死鎖。
             stdout_output, stderr_output = process_dl.communicate()
 
-            # 在程序結束後，檢查返回碼
             if process_dl.returncode != 0:
-                # 將 stderr 的內容包含在錯誤訊息中，以便除錯
                 log.error(f"❌ [執行緒] youtube_downloader.py 執行失敗。Stderr: {stderr_output}")
-                # 我們從 stdout 中解析 JSON，因為即使失敗，腳本也會輸出一個錯誤 JSON
-                # 但如果 stdout 是空的，就使用 stderr 作為錯誤訊息
-                if stdout_output:
-                    raise RuntimeError(stdout_output)
-                else:
-                    raise RuntimeError(f"youtube_downloader.py 執行失敗，返回碼 {process_dl.returncode}。錯誤: {stderr_output}")
+                if stdout_output: raise RuntimeError(stdout_output)
+                else: raise RuntimeError(f"youtube_downloader.py 執行失敗，返回碼 {process_dl.returncode}。錯誤: {stderr_output}")
 
-            # 如果成功，stdout 應該包含最終的 JSON 結果
             download_result = json.loads(stdout_output)
-            media_file_path = download_result['output_path'] # This is an absolute path
+            media_file_path = download_result['output_path']
             video_title = download_result.get('video_title', '無標題影片')
             log.info(f"✅ [執行緒] YouTube 媒體下載完成: {media_file_path}")
 
             if task_type == 'youtube_download_only':
-                # 問題二：將檔案系統路徑轉換為可存取的 URL
                 download_result['output_path'] = convert_to_media_url(download_result['output_path'])
                 db_client.update_task_status(task_id, 'completed', json.dumps(download_result))
                 log.info(f"✅ [執行緒] '僅下載媒體' 任務 {task_id} 完成。")
@@ -1179,8 +1164,11 @@ def trigger_youtube_processing(task_id: str, loop: asyncio.AbstractEventLoop):
             model = process_payload['model']
             tasks_to_run = process_payload.get('tasks', 'summary,transcript')
             output_format = process_payload.get('output_format', 'html')
-            api_key = process_payload.get('api_key') # 從任務酬載中讀取金鑰
-            timeout = process_payload.get('timeout', 180) # 從任務酬載中讀取超時設定
+            api_keys = process_payload.get('api_keys')
+            timeout = process_payload.get('timeout', 180)
+
+            if not api_keys:
+                raise ValueError("任務酬載中未找到 'api_keys' 列表，無法執行 AI 分析。")
 
             log.info(f"執行 Gemini 分析，任務: '{tasks_to_run}', 格式: '{output_format}', 超時: {timeout}s")
             asyncio.run_coroutine_threadsafe(manager.broadcast_json({
@@ -1189,63 +1177,67 @@ def trigger_youtube_processing(task_id: str, loop: asyncio.AbstractEventLoop):
             }), loop)
 
             processor_script_path = ROOT_DIR / "src" / "tools" / ("mock_gemini_processor.py" if IS_MOCK_MODE else "gemini_processor.py")
-            # 問題二：將報告也輸出到 uploads 目錄下
             report_output_dir = UPLOADS_DIR / "reports"
             report_output_dir.mkdir(parents=True, exist_ok=True)
 
-            cmd_process = [
+            cmd_process_base = [
                 sys.executable, str(processor_script_path),
-                "--command=process",
-                "--audio-file", media_file_path,
-                "--model", model,
-                "--output-dir", str(report_output_dir),
-                "--video-title", video_title,
-                "--tasks", tasks_to_run,
-                "--output-format", output_format,
-                "--timeout", str(timeout) # 將超時參數傳遞給子程序
+                "--command=process", "--audio-file", media_file_path, "--model", model,
+                "--output-dir", str(report_output_dir), "--video-title", video_title,
+                "--tasks", tasks_to_run, "--output-format", output_format, "--timeout", str(timeout)
             ]
 
-            proc_env = os.environ.copy()
-            if api_key:
-                proc_env["GOOGLE_API_KEY"] = api_key # 將金鑰設定到子程序的環境變數中
+            process_gemini_success = False
+            final_stdout = ""
+            final_stderr = ""
 
-            log.info(f"任務 {dependent_task_id}: 正要啟動 gemini_processor.py 子程序...")
-            process_gemini = subprocess.Popen(
-                cmd_process, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding='utf-8', env=proc_env
-            )
+            for key_info in api_keys:
+                current_key_value = key_info.get("value")
+                current_key_name = key_info.get("name", "N/A")
+                if not current_key_value: continue
 
-            # JULES'S FIX (2025-09-01): Refactor I/O handling to prevent deadlocks.
-            # Reading stderr line-by-line while stdout buffer might fill up is a classic deadlock scenario.
-            # The safer approach is to use communicate() to get both streams after the process finishes.
-            # This sacrifices real-time progress updates for stability and correctness, which is the right trade-off here.
-            log.info(f"任務 {dependent_task_id}: 正在等待 gemini_processor.py 子程序完成...")
-            stdout_output, stderr_output = process_gemini.communicate()
-            log.info(f"任務 {dependent_task_id}: gemini_processor.py 子程序已結束。返回碼: {process_gemini.returncode}")
+                log.info(f"任務 {dependent_task_id}: 正在嘗試使用金鑰 '{current_key_name}'...")
+                proc_env = os.environ.copy()
+                proc_env["GOOGLE_API_KEY"] = current_key_value
 
-            if process_gemini.returncode != 0:
-                # Log the full stderr for debugging purposes, then raise the error with stdout,
-                # as the tool is designed to put the final error JSON in stdout.
-                log.error(f"❌ [執行緒] gemini_processor.py 執行失敗。Stderr: {stderr_output}")
-                if stdout_output:
-                    raise RuntimeError(stdout_output)
+                process_gemini = subprocess.Popen(
+                    cmd_process_base, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding='utf-8', env=proc_env
+                )
+                stdout_output, stderr_output = process_gemini.communicate()
+
+                if process_gemini.returncode == 0:
+                    log.info(f"✅ 金鑰 '{current_key_name}' 成功完成任務。")
+                    process_gemini_success = True
+                    final_stdout = stdout_output
+                    final_stderr = stderr_output
+                    break
+
+                error_text = (stdout_output + stderr_output).lower()
+                if "429" in error_text or "quota" in error_text:
+                    log.warning(f"⚠️ 金鑰 '{current_key_name}' 遭遇額度問題 (429)。正在嘗試下一個金鑰...")
+                    continue
                 else:
-                    raise RuntimeError(f"Gemini processor failed with exit code {process_gemini.returncode}. Stderr: {stderr_output}")
+                    log.error(f"❌ 金鑰 '{current_key_name}' 遭遇非額度錯誤，任務終止。Stderr: {stderr_output}")
+                    final_stdout = stdout_output
+                    final_stderr = stderr_output
+                    break
 
-            process_result = json.loads(stdout_output)
-            # 問題二：將結果中的所有檔案路徑轉換為 URL
+            if not process_gemini_success:
+                log.error(f"❌ [執行緒] 所有金鑰均執行失敗。最後的錯誤 Stderr: {final_stderr}")
+                if final_stdout: raise RuntimeError(final_stdout)
+                else: raise RuntimeError(f"Gemini processor failed with all available keys. Last error: {final_stderr}")
+
+            process_result = json.loads(final_stdout)
             for key in ["output_path", "html_report_path", "pdf_report_path"]:
-                 if key in process_result and process_result[key]:
+                if key in process_result and process_result[key]:
                     process_result[key] = convert_to_media_url(process_result[key])
 
             db_client.update_task_status(dependent_task_id, 'completed', json.dumps(process_result))
             log.info(f"✅ [執行緒] Gemini AI 處理完成。")
 
-            # JULES'S FIX (2025-08-31): 補上遺失的 WebSocket 廣播
             final_payload = {
-                "task_id": dependent_task_id,
-                "status": "completed",
-                "task_type": "gemini_process",
-                "result": process_result
+                "task_id": dependent_task_id, "status": "completed",
+                "task_type": "gemini_process", "result": process_result
             }
             update_message = {"type": "YOUTUBE_STATUS", "payload": final_payload}
             asyncio.run_coroutine_threadsafe(manager.broadcast_json(update_message), loop)
