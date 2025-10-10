@@ -11,6 +11,7 @@ from pathlib import Path
 from src.core.task_manager import get_manager as get_task_manager
 from src.db.client import DBClient
 from src.tools.universal_downloader import download_file
+from src.core.service_discovery import get_service_url as get_service_url_from_core
 
 # --- 日誌設定 ---
 log = logging.getLogger('api_gateway')
@@ -22,33 +23,17 @@ router = APIRouter(
 )
 
 # --- 微服務配置 ---
-SERVICE_REGISTRY_FILE = Path("/tmp/service_registry.json")
 SERVICE_NAME = "essay_ingestion_service"
 
-def get_service_url(service_name: str) -> str:
+def get_service_url_wrapper(service_name: str) -> str:
     """
-    從服務註冊檔案中讀取指定服務的 URL。
+    一個包裝函式，呼叫核心服務發現模組並處理錯誤，將其轉換為適合 API 路由的 HTTPException。
     """
-    if not SERVICE_REGISTRY_FILE.exists():
-        log.error(f"服務註冊檔案不存在: {SERVICE_REGISTRY_FILE}")
-        raise HTTPException(status_code=503, detail="服務註冊中心不可用，無法路由請求。")
-
-    try:
-        with open(SERVICE_REGISTRY_FILE, 'r', encoding='utf-8') as f:
-            registry = json.load(f)
-
-        service_info = registry.get(service_name)
-        if not service_info or "port" not in service_info:
-            log.error(f"在註冊中心找不到服務 '{service_name}' 的有效配置。")
-            raise HTTPException(status_code=503, detail=f"服務 '{service_name}' 未註冊或配置錯誤。")
-
-        port = service_info["port"]
-        # 在容器化環境中，服務之間通常透過 localhost 進行通訊
-        return f"http://127.0.0.1:{port}"
-
-    except (json.JSONDecodeError, IOError) as e:
-        log.error(f"讀取或解析服務註冊檔案時發生錯誤: {e}")
-        raise HTTPException(status_code=500, detail="讀取服務註冊中心時發生內部錯誤。")
+    url = get_service_url_from_core(service_name)
+    if url is None:
+        log.error(f"服務發現失敗: 無法為服務 '{service_name}' 找到 URL。")
+        raise HTTPException(status_code=503, detail=f"服務 '{service_name}' 目前不可用或未註冊。")
+    return url
 
 
 # --- 共用 HTTP 客戶端 ---
@@ -72,7 +57,7 @@ async def proxy_ingest_text(
     """
     try:
         # 動態獲取微服務 URL
-        service_base_url = get_service_url(SERVICE_NAME)
+        service_base_url = get_service_url_wrapper(SERVICE_NAME)
         target_url = f"{service_base_url}/ingest"
         log.info(f"代理請求至動態發現的 URL: {target_url}")
 
@@ -196,7 +181,7 @@ def run_analysis_pipeline(task_id: str, item_ids: List[int], db_client: DBClient
 
     try:
         # 取得 essay_ingestion_service 的 URL，如果失敗則直接中止
-        service_base_url = get_service_url(SERVICE_NAME)
+        service_base_url = get_service_url_wrapper(SERVICE_NAME)
         target_url = f"{service_base_url}/process-local-document"
         log.info(f"[任務 {task_id}] 將使用擷取服務端點: {target_url}")
     except HTTPException as e:

@@ -7,17 +7,17 @@ import sys
 from pathlib import Path
 from typing import Dict, Any
 
+# --- 路徑修正，確保能匯入 src ---
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
+
 # --- 本地與專案模組匯入 ---
-# JULES: 移除對本地資料庫 repository 的依賴
-from .universal_downloader import download_file
 from .content_extractor import extract_content
-# JULES: 暫時移除 stock_id_extractor 以簡化初始整合
+from src.core.service_discovery import get_service_url
 
 # --- 日誌與常數設定 ---
 log = logging.getLogger(__name__)
-# JULES: 修正 - llm_service 是外部服務，不能指向自己 (8001)。將其指向一個獨立的連接埠。
-LLM_SERVICE_URL = "http://127.0.0.1:8002/generate"
-MODEL_NAME = "gemma2:2b" # JULES: 假設模型名稱不變
+MODEL_NAME = "gemma2:2b"
 DOWNLOAD_DIR = Path(__file__).parent / "downloads"
 DOWNLOAD_DIR.mkdir(exist_ok=True)
 
@@ -67,16 +67,29 @@ def build_analysis_prompt(text_content: str) -> str:
 
 async def analyze_text_with_llm(text_content: str) -> Dict[str, Any]:
     """
-    使用本地 llm_service 分析文字.
+    使用本地 llm_service 分析文字。
+    (Jules @ 2025-10-10) 重構：動態服務發現
     """
+    # 1. 動態發現 llm_service 的 URL
+    llm_base_url = get_service_url("llm_service")
+    if not llm_base_url:
+        log.error("無法找到 'llm_service' 的 URL，分析無法進行。")
+        raise ConnectionError("無法找到 'llm_service'，請檢查服務是否已啟動或註冊。")
+
+    target_url = f"{llm_base_url}/generate"
+
+    # 2. 準備請求內容
     prompt = build_analysis_prompt(text_content)
     payload = {"model": MODEL_NAME, "prompt": prompt}
 
+    # 3. 發送請求
     async with httpx.AsyncClient(timeout=300.0) as client:
         try:
-            log.info(f"正在向 llm_service ({LLM_SERVICE_URL}) 發送分析請求...")
-            response = await client.post(LLM_SERVICE_URL, json=payload)
+            log.info(f"正在向 llm_service ({target_url}) 發送分析請求...")
+            response = await client.post(target_url, json=payload)
             response.raise_for_status()
+
+            # 4. 解析回應
             llm_response_json = response.json()
             analysis_text = llm_response_json.get("response_text", "{}")
             log.info("正在解析 llm_service 回傳的分析結果...")
@@ -84,8 +97,9 @@ async def analyze_text_with_llm(text_content: str) -> Dict[str, Any]:
             analysis_data = json.loads(cleaned_analysis_text)
             log.info("成功解析來自 llm_service 的 JSON 結果。")
             return analysis_data
+
         except httpx.RequestError as e:
-            log.error(f"無法連線到 llm_service: {e}", exc_info=True)
+            log.error(f"無法連線到 llm_service ({target_url}): {e}", exc_info=True)
             raise ConnectionError(f"無法連線到 llm_service: {e}")
         except json.JSONDecodeError as e:
             log.error(f"無法解析來自 llm_service 的回應: {analysis_text}", exc_info=True)
