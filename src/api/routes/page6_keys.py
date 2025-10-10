@@ -123,6 +123,19 @@ async def get_available_models():
         log.error(f"查詢可用模型時發生未預期的錯誤: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"查詢可用模型時發生意外錯誤: {str(e)}")
 
+@router.get("/gemini_status", summary="獲取有效的 Gemini 金鑰數量")
+async def get_gemini_key_status():
+    """
+    查詢並回傳當前資料庫中已驗證且有效的 Gemini 金鑰總數。
+    此端點為 #106.5 專案而新增。
+    """
+    try:
+        valid_gemini_keys = key_manager.get_all_valid_keys_for_manager()
+        return {"valid_gemini_key_count": len(valid_gemini_keys)}
+    except Exception as e:
+        log.error(f"查詢有效 Gemini 金鑰數量時發生錯誤: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="查詢金鑰狀態時發生伺服器內部錯誤。")
+
 @router.post("/test", summary="測試一個 API 金鑰的有效性")
 async def test_api_key(payload: TestKeyRequest):
     """

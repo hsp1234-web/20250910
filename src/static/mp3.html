@@ -502,17 +502,28 @@
 <!-- YouTube 轉報告分頁 (全新升級版) -->
         <div id="youtube-report-tab" class="tab-content">
             <div class="card">
-                <!-- 區域 1: API 金鑰管理 -->
+                <!-- 區域 1: API 金鑰管理 (全新改造版) -->
                 <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px;">
-                    <h2>🔑 Google API 金鑰管理</h2>
-                    <a href="/static/prompts.html" target="_blank" class="button-like" style="background-color: #6c757d; text-decoration: none; padding: 8px 16px; font-size: 0.9em;">管理提示詞</a>
+                    <h2>🔑 Gemini API 金鑰池</h2>
+                    <a href="/page6" class="button-like" style="background-color: #17a2b8; text-decoration: none; padding: 8px 16px; font-size: 0.9em;">管理金鑰池</a>
                 </div>
-                <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 12px;">
-                    <input type="password" id="api-key-input" data-testid="api-key-input" placeholder="在此貼上您的 Google API 金鑰" style="flex-grow: 1; padding: 10px; border-radius: 6px; border: 1px solid #ccc;">
-                    <button id="save-api-key-btn" data-testid="save-api-key-button">儲存金鑰</button>
-                    <button id="clear-api-key-btn" style="background-color: #6c757d;">清除金鑰</button>
+                <div id="key-pool-status-container" style="margin-top: 12px; padding: 12px; border: 1px solid #ddd; border-radius: 8px; background-color: #f9f9f9;">
+                    <p id="key-pool-status-text" style="margin: 0; font-weight: 500;">正在查詢金鑰池狀態...</p>
                 </div>
-                <p id="api-key-status" style="margin-top: 0; font-weight: 500;">狀態: <span style="font-style: italic;">尚未提供金鑰</span></p>
+
+                <!-- 備用臨時金鑰輸入區 (預設隱藏) -->
+                <div style="margin-top: 12px;">
+                    <a href="#" id="toggle-temp-key-link" style="text-decoration: none; color: var(--button-bg-color); font-weight: 500;">使用臨時金鑰...</a>
+                    <div id="temp-key-input-area" class="hidden" style="margin-top: 8px; padding: 16px; border: 1px dashed #ccc; border-radius: 8px;">
+                        <p style="margin-top: 0; font-size: 0.9em; color: #666;">此處輸入的金鑰將僅用於本次提交，不會被儲存到金鑰池中。</p>
+                        <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                            <input type="password" id="api-key-input" data-testid="api-key-input" placeholder="在此貼上您的臨時 Google API 金鑰" style="flex-grow: 1; padding: 10px; border-radius: 6px; border: 1px solid #ccc;">
+                            <button id="save-api-key-btn" data-testid="save-api-key-button">驗證並使用此金鑰</button>
+                            <button id="clear-api-key-btn" style="background-color: #6c757d;">清除</button>
+                        </div>
+                         <p id="api-key-status" style="margin-top: 8px; font-weight: 500;">狀態: <span style="font-style: italic;">尚未提供臨時金鑰</span></p>
+                    </div>
+                </div>
 
                 <!-- 區域 2: YouTube 影片處理 -->
                 <h2 style="margin-top: 24px;">▶️ 輸入 YouTube 影片</h2>
@@ -1685,26 +1696,43 @@
                 updateFileDisplay();
             });
 
-            // --- YouTube 分頁主要邏輯 (已升級) ---
-            const updateApiKeyUI = (state, message) => {
+            // --- YouTube 分頁主要邏輯 (已升級 & 改造) ---
+            let validatedTempApiKey = null; // 用於儲存已驗證的臨時金鑰
+
+            const toggleTempKeyArea = document.getElementById('toggle-temp-key-link');
+            const tempKeyInputArea = document.getElementById('temp-key-input-area');
+            const keyPoolStatusText = document.getElementById('key-pool-status-text');
+
+            // 更新主操作按鈕狀態的統一函式
+            const updateYoutubeActionability = (poolCount) => {
+                const canUsePool = poolCount > 0;
+                const canUseTempKey = validatedTempApiKey !== null;
+                const isEnabled = canUsePool || canUseTempKey;
+
+                startYoutubeProcessingBtn.disabled = !isEnabled;
+                youtubeParamsFieldset.disabled = !isEnabled;
+
+                if (isEnabled) {
+                    startYoutubeProcessingBtn.title = '';
+                } else {
+                    startYoutubeProcessingBtn.title = '請先在「管理金鑰池」中新增有效金鑰，或提供一個臨時金鑰。';
+                }
+            };
+
+            // 更新臨時金鑰狀態的 UI 函式
+            const updateTempKeyStatusUI = (state, message) => {
                 const statusSpan = apiKeyStatus.querySelector('span');
                 statusSpan.style.color = 'inherit';
                 statusSpan.style.fontStyle = 'normal';
 
-                const isValid = state === 'valid';
-                startYoutubeProcessingBtn.disabled = !isValid;
-                youtubeParamsFieldset.disabled = !isValid;
-
                 switch (state) {
                     case 'valid':
-                        statusSpan.textContent = message || '驗證成功';
+                        statusSpan.textContent = message || '臨時金鑰驗證成功，可供使用。';
                         statusSpan.style.color = 'var(--status-green)';
-                        startYoutubeProcessingBtn.title = '';
                         break;
                     case 'invalid':
-                        statusSpan.textContent = message || '驗證失敗';
+                        statusSpan.textContent = message || '臨時金鑰驗證失敗。';
                         statusSpan.style.color = '#dc3545';
-                        startYoutubeProcessingBtn.title = '請提供有效的 API 金鑰以啟用此功能';
                         break;
                     case 'validating':
                         statusSpan.textContent = message || '正在驗證中...';
@@ -1712,40 +1740,59 @@
                         break;
                     case 'not_provided':
                     default:
-                        statusSpan.textContent = message || '尚未提供金鑰';
+                        statusSpan.textContent = message || '尚未提供臨時金鑰。';
                         statusSpan.style.fontStyle = 'italic';
-                        startYoutubeProcessingBtn.title = '請提供有效的 API 金鑰以啟用此功能';
                         break;
                 }
             };
 
-            const validateAndLoadModels = async () => {
-                const apiKey = localStorage.getItem('googleApiKey');
-                if (!apiKey) {
-                    geminiModelSelect.innerHTML = `<option>請先儲存有效的 API 金鑰</option>`;
-                    updateApiKeyUI('not_provided');
-                    return;
-                }
-
-                logAction('validate-and-load-models-start');
-                updateApiKeyUI('validating', '正在驗證金鑰並載入模型...');
+            // 查詢金鑰池狀態並更新 UI
+            const updateKeyPoolStatus = async () => {
+                logAction('query-gemini-key-pool-status');
+                keyPoolStatusText.textContent = '正在查詢金鑰池狀態...';
+                keyPoolStatusText.style.color = '#666';
 
                 try {
+                    const response = await fetch('/api/keys/gemini_status');
+                    if (!response.ok) throw new Error('無法從伺服器獲取金鑰狀態');
+                    const data = await response.json();
+                    const count = data.valid_gemini_key_count || 0;
+
+                    if (count > 0) {
+                        keyPoolStatusText.textContent = `✅ 系統偵測到 ${count} 個有效的 Gemini 金鑰可供使用。`;
+                        keyPoolStatusText.style.color = 'var(--status-green)';
+                        loadGeminiModels(); // 使用金鑰池自動載入模型
+                    } else {
+                        keyPoolStatusText.textContent = '⚠️ 系統未偵測到任何有效的 Gemini 金鑰。請前往「管理金鑰池」新增或驗證金鑰。';
+                        keyPoolStatusText.style.color = '#dc3545';
+                    }
+                    updateYoutubeActionability(count);
+                    return count;
+                } catch (error) {
+                    keyPoolStatusText.textContent = `❌ 查詢金鑰池狀態失敗: ${error.message}`;
+                    keyPoolStatusText.style.color = '#dc3545';
+                    updateYoutubeActionability(0);
+                    return 0;
+                }
+            };
+
+            // 載入 Gemini 模型列表
+            const loadGeminiModels = async (apiKey = null) => {
+                logAction('load-gemini-models-start', apiKey ? 'with-temp-key' : 'with-pool-key');
+                geminiModelSelect.innerHTML = '<option>正在載入模型列表...</option>';
+
+                try {
+                    const payload = {};
+                    if (apiKey) {
+                        payload.api_key = apiKey;
+                    }
                     const response = await fetch('/api/youtube/models', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ api_key: apiKey }),
+                        body: JSON.stringify(payload)
                     });
-
                     const result = await response.json();
-
-                    if (!response.ok) {
-                        throw new Error(result.detail || `伺服器錯誤 ${response.status}`);
-                    }
-
-                    // 成功：更新 UI，啟用按鈕，填充模型
-                    updateApiKeyUI('valid', '金鑰有效，Gemini 功能已啟用');
-                    showStatusMessage('模型載入成功', false);
+                    if (!response.ok) throw new Error(result.detail || `伺服器錯誤 ${response.status}`);
 
                     geminiModelSelect.innerHTML = ''; // 清空
                     if (result.models && result.models.length > 0) {
@@ -1755,24 +1802,69 @@
                             option.textContent = model.name;
                             geminiModelSelect.appendChild(option);
                         });
-                        logAction('validate-and-load-models-success', `loaded ${result.models.length} models`);
+                        logAction('load-gemini-models-success', `loaded ${result.models.length} models`);
                     } else {
                         geminiModelSelect.innerHTML = `<option>未找到任何可用模型</option>`;
-                        logAction('validate-and-load-models-empty');
+                        logAction('load-gemini-models-empty');
                     }
                 } catch (error) {
-                    // 失敗：更新 UI，保持按鈕禁用
-                    console.error("金鑰驗證或模型載入失敗:", error);
-                    logAction('validate-and-load-models-failed', error.message);
-                    geminiModelSelect.innerHTML = `<option>載入失敗</option>`;
-                    updateApiKeyUI('invalid', error.message);
+                    console.error("模型載入失敗:", error);
+                    logAction('load-gemini-models-failed', error.message);
+                    geminiModelSelect.innerHTML = `<option>模型載入失敗</option>`;
+                    showStatusMessage(`模型載入失敗: ${error.message}`, true);
+                    // 重新拋出錯誤，以便呼叫者知道它失敗了
+                    throw error;
                 }
             };
 
+            // 驗證臨時金鑰
+            const validateTempKey = async () => {
+                const apiKey = apiKeyInput.value.trim();
+                if (!apiKey) {
+                    showStatusMessage('臨時 API 金鑰不能為空', true);
+                    return;
+                }
+
+                logAction('validate-temp-key-start');
+                updateTempKeyStatusUI('validating');
+                validatedTempApiKey = null;
+
+                try {
+                    // 使用新的載入函式來驗證金鑰
+                    await loadGeminiModels(apiKey);
+
+                    // 如果 loadGeminiModels 沒有拋出錯誤，則代表金鑰有效
+                    updateTempKeyStatusUI('valid');
+                    validatedTempApiKey = apiKey;
+                    updateYoutubeActionability(0);
+
+                } catch (error) {
+                    // loadGeminiModels 內部已經處理了錯誤訊息顯示
+                    updateTempKeyStatusUI('invalid', error.message);
+                    validatedTempApiKey = null;
+                    // 重新檢查金鑰池狀態以正確設定按鈕狀態
+                    const poolCount = await updateKeyPoolStatus();
+                    updateYoutubeActionability(poolCount);
+                }
+            };
+
+            // 初始化 YouTube 分頁
             const initializeYouTubeTab = () => {
                 logAction('initialize-youtube-tab');
 
-                const addNewYoutubeRow = () => {
+                // 初始載入金鑰池狀態
+                updateKeyPoolStatus();
+
+                // 臨時金鑰區域的切換
+                toggleTempKeyArea.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    logAction('toggle-temp-key-area');
+                    const isHidden = tempKeyInputArea.classList.toggle('hidden');
+                    toggleTempKeyArea.textContent = isHidden ? '使用臨時金鑰...' : '隱藏臨時金鑰區域';
+                });
+
+                // 新增/移除 YouTube URL 列的邏輯 (不變)
+                addYoutubeRowBtn.addEventListener('click', () => {
                     logAction('click-add-youtube-row');
                     const firstRow = youtubeLinkList.querySelector('.youtube-link-row');
                     if (!firstRow) return;
@@ -1780,58 +1872,32 @@
                     newRow.querySelector('.youtube-url-input').value = '';
                     newRow.querySelector('.youtube-filename-input').value = '';
                     youtubeLinkList.appendChild(newRow);
-                };
-
-                const sanitizeFilename = (filename) => filename.replace(/[\\/?%*:|"<>\x00-\x1F]/g, '');
-
-                addYoutubeRowBtn.addEventListener('click', addNewYoutubeRow);
-
+                });
                 youtubeLinkList.addEventListener('click', (e) => {
-                    if (e.target && e.target.classList.contains('remove-youtube-row-btn')) {
+                    if (e.target.classList.contains('remove-youtube-row-btn')) {
                         logAction('click-remove-youtube-row');
                         if (youtubeLinkList.querySelectorAll('.youtube-link-row').length > 1) {
                             e.target.closest('.youtube-link-row').remove();
-                        } else {
-                            showStatusMessage('至少需要保留一列。', true, 3000);
                         }
                     }
                 });
 
-                youtubeLinkList.addEventListener('input', (e) => {
-                    if (e.target && e.target.classList.contains('youtube-filename-input')) {
-                        e.target.value = sanitizeFilename(e.target.value);
-                    }
-                });
-
-                saveApiKeyBtn.addEventListener('click', () => {
-                    const apiKey = apiKeyInput.value.trim();
-                    logAction('click-save-api-key');
-                    if (apiKey) {
-                        localStorage.setItem('googleApiKey', apiKey);
-                        // 直接呼叫新的整合函式
-                        validateAndLoadModels();
-                    } else {
-                        showStatusMessage('API 金鑰不能為空', true);
-                    }
-                });
-
-                clearApiKeyBtn.addEventListener('click', () => {
-                    logAction('click-clear-api-key');
-                    localStorage.removeItem('googleApiKey');
+                // 臨時金鑰操作按鈕
+                saveApiKeyBtn.addEventListener('click', validateTempKey);
+                clearApiKeyBtn.addEventListener('click', async () => {
+                    logAction('click-clear-temp-key');
                     apiKeyInput.value = '';
-                    updateApiKeyUI('not_provided');
-                    geminiModelSelect.innerHTML = '<option>提供有效金鑰後將載入模型</option>';
+                    validatedTempApiKey = null;
+                    updateTempKeyStatusUI('not_provided');
+                    const poolCount = await updateKeyPoolStatus();
+                    updateYoutubeActionability(poolCount);
+                    // 如果清除了臨時金鑰，但金鑰池有金鑰，則重新用金鑰池載入模型
+                    if(poolCount > 0) {
+                        loadGeminiModels();
+                    } else {
+                        geminiModelSelect.innerHTML = '<option>請先提供有效金鑰</option>';
+                    }
                 });
-
-                const storedApiKey = localStorage.getItem('googleApiKey');
-                if (storedApiKey) {
-                    apiKeyInput.value = storedApiKey;
-                    // 頁面載入時也使用新的整合函式
-                    validateAndLoadModels();
-                } else {
-                    updateApiKeyUI('not_provided');
-                    geminiModelSelect.innerHTML = '<option>提供有效金鑰後將載入模型</option>';
-                }
             };
 
             const addYoutubeReportToList = (payload) => {
@@ -1840,11 +1906,8 @@
                 const result = payload.result || {};
                 const taskId = payload.task_id;
 
-                // JULES'S FIX: 防止重複渲染已完成的報告
                 const existingElement = youtubeFileBrowser.querySelector(`.task-item[data-task-id="${taskId}"]`);
                 if (existingElement) {
-                    // 如果元素已存在，則直接返回，不進行任何操作。
-                    // 這樣可以防止輪詢機制在每次獲取到相同的已完成任務時，不斷地在畫面上新增重複的項目。
                     return;
                 }
 
@@ -1858,7 +1921,6 @@
                 reportElement.className = 'task-item';
                 reportElement.dataset.taskId = taskId;
 
-                // 1. Icon and Filename
                 const fileInfoDiv = document.createElement('div');
                 fileInfoDiv.style.display = 'flex';
                 fileInfoDiv.style.alignItems = 'center';
@@ -1872,15 +1934,14 @@
                 filenameSpan.setAttribute('title', videoTitle);
                 fileInfoDiv.appendChild(filenameSpan);
 
-                // 2. Action Buttons
                 const actionsDiv = document.createElement('div');
                 actionsDiv.className = 'task-actions';
 
                 const detailsBtn = document.createElement('a');
                 detailsBtn.href = '#';
                 detailsBtn.textContent = '詳細資料';
-                detailsBtn.className = 'btn-preview'; // Use same style as preview
-                detailsBtn.style.backgroundColor = '#6c757d'; // Grey
+                detailsBtn.className = 'btn-preview';
+                detailsBtn.style.backgroundColor = '#6c757d';
                 detailsBtn.onclick = (e) => {
                     e.preventDefault();
                     logAction('click-yt-report-details', taskId);
@@ -1898,15 +1959,12 @@
                 previewBtn.href = '#';
                 previewBtn.textContent = '預覽';
                 previewBtn.className = 'btn-preview';
-                // JULES'S FIX: Add test id for the preview/view-report button
                 previewBtn.dataset.testid = 'view-report-button';
                 previewBtn.onclick = (e) => {
                     e.preventDefault();
                     logAction('click-yt-report-preview', taskId);
                     const fileType = extension === '.html' ? 'text/html' : 'text/plain';
                     const filename = `${videoTitle.replace(/ /g, '_')}_report${extension}`;
-                    // JULES'S FIX (2025-08-13): 傳遞正確的 'outputPath' 給預覽彈窗，
-                    // 而不是 'taskId'。同時也將 taskId 傳入以供下載按鈕使用。
                     openPreviewModal(outputPath, filename, fileType, taskId);
                 };
 
@@ -1917,19 +1975,17 @@
                 downloadBtn.download = `${videoTitle.replace(/ /g, '_')}_report${extension}`;
                 downloadBtn.onclick = () => logAction('click-yt-report-download', taskId);
 
-
                 actionsDiv.appendChild(detailsBtn);
                 actionsDiv.appendChild(previewBtn);
 
-                // --- JULES'S NEW FEATURE 2025-10-06: 新增「新視窗開啟」按鈕 ---
                 const openInNewTabBtn = document.createElement('a');
                 openInNewTabBtn.href = outputPath;
-                openInNewTabBtn.className = 'btn-preview'; // 使用與預覽相同的樣式
+                openInNewTabBtn.className = 'btn-preview';
                 openInNewTabBtn.textContent = '新視窗開啟';
                 openInNewTabBtn.target = '_blank';
                 openInNewTabBtn.rel = 'noopener noreferrer';
-                openInNewTabBtn.style.backgroundColor = '#17a2b8'; // 使用不同的顏色 (青色) 以作區分
-                openInNewTabBtn.addEventListener('click', () => logAction('click-yt-report-download', taskId)); // Re-use existing log action
+                openInNewTabBtn.style.backgroundColor = '#17a2b8';
+                openInNewTabBtn.addEventListener('click', () => logAction('click-yt-report-download', taskId));
                 actionsDiv.appendChild(openInNewTabBtn);
 
                 actionsDiv.appendChild(downloadBtn);
@@ -1946,7 +2002,7 @@
             detailsModalCloseBtn.addEventListener('click', closeDetailsModal);
             detailsModalOkBtn.addEventListener('click', closeDetailsModal);
 
-
+            // 處理 YouTube 請求（已改造）
             const processYoutubeRequest = async (downloadOnly = false) => {
                 const action = downloadOnly ? 'click-download-audio-only' : 'click-start-youtube-processing';
                 logAction(action);
@@ -1958,9 +2014,7 @@
                     const filenameInput = row.querySelector('.youtube-filename-input');
                     const url = urlInput.value.trim();
                     const filename = filenameInput.value.trim();
-                    if (url) {
-                        requests.push({ url, filename });
-                    }
+                    if (url) requests.push({ url, filename });
                 });
 
                 if (requests.length === 0) {
@@ -1987,9 +2041,17 @@
                         download_only: downloadOnly,
                         tasks: selectedTasks.join(','),
                         output_format: ytOutputFormatSelect.value,
-                        api_key: localStorage.getItem('googleApiKey'), // 實現無狀態傳遞
-                        timeout: parseInt(timeoutValue, 10) || 180 // 新增 timeout 參數
+                        timeout: parseInt(timeoutValue, 10) || 180
                     };
+
+                    // 決定是否要傳送臨時金鑰
+                    if (validatedTempApiKey) {
+                        payload.api_key = validatedTempApiKey;
+                        logAction('process-with-temp-key');
+                    } else {
+                        logAction('process-with-key-pool');
+                    }
+
                     const response = await fetch('/api/youtube/process', {
                         method: 'POST',
                         headers: {'Content-Type': 'application/json'},
@@ -1999,44 +2061,18 @@
                     if (!response.ok) throw new Error((await response.json()).detail || '建立任務失敗');
                     const result = await response.json();
 
-                    const timeoutSeconds = parseInt(timeoutValue, 10) || 180;
-                    const activeTimers = {};
-
                     result.tasks.forEach(task => {
                         const taskType = task.task_type === 'youtube_process_chain' ? 'YouTube 分析' : '僅下載音訊';
                         const displayId = task.task_id;
                         const finalId = task.final_task_id || task.task_id;
-
                         const taskElement = createNewTaskElement(task.url, displayId, taskType);
-
-                        if (displayId !== finalId) {
-                            taskElements.set(finalId, taskElement);
-                        }
-
+                        if (displayId !== finalId) taskElements.set(finalId, taskElement);
                         if (socket && socket.readyState === WebSocket.OPEN) {
                             socket.send(JSON.stringify({ type: 'START_YOUTUBE_PROCESSING', payload: { task_id: displayId }}));
                         }
-
-                        // Start a timeout for this specific task
-                        const timerId = setTimeout(() => {
-                            const currentTaskElement = taskElements.get(finalId);
-                            if (currentTaskElement && !currentTaskElement.dataset.isFinal) {
-                                showStatusMessage(`任務 "${task.url}" 已超過 ${timeoutSeconds} 秒的設定時間，但尚未完成。後端可能仍在處理中，或已發生錯誤。`, true, 20000);
-                            }
-                            delete activeTimers[finalId];
-                        }, timeoutSeconds * 1000);
-                        activeTimers[finalId] = timerId;
                     });
 
-                    // Add a global listener to clear timers when tasks complete
-                    document.addEventListener('task-final-state', (e) => {
-                        const { taskId } = e.detail;
-                        if (activeTimers[taskId]) {
-                            clearTimeout(activeTimers[taskId]);
-                            delete activeTimers[taskId];
-                        }
-                    });
-
+                    // 清空輸入欄
                     const allRows = youtubeLinkList.querySelectorAll('.youtube-link-row');
                     allRows.forEach((row, index) => {
                         if (index === 0) {
