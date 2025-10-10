@@ -319,15 +319,23 @@
 
             // (Jules): 處理「開始分析」按鈕的點擊事件
             startAnalysisBtn.addEventListener('click', () => {
-                const ids = Array.from(selectedItemIds);
-                if (ids.length === 0) {
+                const selectedIds = Array.from(selectedItemIds).map(id => parseInt(id));
+                if (selectedIds.length === 0) {
                     alert('請至少選取一個項目進行分析。');
                     return;
                 }
+
+                // (Jules): 收集當前頁面上所有項目的 ID，以維持 UI 上下文
+                const allItemIdsOnPage = Array.from(cardsContainer.querySelectorAll('.card-checkbox'))
+                                              .map(cb => parseInt(cb.dataset.id));
+
                 startTask(
                     '/api/essay_performance/start_analysis',
-                    { ids: ids.map(id => parseInt(id)) },
-                    `正在向伺服器請求開始分析 ${ids.length} 個項目...`
+                    {
+                        ids: selectedIds,
+                        all_item_ids: allItemIdsOnPage
+                    },
+                    `正在向伺服器請求開始分析 ${selectedIds.length} 個項目...`
                 );
             });
 

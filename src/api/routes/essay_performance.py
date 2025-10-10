@@ -102,6 +102,7 @@ class StartDownloadResponse(BaseModel):
 # Jules: 為分析流程新增資料模型
 class StartAnalysisRequest(BaseModel):
     ids: List[int] = Field(..., description="要進行分析的項目ID列表")
+    all_item_ids: List[int] = Field(None, description="當前頁面上所有項目的ID列表，用於維持狀態上下文")
 
 class StartAnalysisResponse(BaseModel):
     task_id: str = Field(..., description="用於追蹤分析進度的唯一任務ID")
@@ -217,6 +218,13 @@ def run_analysis_pipeline(task_id: str, item_ids: List[int], db_client: DBClient
                 analysis_result = response.json()
                 log.info(f"[任務 {task_id}] 項目 {item_id} 分析成功，收到分析資料。")
 
+                # 從分析結果中提取核心資料
+                analysis_data = analysis_result.get("analysis_data", {})
+
+                # (Jules): 根據新需求，從 analysis_data 中提取 title 和 author
+                new_title = analysis_data.get("title")
+                new_author = analysis_data.get("author")
+
                 updates_for_db = {
                     "ocr_status": "completed",
                     "ai_status": "completed",
@@ -224,8 +232,21 @@ def run_analysis_pipeline(task_id: str, item_ids: List[int], db_client: DBClient
                     "extracted_image_paths": json.dumps(analysis_result.get("image_paths", [])),
                     "last_error_details": None # 清除舊的錯誤訊息
                 }
+
+                # (Jules): 只有在 LLM 確實回傳了有效值時才更新，避免覆蓋掉舊資料
+                if new_title and "無法辨識" not in new_title:
+                    updates_for_db["title"] = new_title
+                if new_author and "無法辨識" not in new_author:
+                    updates_for_db["author"] = new_author
+
                 db_client.update_url(item_id, updates_for_db)
-                task_manager.update_item_status(task_id, item_id, "COMPLETED_ANALYSIS")
+
+                # (Jules): 在任務管理器中也更新這些資訊，以便前端能立即看到
+                details_for_task_manager = {
+                    "title": new_title,
+                    "author": new_author
+                }
+                task_manager.update_item_status(task_id, item_id, "COMPLETED_ANALYSIS", details=details_for_task_manager)
 
             except Exception as e:
                 error_msg = str(e)
@@ -273,12 +294,15 @@ async def start_analysis(
 ):
     """
     接收一個包含多個ID的列表，為這些ID啟動一個背景分析任務。
+    (Jules): 增強版，現在會接收頁面上所有的 ID 以維持 UI 狀態。
     """
     if not request.ids:
-        raise HTTPException(status_code=400, detail="ID列表不可為空。")
+        raise HTTPException(status_code=400, detail="要分析的 ID 列表不可為空。")
 
-    log.info(f"收到 /start_analysis 請求，包含 {len(request.ids)} 個ID。")
-    task_id = task_manager.create_task(request.ids)
+    log.info(f"收到 /start_analysis 請求，包含 {len(request.ids)} 個要分析的 ID，以及 {len(request.all_item_ids or [])} 個上下文 ID。")
+
+    # (Jules): 將 all_item_ids 傳遞給任務管理器，以保留完整的 UI 上下文
+    task_id = task_manager.create_task(item_ids=request.ids, context_item_ids=request.all_item_ids)
     log.info(f"已為分析請求建立任務，Task ID: {task_id}")
 
     # 將耗時的分析工作新增到背景任務佇列中
