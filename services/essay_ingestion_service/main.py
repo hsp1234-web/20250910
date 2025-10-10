@@ -104,8 +104,13 @@ async def process_local_document_endpoint(request: ProcessLocalDocumentRequest):
     except FileNotFoundError as e:
         log.error(f"檔案未找到錯誤: {e}", exc_info=True)
         raise HTTPException(status_code=404, detail=str(e))
+    except ConnectionError as e:
+        # (Jules): 捕捉由 document_analyzer 拋出的、關於下游服務不可用的特定錯誤。
+        log.error(f"下游服務連線錯誤: {e}", exc_info=True)
+        # 回傳 503 Service Unavailable，並附帶清晰的錯誤訊息。
+        raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
-        # 捕捉來自 process_local_document 的異常，並回傳 500 錯誤
+        # 捕捉所有其他未預期的異常，並回傳 500 錯誤
         log.error(f"處理本地文件時發生未預期錯誤: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"分析文件時發生內部伺服器錯誤: {e}")
 

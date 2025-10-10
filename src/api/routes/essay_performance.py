@@ -217,6 +217,13 @@ def run_analysis_pipeline(task_id: str, item_ids: List[int], db_client: DBClient
                 analysis_result = response.json()
                 log.info(f"[任務 {task_id}] 項目 {item_id} 分析成功，收到分析資料。")
 
+                # 從分析結果中提取核心資料
+                analysis_data = analysis_result.get("analysis_data", {})
+
+                # (Jules): 根據新需求，從 analysis_data 中提取 title 和 author
+                new_title = analysis_data.get("title")
+                new_author = analysis_data.get("author")
+
                 updates_for_db = {
                     "ocr_status": "completed",
                     "ai_status": "completed",
@@ -224,8 +231,21 @@ def run_analysis_pipeline(task_id: str, item_ids: List[int], db_client: DBClient
                     "extracted_image_paths": json.dumps(analysis_result.get("image_paths", [])),
                     "last_error_details": None # 清除舊的錯誤訊息
                 }
+
+                # (Jules): 只有在 LLM 確實回傳了有效值時才更新，避免覆蓋掉舊資料
+                if new_title and "無法辨識" not in new_title:
+                    updates_for_db["title"] = new_title
+                if new_author and "無法辨識" not in new_author:
+                    updates_for_db["author"] = new_author
+
                 db_client.update_url(item_id, updates_for_db)
-                task_manager.update_item_status(task_id, item_id, "COMPLETED_ANALYSIS")
+
+                # (Jules): 在任務管理器中也更新這些資訊，以便前端能立即看到
+                details_for_task_manager = {
+                    "title": new_title,
+                    "author": new_author
+                }
+                task_manager.update_item_status(task_id, item_id, "COMPLETED_ANALYSIS", details=details_for_task_manager)
 
             except Exception as e:
                 error_msg = str(e)

@@ -24,7 +24,7 @@ DOWNLOAD_DIR.mkdir(exist_ok=True)
 def build_analysis_prompt(text_content: str) -> str:
     """
     建構一個詳細的提示詞，指導本地 LLM 進行文件分析，並以指定的 JSON 格式回傳結果。
-    JULES: 簡化版本，暫不處理 stock_id。
+    (Jules): 根據需求，新增 title 和 author 欄位。
     """
     # 移除多餘的空白，避免在提示詞中佔用過多 token
     cleaned_text = "\n".join(line.strip() for line in text_content.split('\n') if line.strip())
@@ -42,12 +42,14 @@ def build_analysis_prompt(text_content: str) -> str:
 請仔細閱讀文件內容，並嚴格按照指定的 JSON 格式回傳你的分析。
 
 --- JSON 輸出指令 ---
-請生成一個包含以下五個鍵的 JSON 物件：
-1.  `summary`: (字串) 對文件內容的摘要，長度約在 50 到 100 字之間。
-2.  `analyzed_stock_ids`: (字串列表) 請分析文本中提到的所有台股股票代號，並將它們包含在此欄位中。如果沒有，請回傳一個空列表 `[]`。
-3.  `strategy`: (字串) 判斷作者對主要標的的使用策略。必須是以下五個選項之一： "看多", "看空", "多策略", "無法判斷", "空值"。
-4.  `quality_score`: (整數) 根據報告的分析深度、數據支持和論述清晰度，給出 1 到 10 的評分。1 代表品質最差，10 代表品質最好。
-5.  `is_trade_related`: (字串) 判斷這份文件是否與金融交易直接相關。必須是以下三個選項之一： "是", "否", "空值"。
+請生成一個包含以下七個鍵的 JSON 物件：
+1.  `title`: (字串) 從文件內容中提取出的標題。如果找不到，請回傳 "無法辨識的標題"。
+2.  `author`: (字串) 從文件內容中提取出的作者。如果找不到，請回傳 "無法辨識的作者"。
+3.  `summary`: (字串) 對文件內容的摘要，長度約在 50 到 100 字之間。
+4.  `analyzed_stock_ids`: (字串列表) 請分析文本中提到的所有台股股票代號，並將它們包含在此欄位中。如果沒有，請回傳一個空列表 `[]`。
+5.  `strategy`: (字串) 判斷作者對主要標的的使用策略。必須是以下五個選項之一： "看多", "看空", "多策略", "無法判斷", "空值"。
+6.  `quality_score`: (整數) 根據報告的分析深度、數據支持和論述清晰度，給出 1 到 10 的評分。1 代表品質最差，10 代表品質最好。
+7.  `is_trade_related`: (字串) 判斷這份文件是否與金融交易直接相關。必須是以下三個選項之一： "是", "否", "空值"。
 
 --- 重要提醒 ---
 -   你的回覆**必須**是一個格式完全正確的 JSON 物件。
@@ -56,6 +58,8 @@ def build_analysis_prompt(text_content: str) -> str:
 
 --- JSON 格式範例 ---
 {{
+  "title": "關於 AAA 公司未來三個月的走勢分析",
+  "author": "分析師 王小明",
   "summary": "這是一段約50到100字的內容摘要...",
   "analyzed_stock_ids": ["3711", "2330"],
   "strategy": "看多",
@@ -68,7 +72,7 @@ def build_analysis_prompt(text_content: str) -> str:
 async def analyze_text_with_llm(text_content: str) -> Dict[str, Any]:
     """
     使用本地 llm_service 分析文字。
-    (Jules @ 2025-10-10) 重構：動態服務發現
+    (Jules): 增強錯誤處理，捕捉因為 llm_service 無法連接 Ollama 所造成的 503 錯誤。
     """
     # 1. 動態發現 llm_service 的 URL
     llm_base_url = get_service_url("llm_service")
@@ -98,6 +102,14 @@ async def analyze_text_with_llm(text_content: str) -> Dict[str, Any]:
             log.info("成功解析來自 llm_service 的 JSON 結果。")
             return analysis_data
 
+        except httpx.HTTPStatusError as e:
+            # (Jules): 如果下游服務 (llm_service) 回傳 503，表示它無法連接到 Ollama。
+            # 我們需要捕捉這個特定的錯誤，並將其轉換為一個我們自己可以處理的 ConnectionError。
+            if e.response.status_code == 503:
+                log.error(f"下游的 llm_service 服務目前不可用 (可能是 Ollama 問題): {e.response.text}")
+                raise ConnectionError(f"AI 分析服務 (Ollama) 目前無法使用: {e.response.text}")
+            # 對於其他 HTTP 錯誤，則重新引發它們
+            raise e
         except httpx.RequestError as e:
             log.error(f"無法連線到 llm_service ({target_url}): {e}", exc_info=True)
             raise ConnectionError(f"無法連線到 llm_service: {e}")
