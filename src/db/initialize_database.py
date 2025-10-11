@@ -84,6 +84,21 @@ def initialize():
         _add_column_if_not_exists(cursor, 'extracted_urls', 'status', "TEXT DEFAULT 'pending'")
         _add_column_if_not_exists(cursor, 'extracted_urls', 'source', "TEXT")
 
+        # (Jules @ 2025-10-11) 新增 processing_history 欄位
+        _add_column_if_not_exists(cursor, 'extracted_urls', 'processing_history', 'TEXT')
+        # (Jules @ 2025-10-11) 新增其他後續流程所需的欄位
+        _add_column_if_not_exists(cursor, 'extracted_urls', 'local_path', 'TEXT')
+        _add_column_if_not_exists(cursor, 'extracted_urls', 'extracted_text', 'TEXT')
+        _add_column_if_not_exists(cursor, 'extracted_urls', 'extracted_image_paths', 'TEXT')
+        _add_column_if_not_exists(cursor, 'extracted_urls', 'last_error_details', 'TEXT')
+
+        # (Jules @ 2025-10-11) 移除舊的、不再使用的狀態欄位
+        # 注意：直接刪除欄位在 SQLite 中比較複雜，且可能造成資料遺失。
+        # 在此開發階段，我們僅在程式邏輯中停止使用它們，並在初始化腳本中標註為待移除。
+        # 若需要，可另外編寫一個遷移腳本來處理舊資料。
+        # _remove_column_if_exists(cursor, 'extracted_urls', 'ocr_status')
+        # _remove_column_if_exists(cursor, 'extracted_urls', 'ai_status')
+
         connection.commit()
         print(f"\n資料庫初始化/更新成功。資料庫檔案位於: {DB_PATH}")
 

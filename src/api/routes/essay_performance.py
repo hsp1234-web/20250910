@@ -107,16 +107,16 @@ def get_db_client():
 @router.get("/processing_items", summary="獲取所有可進行AI處理的項目")
 async def get_all_processing_items(db_client: DBClient = Depends(get_db_client)):
     """
-    (Jules @ 2025-10-11) 重構：獲取所有已擷取但尚未成功完成所有處理的項目。
+    (Jules @ 2025-10-11) 重構 v2：獲取所有狀態不是 'completed' 的項目。
     這確保了任何待處理、正在處理或處理失敗的項目都會顯示在清單上。
     """
     try:
         # 獲取所有已擷取的項目
         all_items = db_client.get_filtered_urls()
 
-        # 篩選出需要顯示的項目：尚未完成 OCR 或尚未完成 AI 分析的項目
+        # 篩選出需要顯示的項目：狀態不是 'completed' 的項目
         def is_incomplete(item):
-            return item.get('ocr_status') != 'completed' or item.get('ai_status') != 'completed'
+            return item.get('status') != 'completed'
 
         items_to_process = [item for item in all_items if is_incomplete(item)]
 
@@ -222,9 +222,39 @@ def run_download_pipeline(task_id: str, item_ids: List[int], db_client: DBClient
 
 
 # --- 背景任務邏輯 (Jules @ 2025-10-11) 重構：合併下載與分析 ---
+def _add_history_event(db_client: DBClient, item_id: int, status: str, message: str, details: Dict = None):
+    """
+    (Jules @ 2025-10-11) 輔助函式：新增一筆處理歷程紀錄到資料庫。
+    這確保了狀態更新的原子性和一致性。
+    """
+    try:
+        # 1. 讀取現有歷程
+        record = db_client.get_url_by_id(item_id)
+        history_str = record.get('processing_history')
+        history = json.loads(history_str) if history_str else []
+
+        # 2. 新增事件
+        event = {
+            "status": status,
+            "message": message,
+            "timestamp": datetime.now().isoformat(),
+            "details": details or {}
+        }
+        history.append(event)
+
+        # 3. 寫回資料庫
+        db_client.update_url(item_id, {"processing_history": json.dumps(history)})
+        log.info(f"項目 {item_id}: 已記錄新歷程事件 '{status}'。")
+
+    except Exception as e:
+        log.error(f"項目 {item_id}: 記錄歷程事件 '{status}' 時發生嚴重錯誤: {e}", exc_info=True)
+
+
 def run_full_analysis_pipeline(task_id: str, item_ids: List[int], db_client: DBClient, task_manager):
     """
-    在背景執行緒中運行的完整處理管線，包含下載和分析兩個階段。
+    (Jules @ 2025-10-11) 重構版：在背景執行的完整處理管線。
+    - 使用 processing_history 欄位來記錄每一步的歷程。
+    - 強化了對分析服務回傳結果的錯誤檢查。
     """
     log.info(f"[任務 {task_id}] 完整處理管線已啟動，共 {len(item_ids)} 個項目。")
 
@@ -233,46 +263,64 @@ def run_full_analysis_pipeline(task_id: str, item_ids: List[int], db_client: DBC
         analysis_target_url = f"{service_base_url}/process-local-document"
         log.info(f"[任務 {task_id}] 將使用分析服務端點: {analysis_target_url}")
     except HTTPException as e:
+        err_msg = f"後端分析服務不可用: {e.detail}"
         log.error(f"[任務 {task_id}] 無法啟動管線，因為找不到擷取服務: {e.detail}")
         for item_id in item_ids:
-            task_manager.update_item_status(task_id, item_id, "FAILED", details={"error_message": "後端分析服務不可用"})
+            _add_history_event(db_client, item_id, "PIPELINE_FAILED", err_msg)
+            task_manager.update_item_status(task_id, item_id, "FAILED", details={"error_message": err_msg})
         task_manager.complete_task(task_id)
         return
 
     with httpx.Client(timeout=600.0) as client:
         for item_id in item_ids:
+            local_file_path = None
             try:
+                # --- 準備階段 ---
+                # 清空舊的歷程紀錄並加入初始狀態
+                db_client.update_url(item_id, {"processing_history": json.dumps([])})
+                _add_history_event(db_client, item_id, "QUEUED", "已加入處理佇列")
+                task_manager.update_item_status(task_id, item_id, "QUEUED")
+
                 # --- 階段一：下載 ---
+                _add_history_event(db_client, item_id, "DOWNLOADING", "開始下載檔案")
                 task_manager.update_item_status(task_id, item_id, "DOWNLOADING")
+
                 url_record = db_client.get_url_by_id(item_id)
                 if not url_record or not url_record.get('url'):
                     raise ValueError(f"找不到 ID {item_id} 的 URL 紀錄")
 
                 download_dir = f"data/downloads/essay_{item_id}"
-                success, result_path, _ = download_file(url=url_record['url'], download_dir=download_dir)
+                success, local_file_path, _ = download_file(url=url_record['url'], download_dir=download_dir)
                 if not success:
-                    raise Exception(f"下載失敗: {result_path}")
+                    raise Exception(f"下載失敗: {local_file_path}")
 
-                db_client.update_url(item_id, {"status": "downloaded", "local_path": result_path})
-                task_manager.update_item_status(task_id, item_id, "DOWNLOADED", details={"local_path": result_path})
-                log.info(f"[任務 {task_id}] 項目 {item_id} 下載成功。")
+                db_client.update_url(item_id, {"status": "downloaded", "local_path": local_file_path})
+                _add_history_event(db_client, item_id, "DOWNLOAD_SUCCESS", "檔案下載成功", {"local_path": local_file_path})
+                task_manager.update_item_status(task_id, item_id, "DOWNLOADED", details={"local_path": local_file_path})
 
                 # --- 階段二：分析 ---
+                _add_history_event(db_client, item_id, "ANALYSIS_SENT", "已傳送至分析服務")
                 task_manager.update_item_status(task_id, item_id, "PROCESSING_ANALYSIS")
-                db_client.update_url(item_id, {"ocr_status": "processing", "ai_status": "processing"})
 
-                response = client.post(analysis_target_url, json={"file_path": result_path})
+                response = client.post(analysis_target_url, json={"file_path": local_file_path})
                 response.raise_for_status()
                 analysis_result = response.json()
+
+                # 核心錯誤檢查：檢查分析服務是否回傳了業務邏輯上的錯誤
+                if analysis_result.get("error"):
+                    err_msg = analysis_result.get("error_details", analysis_result["error"])
+                    log.warning(f"[任務 {task_id}] 項目 {item_id} 分析失敗: {err_msg}")
+                    raise ValueError(err_msg) # 拋出錯誤，由統一的 except 區塊處理
+
                 log.info(f"[任務 {task_id}] 項目 {item_id} 分析成功。")
 
+                # --- 階段三：儲存結果 ---
                 analysis_data = analysis_result.get("analysis_data", {})
                 new_title = analysis_data.get("title")
                 new_author = analysis_data.get("author")
 
                 updates_for_db = {
-                    "ocr_status": "completed",
-                    "ai_status": "completed",
+                    "status": "completed",
                     "extracted_text": analysis_result.get("extracted_text"),
                     "extracted_image_paths": json.dumps(analysis_result.get("image_paths", [])),
                     "last_error_details": None
@@ -283,13 +331,16 @@ def run_full_analysis_pipeline(task_id: str, item_ids: List[int], db_client: DBC
                     updates_for_db["author"] = new_author
 
                 db_client.update_url(item_id, updates_for_db)
-                task_manager.update_item_status(task_id, item_id, "COMPLETED_ANALYSIS", details=updates_for_db)
+                _add_history_event(db_client, item_id, "ANALYSIS_SUCCESS", "文件分析成功")
+                task_manager.update_item_status(task_id, item_id, "COMPLETED", details=updates_for_db)
 
             except Exception as e:
                 error_msg = str(e)
                 log.error(f"[任務 {task_id}] 處理項目 {item_id} 時發生錯誤: {error_msg}", exc_info=True)
                 try:
-                    db_client.update_url(item_id, {"status": "failed", "ocr_status": "failed", "ai_status": "failed", "last_error_details": error_msg})
+                    # 記錄最終的失敗狀態
+                    _add_history_event(db_client, item_id, "PIPELINE_FAILED", "處理流程失敗", {"error": error_msg})
+                    db_client.update_url(item_id, {"status": "failed", "last_error_details": error_msg})
                 except Exception as db_e:
                     log.error(f"[任務 {task_id}] 更新項目 {item_id} 狀態為 failed 時再次發生錯誤: {db_e}")
                 task_manager.update_item_status(task_id, item_id, "FAILED", details={"error_message": error_msg})
@@ -367,16 +418,16 @@ async def get_task_status(
         log.warning(f"查詢了不存在的任務ID: {task_id}")
         raise HTTPException(status_code=404, detail=f"找不到任務ID: {task_id}")
 
-    # 從資料庫獲取永久性狀態並合併到回應中
+    # (Jules @ 2025-10-11) 重構 v2：從資料庫獲取 processing_history 並合併到回應中
     if status.get('items'):
         for item_id_str, item_data in status['items'].items():
             try:
                 item_id = int(item_id_str)
                 db_record = db_client.get_url_by_id(item_id)
                 if db_record:
-                    # 合併資料庫中的狀態
-                    item_data['ocr_status'] = db_record.get('ocr_status', 'pending')
-                    item_data['ai_status'] = db_record.get('ai_status', 'pending')
+                    # 優先使用資料庫中的最新歷程紀錄
+                    history_str = db_record.get('processing_history')
+                    item_data['processing_history'] = json.loads(history_str) if history_str else []
 
                     # 確保即使任務管理器中沒有，也能從資料庫填充基本資訊
                     item_data.setdefault('title', db_record.get('title', '讀取中...'))
@@ -384,12 +435,15 @@ async def get_task_status(
                     item_data.setdefault('message_date', db_record.get('message_date', ''))
                     item_data.setdefault('message_time', db_record.get('message_time', ''))
                 else:
-                    item_data['ocr_status'] = 'unknown'
-                    item_data['ai_status'] = 'unknown'
-            except (ValueError, TypeError):
-                log.warning(f"處理項目 {item_id_str} 時遇到無效的 ID。")
-                item_data['ocr_status'] = 'error'
-                item_data['ai_status'] = 'error'
+                    item_data['processing_history'] = []
+
+            except (ValueError, TypeError, json.JSONDecodeError) as e:
+                log.warning(f"為項目 {item_id_str} 補充歷程時發生錯誤: {e}")
+                item_data['processing_history'] = [{
+                    "status": "ERROR",
+                    "message": "無法讀取處理歷程",
+                    "timestamp": datetime.now().isoformat()
+                }]
 
     return status
 
