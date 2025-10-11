@@ -109,6 +109,16 @@ async def get_all_ingested_items(db_client: DBClient = Depends(get_db_client)):
         raise HTTPException(status_code=500, detail="無法從資料庫讀取項目清單。")
 
 
+# --- 依賴注入 ---
+# 這些函式會被 FastAPI 用來提供共享的資源實例給 API 端點
+
+def get_db_client():
+    """提供一個 DBClient 的共享實例。"""
+    # 這裡可以根據需要實現更複雜的生命週期管理
+    # 但對於 DBClient 來說，其內部的 httpx.Client 已經管理了連線池
+    return DBClient()
+
+
 # --- 非同步下載功能 (計畫 15-4a) ---
 
 # --- 資料模型 ---
@@ -125,15 +135,6 @@ class StartAnalysisRequest(BaseModel):
 
 class StartAnalysisResponse(BaseModel):
     task_id: str = Field(..., description="用於追蹤分析進度的唯一任務ID")
-
-# --- 依賴注入 ---
-# 這些函式會被 FastAPI 用來提供共享的資源實例給 API 端點
-
-def get_db_client():
-    """提供一個 DBClient 的共享實例。"""
-    # 這裡可以根據需要實現更複雜的生命週期管理
-    # 但對於 DBClient 來說，其內部的 httpx.Client 已經管理了連線池
-    return DBClient()
 
 # --- 背景任務邏輯 ---
 def run_download_pipeline(task_id: str, item_ids: List[int], db_client: DBClient, task_manager):
