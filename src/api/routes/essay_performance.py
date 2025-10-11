@@ -91,6 +91,16 @@ async def proxy_ingest_text(
         raise HTTPException(status_code=500, detail="代理請求時發生內部錯誤。")
 
 
+# --- 依賴注入 ---
+# 這些函式會被 FastAPI 用來提供共享的資源實例給 API 端點
+# (Jules @ 2025-10-11) 修正 NameError：將 get_db_client 移至使用它的路由之前。
+def get_db_client():
+    """提供一個 DBClient 的共享實例。"""
+    # 這裡可以根據需要實現更複雜的生命週期管理
+    # 但對於 DBClient 來說，其內部的 httpx.Client 已經管理了連線池
+    return DBClient()
+
+
 @router.get("/items", summary="獲取所有已擷取的項目")
 async def get_all_ingested_items(db_client: DBClient = Depends(get_db_client)):
     """
@@ -107,16 +117,6 @@ async def get_all_ingested_items(db_client: DBClient = Depends(get_db_client)):
     except Exception as e:
         log.error(f"從資料庫獲取小作文項目時發生錯誤: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="無法從資料庫讀取項目清單。")
-
-
-# --- 依賴注入 ---
-# 這些函式會被 FastAPI 用來提供共享的資源實例給 API 端點
-
-def get_db_client():
-    """提供一個 DBClient 的共享實例。"""
-    # 這裡可以根據需要實現更複雜的生命週期管理
-    # 但對於 DBClient 來說，其內部的 httpx.Client 已經管理了連線池
-    return DBClient()
 
 
 # --- 非同步下載功能 (計畫 15-4a) ---
