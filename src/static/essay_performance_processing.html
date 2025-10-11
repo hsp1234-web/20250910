@@ -119,113 +119,115 @@
 
             // --- 狀態對應與輔助函式 ---
 
-            // (Jules): 統一管理狀態顯示，包括下載和分析流程的各種狀態
-            const statusDisplayMap = {
-                // 分析狀態 (用於 OCR 和 AI)
-                'pending': { text: '未完成', icon: 'fa-regular fa-clock', color: '#6c757d' },
-                'processing': { text: '處理中...', icon: 'fa-solid fa-spinner fa-spin', color: '#007bff' },
-                'completed': { text: '已完成', icon: 'fa-solid fa-check-circle', color: '#28a745' },
-                'failed': { text: '失敗', icon: 'fa-solid fa-times-circle', color: '#dc3545' },
-                'unknown': { text: '未知', icon: 'fa-solid fa-question-circle', color: '#6c757d' },
+            // (Jules @ 2025-10-11) 重構 v2：狀態與歷程渲染
+            const statusIconMap = {
+                'QUEUED': { icon: 'fa-regular fa-clock', color: '#6c757d' },
+                'DOWNLOADING': { icon: 'fa-solid fa-download', color: '#007bff' },
+                'DOWNLOAD_SUCCESS': { icon: 'fa-solid fa-check', color: '#28a745' },
+                'ANALYSIS_SENT': { icon: 'fa-solid fa-share-square', color: '#17a2b8' },
+                'ANALYSIS_SUCCESS': { icon: 'fa-solid fa-check-double', color: '#28a745' },
+                'PIPELINE_FAILED': { icon: 'fa-solid fa-times-circle', color: '#dc3545' },
+                'ERROR': { icon: 'fa-solid fa-exclamation-triangle', color: '#ffc107' },
             };
 
-            // (Jules): 輔助函式，專門用來渲染 OCR 或 AI 的狀態欄位
-            const renderAnalysisStatus = (statusKey) => {
-                const status = statusDisplayMap[statusKey] || statusDisplayMap['unknown'];
-                return `<span style="color: ${status.color};"><i class="${status.icon}" style="margin-right: 5px;"></i>${status.text}</span>`;
+            const overallStatusMap = {
+                'QUEUED': { text: '⏳ 等待中...', class: 'status-waiting' },
+                'DOWNLOADING': { text: '📥 下載中...', class: 'status-downloading' },
+                'DOWNLOAD_SUCCESS': { text: '📥 下載完成', class: 'status-downloaded' },
+                'ANALYSIS_SENT': { text: '🤖 分析中...', class: 'status-downloading' },
+                'ANALYSIS_SUCCESS': { text: '✅ 完成', class: 'status-downloaded' },
+                'PIPELINE_FAILED': { text: '❌ 失敗', class: 'status-failed' },
+                'default': { text: '❔ 未知', class: 'status-waiting' }
             };
 
-            // --- 核心渲染邏輯 (Jules @ 2025-10-10) 重構 ---
-            // 將渲染與狀態更新分離，以支援從 API 直接載入完整列表
+            const renderHistory = (history) => {
+                if (!history || history.length === 0) {
+                    return '<li>尚無處理歷程</li>';
+                }
+                return history.map(event => {
+                    const statusInfo = statusIconMap[event.status] || statusIconMap['ERROR'];
+                    let detailsText = '';
+                    if (event.status === 'PIPELINE_FAILED' && event.details && event.details.error) {
+                        detailsText = `<div class="error-message" style="margin-top: 5px; padding-left: 20px;"><strong>錯誤詳情:</strong> ${event.details.error}</div>`;
+                    }
+                    return `<li style="color: ${statusInfo.color};">
+                                <i class="${statusInfo.icon}" style="margin-right: 8px; width: 20px;"></i>
+                                ${event.message}
+                                ${detailsText}
+                            </li>`;
+                }).join('');
+            };
+
+            const getOverallStatus = (history) => {
+                if (!history || history.length === 0) {
+                    return overallStatusMap['default'];
+                }
+                const lastEvent = history[history.length - 1];
+                return overallStatusMap[lastEvent.status] || overallStatusMap['default'];
+            };
+
+            const renderCard = (item) => {
+                const isChecked = selectedItemIds.has(item.id.toString());
+                const history = item.processing_history || [];
+                const overallStatus = getOverallStatus(history);
+
+                return `
+                    <div class="card-header">
+                        <div style="display: flex; align-items: center;">
+                            <input type="checkbox" class="card-checkbox" data-id="${item.id}" ${isChecked ? 'checked' : ''}>
+                            <span class="item-id" style="margin-left: 10px;">ID: ${item.id}</span>
+                        </div>
+                        <span class="item-status ${overallStatus.class}">${overallStatus.text}</span>
+                    </div>
+                    <div class="card-body">
+                        <p><strong>標題:</strong> ${item.title || '無標題'}</p>
+                        <p><strong>作者:</strong> ${item.author || '未知'}</p>
+                        <p><strong>時間:</strong> ${item.message_date ? item.message_date.split(' ')[0] : ''} ${item.message_time || ''}</p>
+                        <hr style="margin: 8px 0;">
+                        <p><strong>處理歷程:</strong></p>
+                        <ul class="processing-history" style="list-style-type: none; padding-left: 0; font-size: 0.9em;">
+                            ${renderHistory(history)}
+                        </ul>
+                    </div>
+                `;
+            };
 
             const renderItemList = (items) => {
-                cardsContainer.innerHTML = ''; // 清空現有卡片
+                cardsContainer.innerHTML = '';
                 if (!items || items.length === 0) {
-                    summaryStatusEl.textContent = '資料庫中沒有已下載、可供處理的項目。';
+                    summaryStatusEl.textContent = '資料庫中沒有可供處理的項目。';
                     return;
                 }
 
                 summaryStatusEl.textContent = `找到 ${items.length} 個可處理的項目。請選取後開始分析。`;
 
                 items.forEach(item => {
-                    const card = document.createElement('div');
-                    card.className = 'card';
-                    card.id = `card-${item.id}`; // 給卡片一個唯一的 ID
-
-                    const isChecked = selectedItemIds.has(item.id.toString());
-
-                    // (Jules @ 2025-10-11) 根據項目狀態決定初始顯示
-                    const statusMap = {
-                        'downloaded': { text: '✅ 已下載', class: 'status-downloaded' },
-                        'failed': { text: '❌ 失敗', class: 'status-failed' },
-                        'default': { text: '⌛ 待處理', class: 'status-waiting' }
-                    };
-                    const statusInfo = statusMap[item.status] || statusMap['default'];
-
-                    card.innerHTML = `
-                        <div class="card-header">
-                            <div style="display: flex; align-items: center;">
-                                <input type="checkbox" class="card-checkbox" data-id="${item.id}" ${isChecked ? 'checked' : ''}>
-                                <span class="item-id" style="margin-left: 10px;">ID: ${item.id}</span>
-                            </div>
-                            <span class="item-status ${statusInfo.class}">${statusInfo.text}</span>
-                        </div>
-                        <div class="card-body">
-                            <p><strong>標題:</strong> ${item.title || '無標題'}</p>
-                            <p><strong>作者:</strong> ${item.author || '未知'}</p>
-                            <p><strong>時間:</strong> ${item.message_date ? item.message_date.split(' ')[0] : ''} ${item.message_time || ''}</p>
-                            <hr style="margin: 8px 0;">
-                            <p><strong>OCR 狀態:</strong> <span class="ocr-status">${renderAnalysisStatus(item.ocr_status || 'pending')}</span></p>
-                            <p><strong>AI 分析狀態:</strong> <span class="ai-status">${renderAnalysisStatus(item.ai_status || 'pending')}</span></p>
-                            <div class="error-message" style="display: none;"></div>
-                        </div>
-                    `;
-                    cardsContainer.appendChild(card);
+                    const cardEl = document.createElement('div');
+                    cardEl.className = 'card';
+                    cardEl.id = `card-${item.id}`;
+                    cardEl.innerHTML = renderCard(item);
+                    cardsContainer.appendChild(cardEl);
                 });
 
-                updateActionsPanel(); // 更新按鈕狀態
+                updateActionsPanel();
             };
 
             const updateTaskStatusInUI = (taskData) => {
-                // 更新總體狀態
                 const isOverallCompleted = taskData.status === 'COMPLETED';
                 const timeElapsed = startTime ? ((new Date() - startTime) / 1000).toFixed(1) : 0;
-                 if (isOverallCompleted) {
+                if (isOverallCompleted) {
                     summaryStatusEl.textContent = `全部處理完成！ | 總耗時: ${timeElapsed} 秒`;
                 } else {
                     summaryStatusEl.textContent = `正在處理中... | 總耗時: ${timeElapsed} 秒`;
                 }
 
-                // 更新每個卡片的詳細狀態
                 for (const itemId in taskData.items) {
                     const itemData = taskData.items[itemId];
                     const card = document.getElementById(`card-${itemId}`);
                     if (!card) continue;
 
-                    const statusMap = {
-                        'PROCESSING_ANALYSIS': { text: '🤖 分析中...', class: 'status-downloading' },
-                        'COMPLETED_ANALYSIS': { text: '✅ 分析完成', class: 'status-downloaded' },
-                        'FAILED': { text: '❌ 失敗', class: 'status-failed' },
-                    };
-                    const statusInfo = statusMap[itemData.status] || { text: '❓ 未知', class: 'status-waiting' };
-
-                    // 更新右上角狀態徽章
-                    const statusBadge = card.querySelector('.item-status');
-                    statusBadge.textContent = statusInfo.text;
-                    statusBadge.className = `item-status ${statusInfo.class}`;
-
-                    // 更新 OCR 和 AI 狀態
-                    card.querySelector('.ocr-status').innerHTML = renderAnalysisStatus(itemData.ocr_status || 'pending');
-                    card.querySelector('.ai-status').innerHTML = renderAnalysisStatus(itemData.ai_status || 'pending');
-
-                    // 更新錯誤訊息
-                    const errorDiv = card.querySelector('.error-message');
-                    if (itemData.status === 'FAILED' && itemData.error_message) {
-                        errorDiv.innerHTML = `<strong>錯誤:</strong> ${itemData.error_message}`;
-                        errorDiv.style.display = 'block';
-                    } else {
-                        errorDiv.style.display = 'none';
-                    }
+                    // 重新渲染整個卡片以更新所有資訊
+                    card.innerHTML = renderCard(itemData);
                 }
             };
 

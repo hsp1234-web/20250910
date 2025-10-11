@@ -215,33 +215,34 @@ def initialize_database(conn: sqlite3.Connection = None):
             """)
             # --- 結束 ---
 
-            # --- 為 extracted_urls 進行簡易遷移，新增狀態相關欄位 ---
+            # --- 為 extracted_urls 進行集中化綱要遷移 (Jules @ 2025-10-11) ---
+            log.info("正在檢查並更新 `extracted_urls` 資料表綱要...")
             url_migrations = {
-                "author": "TEXT", # 新增作者欄位
-                "message_date": "TEXT", # 訊息本身的日期
-                "message_time": "TEXT", # 訊息本身的時間
-                "title": "TEXT", # (Jules @ 2025-09-17) 新增標題欄位
+                "title": "TEXT",
+                "author": "TEXT",
+                "message_date": "TEXT",
+                "message_time": "TEXT",
+                "source_text": "TEXT",
                 "status": "TEXT DEFAULT 'pending'",
-                "status_message": "TEXT",
                 "local_path": "TEXT",
-                "file_hash": "TEXT",
-                "extracted_image_paths": "TEXT",
                 "extracted_text": "TEXT",
-                "retry_count": "INTEGER DEFAULT 0", # 為重試機制新增
-                "last_error_details": "TEXT", # 為重試機制新增
-                "ocr_status": "TEXT DEFAULT 'pending'",
-                "ai_status": "TEXT DEFAULT 'pending'"
+                "extracted_image_paths": "TEXT",
+                "last_error_details": "TEXT",
+                "processing_history": "TEXT" # 新的歷程記錄欄位
             }
-            for col, col_type in url_migrations.items():
-                try:
-                    cursor.execute(f"ALTER TABLE extracted_urls ADD COLUMN {col} {col_type}")
-                    log.info(f"欄位 '{col}' 已成功新增至 'extracted_urls' 資料表。")
-                except sqlite3.OperationalError as e:
-                    # 如果欄位已存在，忽略此錯誤，繼續執行
+            # 輔助函式，避免重複程式碼
+            def _add_column_if_not_exists(table, col, col_type):
+                 try:
+                    cursor.execute(f"ALTER TABLE {table} ADD COLUMN {col} {col_type}")
+                    log.info(f"欄位 '{col}' 已成功新增至 '{table}' 資料表。")
+                 except sqlite3.OperationalError as e:
                     if "duplicate column name" in str(e):
                         pass
                     else:
-                        raise # 對於其他錯誤，則重新引發
+                        raise
+
+            for col, col_type in url_migrations.items():
+                _add_column_if_not_exists('extracted_urls', col, col_type)
 
             # --- 為 reports 表格新增 structured_data 欄位 ---
             try:
