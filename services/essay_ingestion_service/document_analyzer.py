@@ -129,7 +129,17 @@ async def _perform_analysis(file_path: str) -> Dict[str, Any]:
     image_paths = content_data.get("image_paths", []) if content_data else []
 
     if not text_content:
-        log.warning("核心分析：文件內容提取成功，但未發現文字內容。")
+        log.warning("核心分析：文件內容提取成功，但未發現文字內容。這將被視為一個可處理的錯誤。")
+        # (Jules @ 2025-10-11) 核心修正：當沒有文字內容時，回傳一個包含明確錯誤訊息的物件。
+        # 這使得上游的 API 閘道可以捕捉到這個「失敗」狀態，而不是將其視為靜默的成功。
+        return {
+            "error": "不支援的檔案類型或內容為空",
+            "error_details": "內容提取工具無法從此檔案中讀取任何文字，因此無法進行分析。",
+            "analysis_data": {},
+            "image_paths": image_paths,
+            "extracted_text": ""
+        }
+
     log.info(f"核心分析：成功提取 {len(text_content)} 字元的文字和 {len(image_paths)} 張圖片。")
 
     analysis_result_data = {}
@@ -138,6 +148,7 @@ async def _perform_analysis(file_path: str) -> Dict[str, Any]:
         analysis_result_data = await analyze_text_with_llm(text_content)
         log.info("核心分析：文件內容分析完成。")
     else:
+        # 這個分支理論上因為上面的錯誤處理而無法到達，但保留它以確保代碼的穩健性。
         log.info("核心分析：跳過 LLM 分析，因為沒有文字內容。")
 
     # 組合並回傳一個包含所有分析產物的字典，以便 API 閘道進行後續處理
