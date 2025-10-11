@@ -173,89 +173,109 @@ def run_download_pipeline(task_id: str, item_ids: List[int], db_client: DBClient
     log.info(f"[任務 {task_id}] 所有項目處理完畢，管線結束。")
 
 
-# --- 背景任務邏輯 (分析) ---
+# --- 背景任務邏輯 (分析) V2 ---
 def run_analysis_pipeline(task_id: str, item_ids: List[int], db_client: DBClient, task_manager):
     """
-    在背景執行緒中運行的分析管線。
+    在背景執行緒中運行的分析管線 (V2)。
+    此版本遵循「以資料庫為中心」的原則，將分析流程拆分為獨立的步驟，並在每一步後更新狀態。
     """
-    log.info(f"[任務 {task_id}] 背景分析管線已啟動，共 {len(item_ids)} 個項目。")
+    log.info(f"[任務 {task_id}] V2 背景分析管線已啟動，共 {len(item_ids)} 個項目。")
 
+    # 1. 服務發現：一次性獲取所有需要的服務 URL
     try:
-        # 取得 essay_ingestion_service 的 URL，如果失敗則直接中止
         service_base_url = get_service_url_wrapper(SERVICE_NAME)
-        target_url = f"{service_base_url}/process-local-document"
-        log.info(f"[任務 {task_id}] 將使用擷取服務端點: {target_url}")
+        extract_url = f"{service_base_url}/extract-content"
+        analyze_url = f"{service_base_url}/analyze-text"
+        log.info(f"[任務 {task_id}] 服務發現成功。提取端點: {extract_url}, 分析端點: {analyze_url}")
     except HTTPException as e:
-        log.error(f"[任務 {task_id}] 無法啟動分析管線，因為找不到擷取服務: {e.detail}")
-        # 將所有項目的狀態都標記為失敗
+        error_msg = f"無法啟動分析管線，因為找不到服務 '{SERVICE_NAME}': {e.detail}"
+        log.error(f"[任務 {task_id}] {error_msg}")
         for item_id in item_ids:
             task_manager.update_item_status(task_id, item_id, "FAILED", details={"error_message": "分析服務不可用"})
         task_manager.complete_task(task_id)
         return
 
-    # 使用同步的 httpx Client，因為此函式本身就在背景執行緒中運行
+    # 使用同步的 httpx.Client 進行 API 呼叫
     with httpx.Client(timeout=600.0) as client:
         for item_id in item_ids:
             try:
-                # 1. 從資料庫查詢項目詳情，特別是本地路徑
+                # --- 步驟 0: 查詢初始狀態 ---
                 url_record = db_client.get_url_by_id(item_id)
                 if not url_record or not url_record.get('local_path'):
                     raise ValueError(f"ID {item_id} 的紀錄不完整或尚未下載 (缺少 local_path)。")
-
                 local_path = url_record['local_path']
-                source_url = url_record['url']
-                log.info(f"[任務 {task_id}] 正在處理項目 ID: {item_id}，檔案路徑: {local_path}")
+                log.info(f"[任務 {task_id}] 開始處理項目 ID: {item_id}，檔案路徑: {local_path}")
 
-                # 2. 更新資料庫和任務狀態為「處理中」
-                db_client.update_url(item_id, {"ocr_status": "processing", "ai_status": "processing"})
+                # --- 步驟 1: 內容提取 ---
+                log.info(f"[任務 {task_id}][{item_id}] 步驟 1: 內容提取")
+                # 1a. 更新狀態為「提取中」
+                db_client.update_url(item_id, {"ocr_status": "processing", "ai_status": "pending", "last_error_details": None})
                 task_manager.update_item_status(task_id, item_id, "PROCESSING_ANALYSIS")
 
-                # 3. 呼叫擷取服務進行分析 (Jules @ 2025-10-09: 更新 API call，只傳送 file_path)
-                response = client.post(target_url, json={"file_path": local_path})
-                response.raise_for_status() # 如果狀態碼不是 2xx，會拋出異常
+                # 1b. 呼叫提取服務
+                response = client.post(extract_url, json={"file_path": local_path})
+                response.raise_for_status()
+                content_data = response.json()
+                extracted_text = content_data.get("extracted_text", "")
+                image_paths = content_data.get("image_paths", [])
 
-                # 4. 分析成功，處理回傳結果並更新資料庫
-                analysis_result = response.json()
-                log.info(f"[任務 {task_id}] 項目 {item_id} 分析成功，收到分析資料。")
-
-                # 從分析結果中提取核心資料
-                analysis_data = analysis_result.get("analysis_data", {})
-
-                # (Jules): 根據新需求，從 analysis_data 中提取 title 和 author
-                new_title = analysis_data.get("title")
-                new_author = analysis_data.get("author")
-
-                updates_for_db = {
+                # 1c. 更新狀態為「提取完成」
+                db_client.update_url(item_id, {
                     "ocr_status": "completed",
-                    "ai_status": "completed",
-                    "extracted_text": analysis_result.get("extracted_text"),
-                    "extracted_image_paths": json.dumps(analysis_result.get("image_paths", [])),
-                    "last_error_details": None # 清除舊的錯誤訊息
-                }
+                    "extracted_text": extracted_text,
+                    "extracted_image_paths": json.dumps(image_paths)
+                })
+                log.info(f"[任務 {task_id}][{item_id}] 內容提取成功，提取到 {len(extracted_text)} 字元。")
 
-                # (Jules): 只有在 LLM 確實回傳了有效值時才更新，避免覆蓋掉舊資料
+                # --- 步驟 2: AI 文字分析 ---
+                log.info(f"[任務 {task_id}][{item_id}] 步驟 2: AI 文字分析")
+                if not extracted_text:
+                    log.info(f"[任務 {task_id}][{item_id}] 無文字內容，跳過 AI 分析。")
+                    db_client.update_url(item_id, {"ai_status": "completed"}) # 沒有文字也視為完成
+                    task_manager.update_item_status(task_id, item_id, "COMPLETED_ANALYSIS")
+                    continue # 處理下一個項目
+
+                # 2a. 更新狀態為「AI分析中」
+                db_client.update_url(item_id, {"ai_status": "processing"})
+
+                # 2b. 呼叫分析服務
+                response = client.post(analyze_url, json={"text_content": extracted_text})
+                response.raise_for_status()
+                analysis_result = response.json()
+                log.info(f"[任務 {task_id}][{item_id}] AI 分析成功。")
+
+                # 2c. 更新狀態為「AI分析完成」
+                updates_for_db = {"ai_status": "completed"}
+                new_title = analysis_result.get("title")
+                new_author = analysis_result.get("author")
+
                 if new_title and "無法辨識" not in new_title:
                     updates_for_db["title"] = new_title
                 if new_author and "無法辨識" not in new_author:
                     updates_for_db["author"] = new_author
 
+                # (Jules): 將詳細的 JSON 分析結果也存入資料庫，以備後用
+                updates_for_db["analysis_result_json"] = json.dumps(analysis_result)
+
                 db_client.update_url(item_id, updates_for_db)
 
-                # (Jules): 在任務管理器中也更新這些資訊，以便前端能立即看到
-                details_for_task_manager = {
-                    "title": new_title,
-                    "author": new_author
-                }
+                # 2d. 更新任務管理器狀態
+                details_for_task_manager = {"title": new_title, "author": new_author}
                 task_manager.update_item_status(task_id, item_id, "COMPLETED_ANALYSIS", details=details_for_task_manager)
 
             except Exception as e:
                 error_msg = str(e)
-                log.error(f"[任務 {task_id}] 處理項目 {item_id} 的分析時發生錯誤: {error_msg}", exc_info=True)
-                db_client.update_url(item_id, {"ocr_status": "failed", "ai_status": "failed", "last_error_details": error_msg})
+                log.error(f"[任務 {task_id}] 處理項目 {item_id} 時發生嚴重錯誤: {error_msg}", exc_info=True)
+                # 無論哪個階段出錯，都將兩個狀態都標記為失敗
+                db_client.update_url(item_id, {
+                    "ocr_status": "failed",
+                    "ai_status": "failed",
+                    "last_error_details": error_msg
+                })
                 task_manager.update_item_status(task_id, item_id, "FAILED", details={"error_message": error_msg})
 
     task_manager.complete_task(task_id)
-    log.info(f"[任務 {task_id}] 所有分析項目處理完畢，管線結束。")
+    log.info(f"[任務 {task_id}] 所有分析項目處理完畢，V2 管線結束。")
 
 
 # --- API 端點 ---

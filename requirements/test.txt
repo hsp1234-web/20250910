@@ -34,4 +34,6 @@ fpdf2==2.7.8
 requests==2.32.4
 gdown==5.2.0
 filetype==1.2.0
-python-dateutil==2.9.0.post0
+python-dateutil==2.9.0.post0twstock
+ollama
+pytest-mock

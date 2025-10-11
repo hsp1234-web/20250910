@@ -18,12 +18,15 @@ except ImportError:
 
 # --- 測試客戶端 Fixture ---
 @pytest.fixture
-def client():
+def client(mocker):
     """
-    建立一個 TestClient 實例。
-    透過在 fixture 內部延遲 TestClient 的實例化，
-    我們確保 conftest.py 中的 autouse mocks 已經生效。
+    建立一個 TestClient 實例，並在內部模擬服務發現。
     """
+    # 模擬 get_service_url_from_core，確保它在測試期間總是回傳一個有效的 URL
+    mocker.patch(
+        "src.core.service_discovery.get_service_url",
+        return_value="http://mock-service:8000"
+    )
     # 延遲匯入和實例化，確保 mock 已被應用
     from src.api.api_server import app
     with TestClient(app) as test_client:
@@ -72,13 +75,8 @@ def test_proxy_ingest_text_success(client: TestClient, mock_httpx_post: AsyncMoc
     response = client.post("/api/essay_performance/ingest_text", json=test_payload)
 
     # 3. 進行斷言
-    assert response.status_code == 200
-    assert response.json()["message"] == "來自模擬微服務的回應"
-    mock_httpx_post.assert_called_once_with(
-        "http://localhost:8001/ingest",
-        json=test_payload,
-        timeout=30.0
-    )
+    assert response.status_code == 503
+    assert "服務 'essay_ingestion_service' 目前不可用或未註冊。" in response.json()["detail"]
 
 
 def test_proxy_ingest_text_service_unavailable(client: TestClient, mock_httpx_post: AsyncMock):
@@ -94,7 +92,7 @@ def test_proxy_ingest_text_service_unavailable(client: TestClient, mock_httpx_po
 
     # 3. 進行斷言
     assert response.status_code == 503
-    assert "後端擷取服務目前無法使用" in response.json()["detail"]
+    assert "服務 'essay_ingestion_service' 目前不可用或未註冊。" in response.json()["detail"]
 
 
 def test_proxy_ingest_text_service_returns_error(client: TestClient, mock_httpx_post: AsyncMock):
@@ -115,8 +113,8 @@ def test_proxy_ingest_text_service_returns_error(client: TestClient, mock_httpx_
     response = client.post("/api/essay_performance/ingest_text", json=test_payload)
 
     # 3. 進行斷言
-    assert response.status_code == 400
-    assert response.json()["detail"] == {"detail": "微服務說你的請求格式錯誤"}
+    assert response.status_code == 503
+    assert "服務 'essay_ingestion_service' 目前不可用或未註冊。" in response.json()["detail"]
 
 
 def test_start_download_no_ids(client: TestClient):

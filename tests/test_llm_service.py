@@ -4,13 +4,7 @@ from unittest.mock import patch, MagicMock
 import sys
 from pathlib import Path
 
-# --- 路徑修正，確保能匯入被測試的應用程式 ---
-# 將專案根目錄加入到 Python 的搜尋路徑中
-PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
-sys.path.insert(0, str(PROJECT_ROOT))
-
-# 從 llm_service 匯入 FastAPI 應用程式實例
-from services.llm_service.main import app, lifespan
+from services.llm_service.main import app
 
 # --- Pytest Fixtures ---
 

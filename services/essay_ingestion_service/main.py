@@ -86,33 +86,66 @@ async def ingest_text(request: IngestRequest):
         log.error(f"處理 /ingest 請求時發生未預期的錯誤: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"內部伺服器錯誤: {e}")
 
-# 重構後的端點，僅負責分析並直接回傳結果
-@app.post("/process-local-document", response_model=Dict[str, Any], tags=["文件圖文分析"])
-async def process_local_document_endpoint(request: ProcessLocalDocumentRequest):
+# --- 新的、拆分後的端點 ---
+
+class ExtractContentRequest(BaseModel):
+    file_path: str
+
+class ExtractContentResponse(BaseModel):
+    extracted_text: str
+    image_paths: List[str]
+
+class AnalyzeTextRequest(BaseModel):
+    text_content: str
+
+@app.post("/extract-content", response_model=ExtractContentResponse, tags=["文件圖文分析 (V2)"])
+async def extract_content_endpoint(request: ExtractContentRequest):
     """
-    接收一個本地檔案路徑，對該檔案進行分析，並直接回傳分析結果的字典。
-    這是一個同步端點，會等待分析完成後才回傳結果。
+    步驟 1: 接收檔案路徑，僅執行內容提取（文字和圖片）。
     """
-    log.info(f"接收到 /process-local-document 請求，路徑: {request.file_path}")
+    log.info(f"接收到 /extract-content 請求，路徑: {request.file_path}")
+    try:
+        # 這裡我們需要一個只執行內容提取的函式
+        from .content_extractor import extract_content
+        # 注意：content_extractor 需要一個輸出目錄來存放圖片
+        # 我們可以設定一個預設或暫存的目錄
+        output_dir = "services/essay_ingestion_service/downloads"
+        content_data = await asyncio.to_thread(extract_content, request.file_path, output_dir)
+        if content_data is None:
+            raise FileNotFoundError(f"無法處理或找不到檔案: {request.file_path}")
+        return ExtractContentResponse(
+            extracted_text=content_data.get("text", ""),
+            image_paths=content_data.get("image_paths", [])
+        )
+    except FileNotFoundError as e:
+        log.error(f"檔案未找到: {e}", exc_info=True)
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        log.error(f"提取內容時發生錯誤: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"提取內容時發生內部錯誤: {e}")
+
+
+@app.post("/analyze-text", response_model=Dict[str, Any], tags=["文件圖文分析 (V2)"])
+async def analyze_text_endpoint(request: AnalyzeTextRequest):
+    """
+    步驟 2: 接收文字內容，僅執行 AI 分析。
+    """
+    log.info(f"接收到 /analyze-text 請求，內容長度: {len(request.text_content)} 字元。")
+    if not request.text_content:
+        log.warning("請求的文字內容為空，無法進行分析。")
+        # 即使內容為空，也回傳一個符合成功結構的空結果，讓呼叫方可以一致地處理
+        return {}
 
     try:
-        # 直接呼叫處理本地檔案的函式，並等待其完成
-        analysis_result = await process_local_document(file_path=request.file_path)
-        # 直接回傳分析結果
+        from .document_analyzer import analyze_text_with_llm
+        analysis_result = await analyze_text_with_llm(request.text_content)
         return analysis_result
-
-    except FileNotFoundError as e:
-        log.error(f"檔案未找到錯誤: {e}", exc_info=True)
-        raise HTTPException(status_code=404, detail=str(e))
     except ConnectionError as e:
-        # (Jules): 捕捉由 document_analyzer 拋出的、關於下游服務不可用的特定錯誤。
         log.error(f"下游服務連線錯誤: {e}", exc_info=True)
-        # 回傳 503 Service Unavailable，並附帶清晰的錯誤訊息。
         raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
-        # 捕捉所有其他未預期的異常，並回傳 500 錯誤
-        log.error(f"處理本地文件時發生未預期錯誤: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"分析文件時發生內部伺服器錯誤: {e}")
+        log.error(f"分析文字時發生錯誤: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"分析文字時發生內部錯誤: {e}")
 
 # --- 啟動配置 ---
 if __name__ == "__main__":
