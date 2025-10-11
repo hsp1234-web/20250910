@@ -85,6 +85,54 @@
         const deselectAllBtn = document.getElementById('deselect-all-btn');
         const nextStepBtn = document.getElementById('next-step-btn');
 
+        // (Jules @ 2025-10-10) 整合修改：
+        // 1. 新增 renderTable 函式，用於將項目資料渲染到表格中。
+        // 2. 新增 loadExistingItems 函式，用於在頁面載入時從後端獲取並顯示所有項目。
+        // 3. 修改 handleSubmit，使其在處理完成後呼叫 loadExistingItems 來刷新整個列表。
+        // 4. 在頁面載入完成時 (DOMContentLoaded) 呼叫 loadExistingItems。
+
+        const renderTable = (items) => {
+            resultBody.innerHTML = ''; // 清空現有表格內容
+            if (items && items.length > 0) {
+                items.forEach(item => {
+                    const row = document.createElement('tr');
+                    row.dataset.itemId = item.id; // 方便未來操作
+                    row.innerHTML = `
+                        <td><input type="checkbox" class="result-checkbox" value="${item.id}"></td>
+                        <td>${item.message_date ? item.message_date.split(' ')[0] : '---'}</td>
+                        <td>${item.author || '---'}</td>
+                        <td>${item.title || '無標題'}</td>
+                        <td><a href="${item.url}" target="_blank" rel="noopener noreferrer">查看連結</a></td>
+                    `;
+                    resultBody.appendChild(row);
+                });
+                resultPanel.style.display = 'block';
+            } else {
+                // 如果沒有項目，可以選擇隱藏表格或顯示提示訊息
+                resultPanel.style.display = 'none';
+            }
+        };
+
+        const loadExistingItems = async () => {
+            statusMessage.textContent = '正在從資料庫載入既有項目...';
+            statusMessage.style.color = 'var(--primary-color)';
+            try {
+                const response = await fetch('/api/essay_performance/items');
+                if (!response.ok) {
+                    const errorResult = await response.json();
+                    throw new Error(errorResult.detail || '無法載入項目列表');
+                }
+                const items = await response.json();
+                renderTable(items);
+                statusMessage.textContent = items.length > 0 ? `成功載入 ${items.length} 個項目。` : '資料庫目前沒有已處理的項目。';
+                statusMessage.style.color = 'var(--success-color)';
+            } catch (error) {
+                statusMessage.textContent = `載入歷史項目時發生錯誤：${error.message}`;
+                statusMessage.style.color = 'var(--error-color)';
+                resultPanel.style.display = 'none';
+            }
+        };
+
         const handleSubmit = async () => {
             const text = textInput.value;
             if (!text.trim()) {
@@ -95,8 +143,6 @@
 
             statusMessage.textContent = '正在處理中，請稍候...';
             statusMessage.style.color = 'var(--primary-color)';
-            resultPanel.style.display = 'none';
-            resultBody.innerHTML = '';
 
             try {
                 const response = await fetch('/api/essay_performance/ingest_text', {
@@ -111,24 +157,12 @@
                     throw new Error(result.detail || '伺服器發生錯誤');
                 }
 
-                statusMessage.textContent = result.message || '處理完成。';
+                // 處理成功後，清除輸入框並重新載入整個列表
+                textInput.value = '';
+                statusMessage.textContent = result.message || '處理完成，正在刷新列表...';
                 statusMessage.style.color = 'var(--success-color)';
 
-                const items = result.inserted_items || [];
-                if (items.length > 0) {
-                    items.forEach(item => {
-                        const row = document.createElement('tr');
-                        row.innerHTML = `
-                            <td><input type="checkbox" class="result-checkbox" value="${item.id}"></td>
-                            <td>${item.message_date ? item.message_date.split(' ')[0] : '---'}</td>
-                            <td>${item.author || '---'}</td>
-                            <td>${item.title || '無標題'}</td>
-                            <td><a href="${item.url}" target="_blank" rel="noopener noreferrer">查看連結</a></td>
-                        `;
-                        resultBody.appendChild(row);
-                    });
-                    resultPanel.style.display = 'block';
-                }
+                await loadExistingItems(); // 重新載入以顯示包含新項目的完整列表
 
             } catch (error) {
                 statusMessage.textContent = `發生錯誤：${error.message}`;
@@ -180,6 +214,9 @@
     <div id="readiness-overlay"><div class="spinner"></div><p>系統正在初始化核心服務，請稍候...</p></div>
     <script>
         document.addEventListener('DOMContentLoaded', function() {
+            // (Jules @ 2025-10-10) 在頁面載入後，立即載入既有項目
+            loadExistingItems();
+
             const overlay = document.getElementById('readiness-overlay');
             const buttons = document.querySelectorAll('button, a.button, input[type="button"], input[type="submit"]');
 

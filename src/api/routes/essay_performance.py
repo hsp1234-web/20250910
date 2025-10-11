@@ -90,6 +90,25 @@ async def proxy_ingest_text(
         log.error(f"代理請求時發生未預期錯誤: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="代理請求時發生內部錯誤。")
 
+
+@router.get("/items", summary="獲取所有已擷取的項目")
+async def get_all_ingested_items(db_client: DBClient = Depends(get_db_client)):
+    """
+    從資料庫中獲取所有已透過文字擷取功能處理過的項目。
+    (Jules @ 2025-10-10) 新增此端點以解決前端列表在重新載入後消失的問題。
+    """
+    try:
+        # 使用 get_filtered_urls()，不帶任何參數以獲取所有紀錄
+        all_items = db_client.get_filtered_urls()
+        # 預設按 ID 降序排序，讓最新的項目顯示在最前面
+        if all_items:
+            return sorted(all_items, key=lambda item: item.get('id', 0), reverse=True)
+        return []
+    except Exception as e:
+        log.error(f"從資料庫獲取小作文項目時發生錯誤: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="無法從資料庫讀取項目清單。")
+
+
 # --- 非同步下載功能 (計畫 15-4a) ---
 
 # --- 資料模型 ---
