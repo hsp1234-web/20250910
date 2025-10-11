@@ -135,50 +135,26 @@
                 return `<span style="color: ${status.color};"><i class="${status.icon}" style="margin-right: 5px;"></i>${status.text}</span>`;
             };
 
-            // --- 核心渲染邏輯 ---
-            const render = (data) => {
-                if (!data || !data.items) {
-                    summaryStatusEl.textContent = '無法獲取任務資料，請重試。';
+            // --- 核心渲染邏輯 (Jules @ 2025-10-10) 重構 ---
+            // 將渲染與狀態更新分離，以支援從 API 直接載入完整列表
+
+            const renderItemList = (items) => {
+                cardsContainer.innerHTML = ''; // 清空現有卡片
+                if (!items || items.length === 0) {
+                    summaryStatusEl.textContent = '資料庫中沒有已下載、可供處理的項目。';
                     return;
                 }
 
-                // 更新上方摘要面板
-                const isOverallCompleted = data.status === 'COMPLETED';
-                const timeElapsed = startTime ? ((new Date() - startTime) / 1000).toFixed(1) : 0;
-                if (isOverallCompleted) {
-                    summaryStatusEl.textContent = `全部處理完成！ | 總耗時: ${timeElapsed} 秒`;
-                } else {
-                    summaryStatusEl.textContent = `正在處理中... | 總耗時: ${timeElapsed} 秒`;
-                }
+                summaryStatusEl.textContent = `找到 ${items.length} 個可處理的項目。請選取後開始分析。`;
 
-                // 重新渲染所有卡片
-                cardsContainer.innerHTML = '';
-                const allItemIdsOnPage = [];
-                for (const itemId in data.items) {
-                    allItemIdsOnPage.push(itemId.toString());
-                    const item = data.items[itemId];
+                items.forEach(item => {
                     const card = document.createElement('div');
                     card.className = 'card';
+                    card.id = `card-${item.id}`; // 給卡片一個唯一的 ID
 
                     const isChecked = selectedItemIds.has(item.id.toString());
+                    const statusInfo = { text: '✅ 已下載', class: 'status-downloaded' }; // 初始狀態都是已下載
 
-                    // (Jules): 根據不同流程狀態，決定右上角徽章的顯示內容
-                    const statusMap = {
-                        'WAITING': { text: '⌛ 等待中', class: 'status-waiting' },
-                        'DOWNLOADING': { text: '📥 下載中...', class: 'status-downloading' },
-                        'DOWNLOADED': { text: '✅ 已下載', class: 'status-downloaded' },
-                        'FAILED': { text: '❌ 失敗', class: 'status-failed' },
-                        'PROCESSING_ANALYSIS': { text: '🤖 分析中...', class: 'status-downloading' }, // 借用下載中樣式
-                        'COMPLETED_ANALYSIS': { text: '✅ 分析完成', class: 'status-downloaded' },
-                    };
-                    const statusInfo = statusMap[item.status] || { text: '❓ 未知', class: 'status-waiting' };
-
-                    let errorHtml = '';
-                    if (item.status === 'FAILED' && item.error_message) {
-                        errorHtml = `<p class="error-message"><strong>錯誤:</strong> ${item.error_message}</p>`;
-                    }
-
-                    // (Jules): 動態產生卡片的 HTML，包含複選框和新的狀態欄位
                     card.innerHTML = `
                         <div class="card-header">
                             <div style="display: flex; align-items: center;">
@@ -188,21 +164,62 @@
                             <span class="item-status ${statusInfo.class}">${statusInfo.text}</span>
                         </div>
                         <div class="card-body">
-                            <p><strong>標題:</strong> ${item.title || '讀取中...'}</p>
-                            <p><strong>作者:</strong> ${item.author || '讀取中...'}</p>
-                            <p><strong>時間:</strong> ${item.message_date || ''} ${item.message_time || ''}</p>
+                            <p><strong>標題:</strong> ${item.title || '無標題'}</p>
+                            <p><strong>作者:</strong> ${item.author || '未知'}</p>
+                            <p><strong>時間:</strong> ${item.message_date ? item.message_date.split(' ')[0] : ''} ${item.message_time || ''}</p>
                             <hr style="margin: 8px 0;">
-                            <p><strong>OCR 狀態:</strong> ${renderAnalysisStatus(item.ocr_status || 'pending')}</p>
-                            <p><strong>AI 分析狀態:</strong> ${renderAnalysisStatus(item.ai_status || 'pending')}</p>
-                            ${errorHtml}
+                            <p><strong>OCR 狀態:</strong> <span class="ocr-status">${renderAnalysisStatus(item.ocr_status || 'pending')}</span></p>
+                            <p><strong>AI 分析狀態:</strong> <span class="ai-status">${renderAnalysisStatus(item.ai_status || 'pending')}</span></p>
+                            <div class="error-message" style="display: none;"></div>
                         </div>
                     `;
                     cardsContainer.appendChild(card);
+                });
+
+                updateActionsPanel(); // 更新按鈕狀態
+            };
+
+            const updateTaskStatusInUI = (taskData) => {
+                // 更新總體狀態
+                const isOverallCompleted = taskData.status === 'COMPLETED';
+                const timeElapsed = startTime ? ((new Date() - startTime) / 1000).toFixed(1) : 0;
+                 if (isOverallCompleted) {
+                    summaryStatusEl.textContent = `全部處理完成！ | 總耗時: ${timeElapsed} 秒`;
+                } else {
+                    summaryStatusEl.textContent = `正在處理中... | 總耗時: ${timeElapsed} 秒`;
                 }
 
-                // (Jules): 根據當前頁面所有項目的選取狀態，更新「全選」複選框的狀態
-                const allVisibleChecked = allItemIdsOnPage.length > 0 && allItemIdsOnPage.every(id => selectedItemIds.has(id));
-                selectAllCheckbox.checked = allVisibleChecked;
+                // 更新每個卡片的詳細狀態
+                for (const itemId in taskData.items) {
+                    const itemData = taskData.items[itemId];
+                    const card = document.getElementById(`card-${itemId}`);
+                    if (!card) continue;
+
+                    const statusMap = {
+                        'PROCESSING_ANALYSIS': { text: '🤖 分析中...', class: 'status-downloading' },
+                        'COMPLETED_ANALYSIS': { text: '✅ 分析完成', class: 'status-downloaded' },
+                        'FAILED': { text: '❌ 失敗', class: 'status-failed' },
+                    };
+                    const statusInfo = statusMap[itemData.status] || { text: '❓ 未知', class: 'status-waiting' };
+
+                    // 更新右上角狀態徽章
+                    const statusBadge = card.querySelector('.item-status');
+                    statusBadge.textContent = statusInfo.text;
+                    statusBadge.className = `item-status ${statusInfo.class}`;
+
+                    // 更新 OCR 和 AI 狀態
+                    card.querySelector('.ocr-status').innerHTML = renderAnalysisStatus(itemData.ocr_status || 'pending');
+                    card.querySelector('.ai-status').innerHTML = renderAnalysisStatus(itemData.ai_status || 'pending');
+
+                    // 更新錯誤訊息
+                    const errorDiv = card.querySelector('.error-message');
+                    if (itemData.status === 'FAILED' && itemData.error_message) {
+                        errorDiv.innerHTML = `<strong>錯誤:</strong> ${itemData.error_message}`;
+                        errorDiv.style.display = 'block';
+                    } else {
+                        errorDiv.style.display = 'none';
+                    }
+                }
             };
 
             // --- 根據選取狀態更新 UI ---
@@ -217,18 +234,19 @@
                 if (!currentTaskId) return;
 
                 try {
-                    // (Jules): 將 API 端點從舊的 download_status 改為新的通用 status 端點
                     const response = await fetch(`/api/essay_performance/status/${currentTaskId}`);
                     if (!response.ok) {
                         throw new Error(`伺服器錯誤: ${response.status}`);
                     }
                     const data = await response.json();
-                    render(data);
+                    updateTaskStatusInUI(data); // (Jules): 改為呼叫僅更新狀態的函式
 
                     if (data.status === 'COMPLETED') {
                         clearInterval(statusInterval);
-                        statusInterval = null; // 重置計時器 ID 很重要
+                        statusInterval = null;
                         console.log('任務完成，停止輪詢。');
+                        // (Jules): 任務完成後，重新載入整個列表以同步最終狀態
+                        await initialPageLoad();
                     }
                 } catch (error) {
                     summaryStatusEl.textContent = `輪詢狀態失敗: ${error.message}`;
@@ -266,25 +284,21 @@
                 }
             };
 
-            // --- 頁面初始載入 ---
-            const initialPageLoad = () => {
-                const params = new URLSearchParams(window.location.search);
-                const idsParam = params.get('ids');
-                if (!idsParam) {
-                    summaryStatusEl.textContent = '錯誤：URL 中缺少有效的 "ids" 參數。';
-                    return;
+            // --- 頁面初始載入 (Jules @ 2025-10-10) 重構 ---
+            const initialPageLoad = async () => {
+                summaryStatusEl.textContent = '正在從資料庫載入所有可處理的項目...';
+                try {
+                    const response = await fetch('/api/essay_performance/processing_items');
+                    if (!response.ok) {
+                        const errorData = await response.json();
+                        throw new Error(errorData.detail || '無法載入項目');
+                    }
+                    const items = await response.json();
+                    renderItemList(items); // 使用新的渲染函式
+                } catch (error) {
+                    summaryStatusEl.textContent = `載入頁面時發生錯誤: ${error.message}`;
+                    console.error('載入頁面時發生錯誤:', error);
                 }
-                const ids = idsParam.split(',').map(id => parseInt(id.trim())).filter(id => !isNaN(id));
-                if (ids.length === 0) {
-                    summaryStatusEl.textContent = '錯誤：未提供有效的項目 ID。';
-                    return;
-                }
-                // 啟動初始的下載任務
-                startTask(
-                    '/api/essay_performance/start_download',
-                    { ids: ids },
-                    `正在向伺服器請求開始處理 ${ids.length} 個項目...`
-                );
             };
 
             // --- 事件監聽器設定 ---

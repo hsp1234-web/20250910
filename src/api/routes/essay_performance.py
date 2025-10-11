@@ -90,6 +90,54 @@ async def proxy_ingest_text(
         log.error(f"代理請求時發生未預期錯誤: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="代理請求時發生內部錯誤。")
 
+
+# --- 依賴注入 ---
+# 這些函式會被 FastAPI 用來提供共享的資源實例給 API 端點
+# (Jules @ 2025-10-11) 修正 NameError：將 get_db_client 移至使用它的路由之前。
+def get_db_client():
+    """提供一個 DBClient 的共享實例。"""
+    # 這裡可以根據需要實現更複雜的生命週期管理
+    # 但對於 DBClient 來說，其內部的 httpx.Client 已經管理了連線池
+    return DBClient()
+
+
+@router.get("/processing_items", summary="獲取所有可進行AI處理的項目")
+async def get_all_processing_items(db_client: DBClient = Depends(get_db_client)):
+    """
+    從資料庫中獲取所有狀態為 'downloaded' 的項目，這些項目已準備好或正在進行本地 AI 處理。
+    (Jules @ 2025-10-10) 新增此端點以解決「本地AI處理」頁面在重新載入後只顯示當前任務項目的問題。
+    """
+    try:
+        # 獲取所有已成功下載的項目
+        # 這些項目是 AI 處理頁面的資料來源
+        items = db_client.get_urls_by_statuses(statuses=['downloaded'])
+        # 預設按 ID 降序排序，讓最新的項目顯示在最前面
+        if items:
+            return sorted(items, key=lambda item: item.get('id', 0), reverse=True)
+        return []
+    except Exception as e:
+        log.error(f"從資料庫獲取可處理項目時發生錯誤: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="無法從資料庫讀取可處理的項目清單。")
+
+
+@router.get("/items", summary="獲取所有已擷取的項目")
+async def get_all_ingested_items(db_client: DBClient = Depends(get_db_client)):
+    """
+    從資料庫中獲取所有已透過文字擷取功能處理過的項目。
+    (Jules @ 2025-10-10) 新增此端點以解決前端列表在重新載入後消失的問題。
+    """
+    try:
+        # 使用 get_filtered_urls()，不帶任何參數以獲取所有紀錄
+        all_items = db_client.get_filtered_urls()
+        # 預設按 ID 降序排序，讓最新的項目顯示在最前面
+        if all_items:
+            return sorted(all_items, key=lambda item: item.get('id', 0), reverse=True)
+        return []
+    except Exception as e:
+        log.error(f"從資料庫獲取小作文項目時發生錯誤: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="無法從資料庫讀取項目清單。")
+
+
 # --- 非同步下載功能 (計畫 15-4a) ---
 
 # --- 資料模型 ---
@@ -106,15 +154,6 @@ class StartAnalysisRequest(BaseModel):
 
 class StartAnalysisResponse(BaseModel):
     task_id: str = Field(..., description="用於追蹤分析進度的唯一任務ID")
-
-# --- 依賴注入 ---
-# 這些函式會被 FastAPI 用來提供共享的資源實例給 API 端點
-
-def get_db_client():
-    """提供一個 DBClient 的共享實例。"""
-    # 這裡可以根據需要實現更複雜的生命週期管理
-    # 但對於 DBClient 來說，其內部的 httpx.Client 已經管理了連線池
-    return DBClient()
 
 # --- 背景任務邏輯 ---
 def run_download_pipeline(task_id: str, item_ids: List[int], db_client: DBClient, task_manager):
