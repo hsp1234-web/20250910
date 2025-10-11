@@ -23,61 +23,49 @@ import uuid
 import threading
 from typing import Dict, Any, List
 
-import json
-from src.db.client import DBClient
-
 class TaskManager:
     """管理背景任務狀態的類別。"""
 
-    def __init__(self, db_client: DBClient):
-        """
-        初始化 TaskManager。
-        (Jules @ 2025-10-11) 新增：注入 DBClient 以便查詢初始狀態。
-        """
+    def __init__(self):
+        """初始化 TaskManager。"""
         self._tasks: Dict[str, Dict[str, Any]] = {}
         self._lock = threading.Lock()
-        self.db_client = db_client
 
     def create_task(self, item_ids: List[int], context_item_ids: List[int] = None) -> str:
         """
-        (Jules @ 2025-10-11) 重構：為給定的項目 ID 列表創建一個新的任務，並從資料庫讀取其初始狀態。
+        為給定的項目 ID 列表創建一個新的任務。
+        (Jules): 增強版，可以接收一個包含所有上下文項目的 ID 列表。
+
+        Args:
+            item_ids (List[int]): 需要 actively 處理的項目 ID 列表。
+            context_item_ids (List[int], optional): 包含所有應在任務中追蹤的項目的 ID 列表。
+                                                    如果為 None，則只追蹤 item_ids。
+
+        Returns:
+            str: 新創建任務的唯一 task_id。
         """
         task_id = str(uuid.uuid4())
+
+        # 如果沒有提供上下文，則預設為只處理 item_ids
         all_ids = context_item_ids if context_item_ids is not None else item_ids
-
-        initial_items_state = {}
-        for item_id in all_ids:
-            # 從資料庫獲取每個項目的最新狀態
-            db_record = self.db_client.get_url_by_id(item_id)
-            if db_record:
-                history_str = db_record.get('processing_history')
-                history = json.loads(history_str) if history_str else []
-
-                # 將資料庫紀錄直接作為初始狀態，確保資訊一致
-                initial_state = dict(db_record)
-                initial_state['processing_history'] = history
-
-                # 如果這個項目是本次要主動處理的，將其 status 設為 WAITING
-                if item_id in item_ids:
-                    initial_state['status'] = "WAITING"
-                else:
-                    # 否則，根據其歷史紀錄的最後一筆決定其顯示狀態
-                    last_event_status = history[-1]['status'] if history else "PENDING"
-                    initial_state['status'] = last_event_status
-
-                initial_items_state[item_id] = initial_state
-            else:
-                # 如果在資料庫中找不到，則使用預設值
-                initial_items_state[item_id] = {
-                    "id": item_id, "title": "錯誤：找不到紀錄", "author": "N/A",
-                    "message_date": "N/A", "message_time": "N/A",
-                    "status": "ERROR", "error_message": "在資料庫中找不到此項目"
-                }
 
         with self._lock:
             self._tasks[task_id] = {
                 "status": "PROCESSING",
-                "items": initial_items_state
+                "items": {
+                    item_id: {
+                        "id": item_id,
+                        "title": "正在查詢...",
+                        "author": "N/A",
+                        "message_date": "N/A",
+                        "message_time": "N/A",
+                        # (Jules): 只有在 item_ids 中的項目才設定為 WAITING，其他的保持原樣或設為 PENDING。
+                        # 為了簡化，我們這裡假設所有不在 item_ids 中的項目都是初始狀態。
+                        # 在一個更複雜的系統中，我們可能會從資料庫查詢它們的當前狀態。
+                        "status": "WAITING" if item_id in item_ids else "PENDING",
+                        "error_message": None
+                    } for item_id in all_ids
+                }
             }
         return task_id
 
@@ -124,7 +112,7 @@ class TaskManager:
                 self._tasks[task_id]['status'] = 'COMPLETED'
 
 
-# --- 單例模式 (Jules @ 2025-10-11) 重構 ---
+# --- 單例模式 ---
 _manager_instance = None
 _manager_lock = threading.Lock()
 
@@ -132,13 +120,10 @@ def get_manager() -> TaskManager:
     """
     獲取 TaskManager 的單一實例。
     使用雙重檢查鎖定模式確保線程安全。
-    現在會自動初始化並注入 DBClient。
     """
     global _manager_instance
     if _manager_instance is None:
         with _manager_lock:
             if _manager_instance is None:
-                # 在此處建立 DBClient 的一個實例並傳遞給 TaskManager
-                db_client = DBClient()
-                _manager_instance = TaskManager(db_client=db_client)
+                _manager_instance = TaskManager()
     return _manager_instance

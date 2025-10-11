@@ -218,15 +218,19 @@
             const updateTaskStatusInUI = (taskData) => {
                 const isOverallCompleted = taskData.status === 'COMPLETED';
                 const timeElapsed = startTime ? ((new Date() - startTime) / 1000).toFixed(1) : 0;
-
-                // 渲染卡片
-                const itemsToRender = Object.values(taskData.items);
-                renderItemList(itemsToRender);
-
                 if (isOverallCompleted) {
                     summaryStatusEl.textContent = `全部處理完成！ | 總耗時: ${timeElapsed} 秒`;
                 } else {
                     summaryStatusEl.textContent = `正在處理中... | 總耗時: ${timeElapsed} 秒`;
+                }
+
+                for (const itemId in taskData.items) {
+                    const itemData = taskData.items[itemId];
+                    const card = document.getElementById(`card-${itemId}`);
+                    if (!card) continue;
+
+                    // 重新渲染整個卡片以更新所有資訊
+                    card.innerHTML = renderCard(itemData);
                 }
             };
 
@@ -249,25 +253,11 @@
                     const data = await response.json();
                     updateTaskStatusInUI(data); // (Jules): 改為呼叫僅更新狀態的函式
 
-                    // 檢查這是否是一個有效的處理任務，或者只是一個初始化的同步任務
-                    const hasActiveItems = Object.values(data.items).some(item =>
-                        ['WAITING', 'DOWNLOADING', 'PROCESSING_ANALYSIS'].includes(item.status)
-                    );
-
-                    if (data.status === 'COMPLETED' && !hasActiveItems) {
-                         // 這是一個初始同步任務，完成後停止輪詢即可
+                    if (data.status === 'COMPLETED') {
                         clearInterval(statusInterval);
                         statusInterval = null;
-                        currentTaskId = null; // 清除任務ID
-                        console.log('初始狀態同步完成，停止輪詢。');
-                        summaryStatusEl.textContent = `找到 ${Object.keys(data.items).length} 個可處理的項目。請選取後開始分析。`;
-                    } else if (data.status === 'COMPLETED') {
-                        // 這是一個真正的處理任務完成了
-                        clearInterval(statusInterval);
-                        statusInterval = null;
-                        currentTaskId = null;
                         console.log('任務完成，停止輪詢。');
-                        // 重新載入整個列表以同步最終狀態
+                        // (Jules): 任務完成後，重新載入整個列表以同步最終狀態
                         await initialPageLoad();
                     }
                 } catch (error) {
@@ -310,27 +300,14 @@
             const initialPageLoad = async () => {
                 summaryStatusEl.textContent = '正在從資料庫載入所有可處理的項目...';
                 try {
-                    const response = await fetch('/api/essay_performance/processing_items');
+                    // (Jules @ 2025-10-11) 修正：改為呼叫 /items 端點以獲取所有項目，包含已完成的。
+                    const response = await fetch('/api/essay_performance/items');
                     if (!response.ok) {
                         const errorData = await response.json();
                         throw new Error(errorData.detail || '無法載入項目');
                     }
                     const items = await response.json();
-
-                    // (Jules @ 2025-10-11) 核心邏輯變更：
-                    // 不再由前端直接渲染，而是觸發一次後端任務來獲取包含所有上下文的初始狀態。
-                    if (items && items.length > 0) {
-                        const allItemIds = items.map(item => item.id);
-                        // 建立一個 "空" 任務，只為了獲取所有項目的當前狀態
-                        await startTask(
-                            '/api/essay_performance/start_full_analysis',
-                            { ids: [], all_item_ids: allItemIds },
-                            '正在同步所有項目狀態...'
-                        );
-                    } else {
-                        renderItemList([]); // 處理沒有項目的情況
-                    }
-
+                    renderItemList(items); // 使用新的渲染函式
                 } catch (error) {
                     summaryStatusEl.textContent = `載入頁面時發生錯誤: ${error.message}`;
                     console.error('載入頁面時發生錯誤:', error);
