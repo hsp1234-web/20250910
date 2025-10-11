@@ -266,12 +266,12 @@
                 }
             };
 
-            // --- 頁面初始載入 ---
+            // --- 頁面初始載入 (Jules @ 2025-10-10 重構) ---
             const initialPageLoad = () => {
                 const params = new URLSearchParams(window.location.search);
                 const idsParam = params.get('ids');
                 if (!idsParam) {
-                    summaryStatusEl.textContent = '錯誤：URL 中缺少有效的 "ids" 參數。';
+                    summaryStatusEl.textContent = '錯誤：URL 中缺少有效的 "ids" 參數。無法載入項目狀態。';
                     return;
                 }
                 const ids = idsParam.split(',').map(id => parseInt(id.trim())).filter(id => !isNaN(id));
@@ -279,11 +279,15 @@
                     summaryStatusEl.textContent = '錯誤：未提供有效的項目 ID。';
                     return;
                 }
-                // 啟動初始的下載任務
+
+                // 新流程：
+                // 1. 不再盲目觸發下載，而是先為這些 ID 建立一個純追蹤任務。
+                // 2. 拿到 task_id 後，立即開始輪詢狀態。
+                // 這樣無論項目是新的、已下載的還是已分析的，都能正確顯示其當前狀態。
                 startTask(
-                    '/api/essay_performance/start_download',
+                    '/api/essay_performance/create_polling_task',
                     { ids: ids },
-                    `正在向伺服器請求開始處理 ${ids.length} 個項目...`
+                    `正在初始化 ${ids.length} 個項目的狀態追蹤...`
                 );
             };
 

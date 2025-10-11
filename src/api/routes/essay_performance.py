@@ -316,6 +316,34 @@ async def start_download(
     return {"task_id": task_id}
 
 
+# (Jules @ 2025-10-10) 新增一個輕量級端點，僅用於建立追蹤任務而不啟動任何背景工作。
+class CreatePollingTaskRequest(BaseModel):
+    ids: List[int] = Field(..., description="要追蹤的項目ID列表")
+
+class CreatePollingTaskResponse(BaseModel):
+    task_id: str = Field(..., description="用於追蹤狀態的唯一任務ID")
+
+@router.post("/create_polling_task", response_model=CreatePollingTaskResponse, summary="建立僅供輪詢的任務")
+async def create_polling_task(
+    request: CreatePollingTaskRequest,
+    task_manager = Depends(get_task_manager)
+):
+    """
+    接收一個 ID 列表，為其建立一個任務 ID，但不觸發任何背景處理。
+    此端點主要用於讓前端在處理已存在項目時，能獲取一個 task_id 來輪詢其當前狀態。
+    """
+    if not request.ids:
+        raise HTTPException(status_code=400, detail="ID 列表不可為空。")
+
+    log.info(f"收到 /create_polling_task 請求，為 {len(request.ids)} 個 ID 建立一個追蹤任務。")
+    # 建立一個任務，但將所有 ID 都放在 context_item_ids 中，表示它們是初始狀態的一部分。
+    # 真正的 "item_ids" (要處理的 ID) 留空，這樣就不會觸發任何操作。
+    task_id = task_manager.create_task(item_ids=[], context_item_ids=request.ids)
+    log.info(f"已為追蹤請求建立任務，Task ID: {task_id}")
+
+    return {"task_id": task_id}
+
+
 @router.post("/start_analysis", response_model=StartAnalysisResponse, summary="啟動非同步文件分析")
 async def start_analysis(
     request: StartAnalysisRequest,

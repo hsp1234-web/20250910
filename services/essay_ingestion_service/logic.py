@@ -117,7 +117,8 @@ def parse_chat_log(text: str) -> List[Dict[str, Optional[str]]]:
 
 def save_parsed_data_to_db(parsed_data: List[Dict], source_text: str) -> List[Dict]:
     """
-    [V4] 將解析後的資料存入資料庫，並查詢存入的詳細資訊後回傳。
+    (Jules @ 2025-10-10) 將解析後的資料存入資料庫，並**總是**查詢所有相關項目的詳細資訊後回傳。
+    此修改解決了當所有項目都已存在時，前端無法接收到項目列表的問題。
     """
     if not parsed_data:
         log.info("沒有要儲存的資料。")
@@ -137,22 +138,31 @@ def save_parsed_data_to_db(parsed_data: List[Dict], source_text: str) -> List[Di
         for item in parsed_data
     ]
 
+    # 無論是否為新項目，我們都需要所有相關項目的 URL 列表以進行後續查詢。
     url_list = [item['url'] for item in parsed_data if item.get('url')]
+    if not url_list:
+        log.warning("解析出的資料中不包含任何有效的 URL。")
+        return []
 
     try:
         db_client = DBClient()
+        # 步驟 1: 嘗試新增資料。DBClient 會處理重複的 URL。
         inserted_count = db_client.add_new_urls(parsed_data=data_to_send, source_text=source_text)
 
         if inserted_count > 0:
             log.info(f"成功透過 db_manager 儲存了 {inserted_count} 筆新資料。")
-            log.info(f"正在查詢剛存入的 {len(url_list)} 筆資料的詳細資訊...")
-            inserted_items_details = db_client.get_urls_by_url_list(url_list)
-            log.info(f"成功查詢到 {len(inserted_items_details)} 筆詳細資訊。")
-            return inserted_items_details
         else:
-            log.info("沒有新增任何資料（可能均為重複項）。")
-            return []
+            log.info("沒有新增任何資料（所有項目均為重複項）。")
+
+        # 步驟 2: 無論是否新增了資料，都根據 URL 列表查詢所有相關項目的最新資訊。
+        # 這是解決問題的關鍵：確保即使是已存在的項目，也能將其資訊回傳給前端。
+        log.info(f"正在查詢 {len(url_list)} 個相關項目的詳細資訊...")
+        all_items_details = db_client.get_urls_by_url_list(url_list)
+        log.info(f"成功查詢到 {len(all_items_details)} 筆詳細資訊。")
+
+        return all_items_details
 
     except Exception as e:
-        log.error(f"呼叫 DBClient 時發生嚴重錯誤: {e}", exc_info=True)
+        log.error(f"在儲存或查詢資料庫時發生嚴重錯誤: {e}", exc_info=True)
+        # 在發生錯誤時回傳空列表，以防止下游出現問題。
         return []
