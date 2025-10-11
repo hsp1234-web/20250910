@@ -17,7 +17,7 @@ from src.core.service_discovery import get_service_url
 
 # --- 日誌與常數設定 ---
 log = logging.getLogger(__name__)
-MODEL_NAME = "gemma2:2b"
+MODEL_NAME = "qwen2:1.5b"
 DOWNLOAD_DIR = Path(__file__).parent / "downloads"
 DOWNLOAD_DIR.mkdir(exist_ok=True)
 
