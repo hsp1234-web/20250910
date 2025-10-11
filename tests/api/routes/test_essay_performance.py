@@ -21,10 +21,10 @@ except ImportError:
 def client():
     """
     建立一個 TestClient 實例。
-    透過在 fixture 內部延遲 TestClient 的實例化，
-    我們確保 conftest.py 中的 autouse mocks 已經生效。
     """
-    # 延遲匯入和實例化，確保 mock 已被應用
+    # 在測試前確保資料庫已初始化
+    from src.db import database
+    database.initialize_database()
     from src.api.api_server import app
     with TestClient(app) as test_client:
         yield test_client
@@ -34,25 +34,14 @@ def client():
 def mock_httpx_post(mocker):
     """
     一個更穩健的 fixture，直接 mock 掉 httpx.AsyncClient 的 post 方法。
-    這能確保任何地方的 httpx 呼叫都會被攔截。
     """
-    # 建立一個非同步 mock 來代表 post 方法
     mock_post_method = AsyncMock()
-
-    # 我們需要 mock AsyncClient 的 __aenter__ (即 'async with' 的進入點)
-    # 讓它回傳一個帶有我們 mock_post_method 的物件
     mock_client_instance = AsyncMock()
     mock_client_instance.post = mock_post_method
-
-    # 使用 mocker.patch 來替換掉整個 httpx.AsyncClient 類別
-    # 當 httpx.AsyncClient() 被呼叫時，它會回傳一個實例，
-    # 該實例的 __aenter__ 方法被設定為回傳我們完全控制的 mock_client_instance
     mocker.patch(
         "httpx.AsyncClient.__aenter__",
         return_value=mock_client_instance
     )
-
-    # fixture 回傳這個 post 方法的 mock，以便在測試中進行設定和斷言
     return mock_post_method
 
 
@@ -75,7 +64,7 @@ def test_proxy_ingest_text_success(client: TestClient, mock_httpx_post: AsyncMoc
     assert response.status_code == 200
     assert response.json()["message"] == "來自模擬微服務的回應"
     mock_httpx_post.assert_called_once_with(
-        "http://localhost:8001/ingest",
+        "http://127.0.0.1:8001/ingest",
         json=test_payload,
         timeout=30.0
     )

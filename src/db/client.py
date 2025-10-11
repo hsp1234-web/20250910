@@ -174,6 +174,12 @@ class DBClient:
         """
         return self._send_request("get_urls_by_url_list", {"url_list": url_list})
 
+    def get_urls_by_id_list(self, id_list: list[int]) -> list[dict]:
+        """
+        (Jules @ 2025-10-10) 新增：根據 ID 列表獲取詳細資訊。
+        """
+        return self._send_request("get_urls_by_id_list", {"id_list": id_list})
+
     def get_system_logs(self, levels: list[str] = None, sources: list[str] = None) -> list[dict]:
         return self._send_request("get_system_logs", {
             "levels": levels or [],

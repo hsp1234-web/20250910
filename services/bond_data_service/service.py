@@ -56,7 +56,10 @@ class StressIndexService:
         if df.empty:
             return None
 
-        df['spread_10y2y'] = df.get('dgs10') - df.get('dgs2')
+        if 'dgs10' in df and 'dgs2' in df:
+            df['spread_10y2y'] = df['dgs10'] - df['dgs2']
+        else:
+            df['spread_10y2y'] = np.nan
         df['sofr_ma60'] = df['sofr'].rolling(window=60, min_periods=30).mean()
         df['sofr_dev'] = df['sofr'] - df['sofr_ma60']
         df['pos_res_ratio'] = df.get('dealer_net_positions') / df.get('wresbal', 0).replace(0, np.nan)

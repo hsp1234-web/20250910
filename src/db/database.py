@@ -380,6 +380,32 @@ def set_app_state(key: str, value: str) -> bool:
         if conn:
             conn.close()
 
+def get_urls_by_id_list(id_list: list[int]) -> list[dict]:
+    """
+    (Jules @ 2025-10-10) 新增：根據 ID 列表獲取所有紀錄的詳細資訊。
+    """
+    if not id_list:
+        return []
+
+    conn = get_db_connection()
+    if not conn: return []
+
+    try:
+        placeholders = ','.join(['?'] * len(id_list))
+        # 查詢所有前端渲染可能需要的欄位
+        sql = f"SELECT * FROM extracted_urls WHERE id IN ({placeholders})"
+
+        cursor = conn.cursor()
+        cursor.execute(sql, id_list)
+        rows = cursor.fetchall()
+        return [dict(row) for row in rows]
+    except sqlite3.Error as e:
+        log.error(f"❌ 根據 ID 列表 {id_list} 查詢時發生錯誤: {e}", exc_info=True)
+        return []
+    finally:
+        if conn:
+            conn.close()
+
 def get_app_state(key: str) -> str | None:
     """
     根據鍵從 app_state 表中獲取值。

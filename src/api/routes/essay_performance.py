@@ -174,88 +174,119 @@ def run_download_pipeline(task_id: str, item_ids: List[int], db_client: DBClient
 
 
 # --- 背景任務邏輯 (分析) ---
-def run_analysis_pipeline(task_id: str, item_ids: List[int], db_client: DBClient, task_manager):
+# (Jules @ 2025-10-10) 重構 run_analysis_pipeline 以支援並行處理和更精確的資料庫狀態更新
+async def _analyze_single_item(item_id: int, db_client: DBClient, task_manager, task_id: str, client: httpx.AsyncClient, target_url: str):
     """
-    在背景執行緒中運行的分析管線。
+    (非同步輔助函式) 處理單一項目的完整分析流程。
     """
-    log.info(f"[任務 {task_id}] 背景分析管線已啟動，共 {len(item_ids)} 個項目。")
-
     try:
-        # 取得 essay_ingestion_service 的 URL，如果失敗則直接中止
+        # 1. 從資料庫查詢項目詳情，特別是本地路徑和當前狀態
+        url_record = db_client.get_url_by_id(item_id)
+        if not url_record or not url_record.get('local_path'):
+            raise ValueError(f"ID {item_id} 的紀錄不完整或尚未下載 (缺少 local_path)。")
+
+        # 狀態鎖定：如果項目已在處理或已完成，則跳過
+        if url_record.get('processing_status') in ['ANALYZING', 'COMPLETED']:
+            log.warning(f"[任務 {task_id}] 項目 {item_id} 的狀態為 {url_record.get('processing_status')}，跳過重複分析。")
+            return
+
+        local_path = url_record['local_path']
+        log.info(f"[任務 {task_id}] 開始處理項目 ID: {item_id}，檔案路徑: {local_path}")
+
+        # 2. 立即更新資料庫和任務狀態為「分析中」
+        db_client.update_url(item_id, {
+            "processing_status": "ANALYZING",
+            "ocr_status": "processing",
+            "ai_status": "processing",
+            "processing_started_at": "CURRENT_TIMESTAMP"
+        })
+        task_manager.update_item_status(task_id, item_id, "PROCESSING_ANALYSIS")
+
+        # 3. 呼叫擷取服務進行分析
+        response = await client.post(target_url, json={"file_path": local_path}, timeout=600.0)
+        response.raise_for_status()
+
+        # 4. 分析成功，處理回傳結果
+        analysis_result = response.json()
+        log.info(f"[任務 {task_id}] 項目 {item_id} 分析成功，收到分析資料。")
+
+        analysis_data = analysis_result.get("analysis_data", {})
+        new_title = analysis_data.get("title")
+        new_author = analysis_data.get("author")
+
+        updates_for_db = {
+            "processing_status": "COMPLETED",
+            "ocr_status": "completed",
+            "ai_status": "completed",
+            "extracted_text": analysis_result.get("extracted_text"),
+            "extracted_image_paths": json.dumps(analysis_result.get("image_paths", [])),
+            "last_error_details": None,
+            "processing_completed_at": "CURRENT_TIMESTAMP"
+        }
+
+        if new_title and "無法辨識" not in new_title:
+            updates_for_db["title"] = new_title
+        if new_author and "無法辨識" not in new_author:
+            updates_for_db["author"] = new_author
+
+        db_client.update_url(item_id, updates_for_db)
+
+        # 5. 更新任務管理器狀態
+        details_for_task_manager = {"title": new_title, "author": new_author}
+        task_manager.update_item_status(task_id, item_id, "COMPLETED_ANALYSIS", details=details_for_task_manager)
+
+    except Exception as e:
+        error_msg = str(e)
+        log.error(f"[任務 {task_id}] 處理項目 {item_id} 的分析時發生錯誤: {error_msg}", exc_info=True)
+        try:
+            db_client.update_url(item_id, {
+                "processing_status": "FAILED",
+                "ocr_status": "failed",
+                "ai_status": "failed",
+                "last_error_details": error_msg,
+                "processing_completed_at": "CURRENT_TIMESTAMP"
+            })
+            task_manager.update_item_status(task_id, item_id, "FAILED", details={"error_message": error_msg})
+        except Exception as db_err:
+            log.error(f"[任務 {task_id}] 在記錄錯誤資訊至資料庫時再次發生錯誤: {db_err}")
+
+
+async def run_analysis_pipeline_async(task_id: str, item_ids: List[int], db_client: DBClient, task_manager):
+    """
+    (非同步) 在背景執行緒中運行的分析管線，使用 asyncio.gather 實現並行處理。
+    """
+    log.info(f"[任務 {task_id}] 背景非同步分析管線已啟動，共 {len(item_ids)} 個項目。")
+    try:
         service_base_url = get_service_url_wrapper(SERVICE_NAME)
         target_url = f"{service_base_url}/process-local-document"
         log.info(f"[任務 {task_id}] 將使用擷取服務端點: {target_url}")
     except HTTPException as e:
         log.error(f"[任務 {task_id}] 無法啟動分析管線，因為找不到擷取服務: {e.detail}")
-        # 將所有項目的狀態都標記為失敗
         for item_id in item_ids:
             task_manager.update_item_status(task_id, item_id, "FAILED", details={"error_message": "分析服務不可用"})
         task_manager.complete_task(task_id)
         return
 
-    # 使用同步的 httpx Client，因為此函式本身就在背景執行緒中運行
-    with httpx.Client(timeout=600.0) as client:
-        for item_id in item_ids:
-            try:
-                # 1. 從資料庫查詢項目詳情，特別是本地路徑
-                url_record = db_client.get_url_by_id(item_id)
-                if not url_record or not url_record.get('local_path'):
-                    raise ValueError(f"ID {item_id} 的紀錄不完整或尚未下載 (缺少 local_path)。")
-
-                local_path = url_record['local_path']
-                source_url = url_record['url']
-                log.info(f"[任務 {task_id}] 正在處理項目 ID: {item_id}，檔案路徑: {local_path}")
-
-                # 2. 更新資料庫和任務狀態為「處理中」
-                db_client.update_url(item_id, {"ocr_status": "processing", "ai_status": "processing"})
-                task_manager.update_item_status(task_id, item_id, "PROCESSING_ANALYSIS")
-
-                # 3. 呼叫擷取服務進行分析 (Jules @ 2025-10-09: 更新 API call，只傳送 file_path)
-                response = client.post(target_url, json={"file_path": local_path})
-                response.raise_for_status() # 如果狀態碼不是 2xx，會拋出異常
-
-                # 4. 分析成功，處理回傳結果並更新資料庫
-                analysis_result = response.json()
-                log.info(f"[任務 {task_id}] 項目 {item_id} 分析成功，收到分析資料。")
-
-                # 從分析結果中提取核心資料
-                analysis_data = analysis_result.get("analysis_data", {})
-
-                # (Jules): 根據新需求，從 analysis_data 中提取 title 和 author
-                new_title = analysis_data.get("title")
-                new_author = analysis_data.get("author")
-
-                updates_for_db = {
-                    "ocr_status": "completed",
-                    "ai_status": "completed",
-                    "extracted_text": analysis_result.get("extracted_text"),
-                    "extracted_image_paths": json.dumps(analysis_result.get("image_paths", [])),
-                    "last_error_details": None # 清除舊的錯誤訊息
-                }
-
-                # (Jules): 只有在 LLM 確實回傳了有效值時才更新，避免覆蓋掉舊資料
-                if new_title and "無法辨識" not in new_title:
-                    updates_for_db["title"] = new_title
-                if new_author and "無法辨識" not in new_author:
-                    updates_for_db["author"] = new_author
-
-                db_client.update_url(item_id, updates_for_db)
-
-                # (Jules): 在任務管理器中也更新這些資訊，以便前端能立即看到
-                details_for_task_manager = {
-                    "title": new_title,
-                    "author": new_author
-                }
-                task_manager.update_item_status(task_id, item_id, "COMPLETED_ANALYSIS", details=details_for_task_manager)
-
-            except Exception as e:
-                error_msg = str(e)
-                log.error(f"[任務 {task_id}] 處理項目 {item_id} 的分析時發生錯誤: {error_msg}", exc_info=True)
-                db_client.update_url(item_id, {"ocr_status": "failed", "ai_status": "failed", "last_error_details": error_msg})
-                task_manager.update_item_status(task_id, item_id, "FAILED", details={"error_message": error_msg})
+    async with httpx.AsyncClient() as client:
+        # 建立所有項目的非同步任務
+        tasks = [
+            _analyze_single_item(item_id, db_client, task_manager, task_id, client, target_url)
+            for item_id in item_ids
+        ]
+        # 並行執行所有任務
+        await asyncio.gather(*tasks)
 
     task_manager.complete_task(task_id)
-    log.info(f"[任務 {task_id}] 所有分析項目處理完畢，管線結束。")
+    log.info(f"[任務 {task_id}] 所有分析項目處理完畢，非同步管線結束。")
+
+
+def run_analysis_pipeline(task_id: str, item_ids: List[int], db_client: DBClient, task_manager):
+    """
+    用於啟動非同步分析管線的同步包裝函式。
+    FastAPI 的 BackgroundTasks 需要一個同步的進入點。
+    """
+    import asyncio
+    asyncio.run(run_analysis_pipeline_async(task_id, item_ids, db_client, task_manager))
 
 
 # --- API 端點 ---
@@ -319,38 +350,74 @@ async def get_task_status(
 ):
     """
     根據任務ID，查詢並回傳一個任務的當前狀態。
-    - 如果任務ID不存在，回傳 404 Not Found。
-    - 回傳的資料包含整個任務的總體狀態以及每個子項目的詳細狀態，
-      並會從資料庫補充 OCR 和 AI 分析狀態等永久性資料。
+    (Jules @ 2025-10-10) 重構：狀態的唯一真實來源是資料庫。此函式現在直接查詢資料庫。
     """
     log.debug(f"收到對任務 {task_id} 的通用狀態查詢請求。")
-    status = task_manager.get_task_status(task_id)
-    if status is None:
+    task_info = task_manager.get_task_status(task_id)
+    if task_info is None:
         log.warning(f"查詢了不存在的任務ID: {task_id}")
         raise HTTPException(status_code=404, detail=f"找不到任務ID: {task_id}")
 
-    # 從資料庫獲取永久性狀態並合併到回應中
-    if status.get('items'):
-        for item_id_str, item_data in status['items'].items():
-            try:
-                item_id = int(item_id_str)
-                db_record = db_client.get_url_by_id(item_id)
-                if db_record:
-                    # 合併資料庫中的狀態
-                    item_data['ocr_status'] = db_record.get('ocr_status', 'pending')
-                    item_data['ai_status'] = db_record.get('ai_status', 'pending')
+    # 1. 從任務管理器獲取此任務關聯的所有 ID
+    all_item_ids = task_info.get('context_item_ids', [])
+    if not all_item_ids:
+        log.warning(f"任務 {task_id} 中沒有找到任何關聯的項目 ID。")
+        # 即使沒有ID，也回傳一個有效的空任務狀態
+        return {
+            "task_id": task_id,
+            "status": "COMPLETED", # 如果沒有項目，可視為已完成
+            "items": {}
+        }
 
-                    # 確保即使任務管理器中沒有，也能從資料庫填充基本資訊
-                    item_data.setdefault('title', db_record.get('title', '讀取中...'))
-                    item_data.setdefault('author', db_record.get('author', '未知作者'))
-                    item_data.setdefault('message_date', db_record.get('message_date', ''))
-                    item_data.setdefault('message_time', db_record.get('message_time', ''))
-                else:
-                    item_data['ocr_status'] = 'unknown'
-                    item_data['ai_status'] = 'unknown'
-            except (ValueError, TypeError):
-                log.warning(f"處理項目 {item_id_str} 時遇到無效的 ID。")
-                item_data['ocr_status'] = 'error'
-                item_data['ai_status'] = 'error'
+    # 2. 直接從資料庫批量查詢這些 ID 的最新狀態
+    try:
+        records = db_client.get_urls_by_id_list(all_item_ids)
+        if not records:
+            raise HTTPException(status_code=404, detail=f"在資料庫中找不到與任務 {task_id} 相關的任何項目。")
+    except Exception as e:
+        log.error(f"從資料庫查詢任務 {task_id} 的項目時出錯: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="查詢資料庫時發生錯誤。")
 
-    return status
+    # 3. 建構前端所需的回應格式
+    items_map = {}
+    is_overall_completed = True
+    for record in records:
+        item_id = record['id']
+        processing_status = record.get('processing_status', 'PENDING')
+
+        # 根據 processing_status 決定前端的總體狀態
+        # 注意：這裡的邏輯需要和前端的 `statusMap` 對應
+        ui_status = "WAITING" # 預設值
+        if processing_status == 'ANALYZING':
+            ui_status = "PROCESSING_ANALYSIS"
+            is_overall_completed = False
+        elif processing_status == 'COMPLETED':
+            ui_status = "COMPLETED_ANALYSIS"
+        elif processing_status == 'FAILED':
+            ui_status = "FAILED"
+        elif processing_status == 'DOWNLOADED':
+            ui_status = "DOWNLOADED"
+        elif processing_status == 'DOWNLOADING':
+            ui_status = 'DOWNLOADING'
+            is_overall_completed = False
+
+        if processing_status not in ['COMPLETED', 'FAILED']:
+            is_overall_completed = False
+
+        items_map[str(item_id)] = {
+            "id": item_id,
+            "status": ui_status,
+            "title": record.get('title', '讀取中...'),
+            "author": record.get('author', '未知作者'),
+            "message_date": record.get('message_date', ''),
+            "message_time": record.get('message_time', ''),
+            "ocr_status": record.get('ocr_status', 'pending'),
+            "ai_status": record.get('ai_status', 'pending'),
+            "error_message": record.get('last_error_details')
+        }
+
+    return {
+        "task_id": task_id,
+        "status": "COMPLETED" if is_overall_completed else "PROCESSING",
+        "items": items_map
+    }

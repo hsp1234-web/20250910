@@ -81,8 +81,19 @@ def initialize():
         _add_column_if_not_exists(cursor, 'extracted_urls', 'message_time', 'TEXT')
         _add_column_if_not_exists(cursor, 'extracted_urls', 'source_text', 'TEXT')
         _add_column_if_not_exists(cursor, 'extracted_urls', 'created_at', 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP')
-        _add_column_if_not_exists(cursor, 'extracted_urls', 'status', "TEXT DEFAULT 'pending'")
+        _add_column_if_not_exists(cursor, 'extracted_urls', 'status', "TEXT DEFAULT 'pending'") # 例如 'pending', 'downloaded', 'processed'
         _add_column_if_not_exists(cursor, 'extracted_urls', 'source', "TEXT")
+
+        # (Jules @ 2025-10-10) 根據新架構新增更詳細的狀態追蹤欄位
+        _add_column_if_not_exists(cursor, 'extracted_urls', 'processing_status', "TEXT DEFAULT 'PENDING'") # PENDING, DOWNLOADING, DOWNLOADED, ANALYZING, COMPLETED, FAILED
+        _add_column_if_not_exists(cursor, 'extracted_urls', 'ocr_status', "TEXT DEFAULT 'pending'") # pending, processing, completed, failed
+        _add_column_if_not_exists(cursor, 'extracted_urls', 'ai_status', "TEXT DEFAULT 'pending'") # pending, processing, completed, failed
+        _add_column_if_not_exists(cursor, 'extracted_urls', 'local_path', 'TEXT')
+        _add_column_if_not_exists(cursor, 'extracted_urls', 'last_error_details', 'TEXT')
+        _add_column_if_not_exists(cursor, 'extracted_urls', 'processing_started_at', 'TIMESTAMP')
+        _add_column_if_not_exists(cursor, 'extracted_urls', 'processing_completed_at', 'TIMESTAMP')
+        _add_column_if_not_exists(cursor, 'extracted_urls', 'extracted_text', 'TEXT')
+        _add_column_if_not_exists(cursor, 'extracted_urls', 'extracted_image_paths', 'TEXT') # 儲存為 JSON 字串
 
         connection.commit()
         print(f"\n資料庫初始化/更新成功。資料庫檔案位於: {DB_PATH}")
