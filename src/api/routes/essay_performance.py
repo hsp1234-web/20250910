@@ -104,16 +104,22 @@ def get_db_client():
 @router.get("/processing_items", summary="獲取所有可進行AI處理的項目")
 async def get_all_processing_items(db_client: DBClient = Depends(get_db_client)):
     """
-    從資料庫中獲取所有狀態為 'downloaded' 的項目，這些項目已準備好或正在進行本地 AI 處理。
-    (Jules @ 2025-10-10) 新增此端點以解決「本地AI處理」頁面在重新載入後只顯示當前任務項目的問題。
+    (Jules @ 2025-10-11) 重構：獲取所有已擷取但尚未成功完成所有處理的項目。
+    這確保了任何待處理、正在處理或處理失敗的項目都會顯示在清單上。
     """
     try:
-        # 獲取所有已成功下載的項目
-        # 這些項目是 AI 處理頁面的資料來源
-        items = db_client.get_urls_by_statuses(statuses=['downloaded'])
+        # 獲取所有已擷取的項目
+        all_items = db_client.get_filtered_urls()
+
+        # 篩選出需要顯示的項目：尚未完成 OCR 或尚未完成 AI 分析的項目
+        def is_incomplete(item):
+            return item.get('ocr_status') != 'completed' or item.get('ai_status') != 'completed'
+
+        items_to_process = [item for item in all_items if is_incomplete(item)]
+
         # 預設按 ID 降序排序，讓最新的項目顯示在最前面
-        if items:
-            return sorted(items, key=lambda item: item.get('id', 0), reverse=True)
+        if items_to_process:
+            return sorted(items_to_process, key=lambda item: item.get('id', 0), reverse=True)
         return []
     except Exception as e:
         log.error(f"從資料庫獲取可處理項目時發生錯誤: {e}", exc_info=True)
@@ -212,55 +218,52 @@ def run_download_pipeline(task_id: str, item_ids: List[int], db_client: DBClient
     log.info(f"[任務 {task_id}] 所有項目處理完畢，管線結束。")
 
 
-# --- 背景任務邏輯 (分析) ---
-def run_analysis_pipeline(task_id: str, item_ids: List[int], db_client: DBClient, task_manager):
+# --- 背景任務邏輯 (Jules @ 2025-10-11) 重構：合併下載與分析 ---
+def run_full_analysis_pipeline(task_id: str, item_ids: List[int], db_client: DBClient, task_manager):
     """
-    在背景執行緒中運行的分析管線。
+    在背景執行緒中運行的完整處理管線，包含下載和分析兩個階段。
     """
-    log.info(f"[任務 {task_id}] 背景分析管線已啟動，共 {len(item_ids)} 個項目。")
+    log.info(f"[任務 {task_id}] 完整處理管線已啟動，共 {len(item_ids)} 個項目。")
 
     try:
-        # 取得 essay_ingestion_service 的 URL，如果失敗則直接中止
         service_base_url = get_service_url_wrapper(SERVICE_NAME)
-        target_url = f"{service_base_url}/process-local-document"
-        log.info(f"[任務 {task_id}] 將使用擷取服務端點: {target_url}")
+        analysis_target_url = f"{service_base_url}/process-local-document"
+        log.info(f"[任務 {task_id}] 將使用分析服務端點: {analysis_target_url}")
     except HTTPException as e:
-        log.error(f"[任務 {task_id}] 無法啟動分析管線，因為找不到擷取服務: {e.detail}")
-        # 將所有項目的狀態都標記為失敗
+        log.error(f"[任務 {task_id}] 無法啟動管線，因為找不到擷取服務: {e.detail}")
         for item_id in item_ids:
-            task_manager.update_item_status(task_id, item_id, "FAILED", details={"error_message": "分析服務不可用"})
+            task_manager.update_item_status(task_id, item_id, "FAILED", details={"error_message": "後端分析服務不可用"})
         task_manager.complete_task(task_id)
         return
 
-    # 使用同步的 httpx Client，因為此函式本身就在背景執行緒中運行
     with httpx.Client(timeout=600.0) as client:
         for item_id in item_ids:
             try:
-                # 1. 從資料庫查詢項目詳情，特別是本地路徑
+                # --- 階段一：下載 ---
+                task_manager.update_item_status(task_id, item_id, "DOWNLOADING")
                 url_record = db_client.get_url_by_id(item_id)
-                if not url_record or not url_record.get('local_path'):
-                    raise ValueError(f"ID {item_id} 的紀錄不完整或尚未下載 (缺少 local_path)。")
+                if not url_record or not url_record.get('url'):
+                    raise ValueError(f"找不到 ID {item_id} 的 URL 紀錄")
 
-                local_path = url_record['local_path']
-                source_url = url_record['url']
-                log.info(f"[任務 {task_id}] 正在處理項目 ID: {item_id}，檔案路徑: {local_path}")
+                download_dir = f"data/downloads/essay_{item_id}"
+                success, result_path, _ = download_file(url=url_record['url'], download_dir=download_dir)
+                if not success:
+                    raise Exception(f"下載失敗: {result_path}")
 
-                # 2. 更新資料庫和任務狀態為「處理中」
-                db_client.update_url(item_id, {"ocr_status": "processing", "ai_status": "processing"})
+                db_client.update_url(item_id, {"status": "downloaded", "local_path": result_path})
+                task_manager.update_item_status(task_id, item_id, "DOWNLOADED", details={"local_path": result_path})
+                log.info(f"[任務 {task_id}] 項目 {item_id} 下載成功。")
+
+                # --- 階段二：分析 ---
                 task_manager.update_item_status(task_id, item_id, "PROCESSING_ANALYSIS")
+                db_client.update_url(item_id, {"ocr_status": "processing", "ai_status": "processing"})
 
-                # 3. 呼叫擷取服務進行分析 (Jules @ 2025-10-09: 更新 API call，只傳送 file_path)
-                response = client.post(target_url, json={"file_path": local_path})
-                response.raise_for_status() # 如果狀態碼不是 2xx，會拋出異常
-
-                # 4. 分析成功，處理回傳結果並更新資料庫
+                response = client.post(analysis_target_url, json={"file_path": result_path})
+                response.raise_for_status()
                 analysis_result = response.json()
-                log.info(f"[任務 {task_id}] 項目 {item_id} 分析成功，收到分析資料。")
+                log.info(f"[任務 {task_id}] 項目 {item_id} 分析成功。")
 
-                # 從分析結果中提取核心資料
                 analysis_data = analysis_result.get("analysis_data", {})
-
-                # (Jules): 根據新需求，從 analysis_data 中提取 title 和 author
                 new_title = analysis_data.get("title")
                 new_author = analysis_data.get("author")
 
@@ -269,32 +272,27 @@ def run_analysis_pipeline(task_id: str, item_ids: List[int], db_client: DBClient
                     "ai_status": "completed",
                     "extracted_text": analysis_result.get("extracted_text"),
                     "extracted_image_paths": json.dumps(analysis_result.get("image_paths", [])),
-                    "last_error_details": None # 清除舊的錯誤訊息
+                    "last_error_details": None
                 }
-
-                # (Jules): 只有在 LLM 確實回傳了有效值時才更新，避免覆蓋掉舊資料
                 if new_title and "無法辨識" not in new_title:
                     updates_for_db["title"] = new_title
                 if new_author and "無法辨識" not in new_author:
                     updates_for_db["author"] = new_author
 
                 db_client.update_url(item_id, updates_for_db)
-
-                # (Jules): 在任務管理器中也更新這些資訊，以便前端能立即看到
-                details_for_task_manager = {
-                    "title": new_title,
-                    "author": new_author
-                }
-                task_manager.update_item_status(task_id, item_id, "COMPLETED_ANALYSIS", details=details_for_task_manager)
+                task_manager.update_item_status(task_id, item_id, "COMPLETED_ANALYSIS", details=updates_for_db)
 
             except Exception as e:
                 error_msg = str(e)
-                log.error(f"[任務 {task_id}] 處理項目 {item_id} 的分析時發生錯誤: {error_msg}", exc_info=True)
-                db_client.update_url(item_id, {"ocr_status": "failed", "ai_status": "failed", "last_error_details": error_msg})
+                log.error(f"[任務 {task_id}] 處理項目 {item_id} 時發生錯誤: {error_msg}", exc_info=True)
+                try:
+                    db_client.update_url(item_id, {"status": "failed", "ocr_status": "failed", "ai_status": "failed", "last_error_details": error_msg})
+                except Exception as db_e:
+                    log.error(f"[任務 {task_id}] 更新項目 {item_id} 狀態為 failed 時再次發生錯誤: {db_e}")
                 task_manager.update_item_status(task_id, item_id, "FAILED", details={"error_message": error_msg})
 
     task_manager.complete_task(task_id)
-    log.info(f"[任務 {task_id}] 所有分析項目處理完畢，管線結束。")
+    log.info(f"[任務 {task_id}] 所有項目完整處理完畢，管線結束。")
 
 
 # --- API 端點 ---
@@ -324,28 +322,26 @@ async def start_download(
     return {"task_id": task_id}
 
 
-@router.post("/start_analysis", response_model=StartAnalysisResponse, summary="啟動非同步文件分析")
-async def start_analysis(
+@router.post("/start_full_analysis", response_model=StartAnalysisResponse, summary="啟動完整的下載與分析流程")
+async def start_full_analysis(
     request: StartAnalysisRequest,
     background_tasks: BackgroundTasks,
     db_client: DBClient = Depends(get_db_client),
     task_manager = Depends(get_task_manager)
 ):
     """
-    接收一個包含多個ID的列表，為這些ID啟動一個背景分析任務。
-    (Jules): 增強版，現在會接收頁面上所有的 ID 以維持 UI 狀態。
+    接收一個ID列表，為這些ID啟動一個包含下載和AI分析的完整背景任務。
+    (Jules @ 2025-10-11) 新增此端點以簡化前端操作。
     """
     if not request.ids:
-        raise HTTPException(status_code=400, detail="要分析的 ID 列表不可為空。")
+        raise HTTPException(status_code=400, detail="要處理的 ID 列表不可為空。")
 
-    log.info(f"收到 /start_analysis 請求，包含 {len(request.ids)} 個要分析的 ID，以及 {len(request.all_item_ids or [])} 個上下文 ID。")
+    log.info(f"收到 /start_full_analysis 請求，包含 {len(request.ids)} 個 ID。")
 
-    # (Jules): 將 all_item_ids 傳遞給任務管理器，以保留完整的 UI 上下文
     task_id = task_manager.create_task(item_ids=request.ids, context_item_ids=request.all_item_ids)
-    log.info(f"已為分析請求建立任務，Task ID: {task_id}")
+    log.info(f"已為完整分析請求建立任務，Task ID: {task_id}")
 
-    # 將耗時的分析工作新增到背景任務佇列中
-    background_tasks.add_task(run_analysis_pipeline, task_id, request.ids, db_client, task_manager)
+    background_tasks.add_task(run_full_analysis_pipeline, task_id, request.ids, db_client, task_manager)
 
     return {"task_id": task_id}
 

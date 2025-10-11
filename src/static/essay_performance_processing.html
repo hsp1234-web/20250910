@@ -153,7 +153,14 @@
                     card.id = `card-${item.id}`; // 給卡片一個唯一的 ID
 
                     const isChecked = selectedItemIds.has(item.id.toString());
-                    const statusInfo = { text: '✅ 已下載', class: 'status-downloaded' }; // 初始狀態都是已下載
+
+                    // (Jules @ 2025-10-11) 根據項目狀態決定初始顯示
+                    const statusMap = {
+                        'downloaded': { text: '✅ 已下載', class: 'status-downloaded' },
+                        'failed': { text: '❌ 失敗', class: 'status-failed' },
+                        'default': { text: '⌛ 待處理', class: 'status-waiting' }
+                    };
+                    const statusInfo = statusMap[item.status] || statusMap['default'];
 
                     card.innerHTML = `
                         <div class="card-header">
@@ -331,7 +338,7 @@
                 updateActionsPanel();
             });
 
-            // (Jules): 處理「開始分析」按鈕的點擊事件
+            // (Jules @ 2025-10-11) 處理「開始分析」按鈕的點擊事件，改為呼叫完整流程 API
             startAnalysisBtn.addEventListener('click', () => {
                 const selectedIds = Array.from(selectedItemIds).map(id => parseInt(id));
                 if (selectedIds.length === 0) {
@@ -339,17 +346,16 @@
                     return;
                 }
 
-                // (Jules): 收集當前頁面上所有項目的 ID，以維持 UI 上下文
                 const allItemIdsOnPage = Array.from(cardsContainer.querySelectorAll('.card-checkbox'))
                                               .map(cb => parseInt(cb.dataset.id));
 
                 startTask(
-                    '/api/essay_performance/start_analysis',
+                    '/api/essay_performance/start_full_analysis', // 改為呼叫新的合併後端點
                     {
                         ids: selectedIds,
                         all_item_ids: allItemIdsOnPage
                     },
-                    `正在向伺服器請求開始分析 ${selectedIds.length} 個項目...`
+                    `正在啟動完整處理流程，共 ${selectedIds.length} 個項目...`
                 );
             });
 
