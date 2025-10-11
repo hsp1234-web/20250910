@@ -1,16 +1,10 @@
 import pytest
 from fastapi.testclient import TestClient
 from unittest.mock import patch, MagicMock
-import sys
-from pathlib import Path
-
-# --- 路徑修正，確保能匯入被測試的應用程式 ---
-# 將專案根目錄加入到 Python 的搜尋路徑中
-PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
-sys.path.insert(0, str(PROJECT_ROOT))
-
-# 從 llm_service 匯入 FastAPI 應用程式實例
-from services.llm_service.main import app, lifespan
+# (Jules @ 2025-10-11) 移除手動 sys.path 修改。
+# Pytest 會自動處理路徑，手動修改會導致在某些執行情境下 (如 VSCode Test Explorer) 發生 import-error。
+# 正確的執行方式是從專案根目錄執行 `python -m pytest`。
+from services.llm_service.main import app
 
 # --- Pytest Fixtures ---
 

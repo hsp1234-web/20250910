@@ -2,10 +2,13 @@
 import httpx
 from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
 from pydantic import BaseModel, Field
-from typing import List
+from typing import List, Dict, Any
 import logging
 import json
 from pathlib import Path
+import tempfile
+import uuid
+from datetime import datetime
 
 # --- 專案內部模組匯入 ---
 from src.core.task_manager import get_manager as get_task_manager
@@ -389,3 +392,120 @@ async def get_task_status(
                 item_data['ai_status'] = 'error'
 
     return status
+
+
+# --- Jules @ 2025-10-11: 本地分析測試端點 ---
+def run_local_analysis_pipeline(task_id: str, item_id: int, db_client: DBClient, task_manager):
+    """
+    專為本地測試設計的背景管線，跳過下載步驟。
+    """
+    log.info(f"[任務 {task_id}] 本地分析管線已啟動，項目 ID: {item_id}。")
+    local_file_path = None
+    try:
+        # --- 階段一：建立本地檔案 ---
+        task_manager.update_item_status(task_id, item_id, "CREATING_LOCAL_FILE", {"message": "正在生成本地測試檔案..."})
+
+        test_content = "這是一個本地測試檔案，用於驗證Ollama分析流程。\n台灣，美麗的寶島。"
+        # 使用 tempfile 確保檔案名稱的唯一性並放置在暫存目錄
+        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.txt', encoding='utf-8', dir='/tmp') as f:
+            f.write(test_content)
+            local_file_path = f.name
+
+        log.info(f"[任務 {task_id}] 本地測試檔案已建立於: {local_file_path}")
+        db_client.update_url(item_id, {"local_path": local_file_path, "status": "local_file_created"})
+        task_manager.update_item_status(task_id, item_id, "ANALYSIS_QUEUED", {"local_path": local_file_path})
+
+        # --- 階段二：呼叫分析服務 ---
+        task_manager.update_item_status(task_id, item_id, "PROCESSING_ANALYSIS", {"message": "已傳送至分析服務"})
+        db_client.update_url(item_id, {"ocr_status": "processing", "ai_status": "processing"})
+
+        service_base_url = get_service_url_wrapper(SERVICE_NAME)
+        analysis_target_url = f"{service_base_url}/process-local-document"
+
+        with httpx.Client(timeout=600.0) as client:
+            response = client.post(analysis_target_url, json={"file_path": local_file_path})
+            response.raise_for_status()
+            analysis_result = response.json()
+
+        log.info(f"[任務 {task_id}] 項目 {item_id} 分析成功。")
+
+        # --- 階段三：處理分析結果 ---
+        analysis_data = analysis_result.get("analysis_data", {})
+        updates_for_db = {
+            "ocr_status": "completed",
+            "ai_status": "completed",
+            "extracted_text": analysis_result.get("extracted_text"),
+            "extracted_image_paths": json.dumps(analysis_result.get("image_paths", [])),
+            "last_error_details": None,
+            "title": analysis_data.get("title", "本地測試標題"),
+            "author": analysis_data.get("author", "本地測試作者"),
+        }
+        db_client.update_url(item_id, updates_for_db)
+        task_manager.update_item_status(task_id, item_id, "COMPLETED_ANALYSIS", details=updates_for_db)
+        log.info(f"[任務 {task_id}] 項目 {item_id} 的資料庫紀錄與任務狀態已更新。")
+
+    except Exception as e:
+        error_msg = str(e)
+        log.error(f"[任務 {task_id}] 處理本地分析項目 {item_id} 時發生錯誤: {error_msg}", exc_info=True)
+        try:
+            db_client.update_url(item_id, {"status": "failed", "ocr_status": "failed", "ai_status": "failed", "last_error_details": error_msg})
+        except Exception as db_e:
+            log.error(f"[任務 {task_id}] 更新項目 {item_id} 狀態為 failed 時再次發生錯誤: {db_e}")
+        task_manager.update_item_status(task_id, item_id, "FAILED", details={"error_message": error_msg})
+    finally:
+        # 清理暫存檔案
+        if local_file_path and Path(local_file_path).exists():
+            try:
+                Path(local_file_path).unlink()
+                log.info(f"[任務 {task_id}] 已成功刪除暫存檔案: {local_file_path}")
+            except OSError as e:
+                log.error(f"[任務 {task_id}] 刪除暫存檔案 {local_file_path} 時失敗: {e}")
+
+        task_manager.complete_task(task_id)
+        log.info(f"[任務 {task_id}] 本地分析管線結束。")
+
+
+@router.post("/local_analysis_test", response_model=StartAnalysisResponse, summary="[開發用] 觸發一個使用本地檔案的完整分析流程")
+async def trigger_local_analysis_test(
+    background_tasks: BackgroundTasks,
+    db_client: DBClient = Depends(get_db_client),
+    task_manager = Depends(get_task_manager)
+):
+    """
+    此端點為開發和測試目的而設計，用於繞過網路下載步驟，直接測試後端的
+    文件分析流程（OCR + AI）。
+    """
+    log.info("收到 /local_analysis_test 請求，準備啟動本地分析測試流程。")
+
+    try:
+        # 1. 創建一個虛擬的資料庫紀錄
+        now = datetime.now()
+        fake_url_data = {
+            "url": f"local-test://{uuid.uuid4()}",
+            "title": "本地分析測試",
+            "author": "系統自動生成",
+            "message_date": now.strftime("%Y-%m-%d"),
+            "message_time": now.strftime("%H:%M"),
+            "source_text": "由 /local_analysis_test 端點觸發",
+            "status": "pending_local_analysis",
+            "ocr_status": "pending",
+            "ai_status": "pending",
+        }
+        inserted_id = db_client.add_new_urls(parsed_data=[fake_url_data], source_text=fake_url_data["source_text"])
+        if not inserted_id or not inserted_id.get("ids"):
+            raise Exception("在資料庫中創建虛擬紀錄失敗。")
+
+        item_id = inserted_id["ids"][0]
+        log.info(f"已在資料庫中創建虛擬紀錄，ID: {item_id}")
+
+        # 2. 創建並啟動背景任務
+        task_id = task_manager.create_task(item_ids=[item_id])
+        log.info(f"已為本地分析請求建立任務，Task ID: {task_id}")
+
+        background_tasks.add_task(run_local_analysis_pipeline, task_id, item_id, db_client, task_manager)
+
+        return {"task_id": task_id}
+
+    except Exception as e:
+        log.error(f"觸發本地分析測試時發生錯誤: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"無法啟動本地分析測試: {e}")
