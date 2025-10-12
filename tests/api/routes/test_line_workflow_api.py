@@ -16,14 +16,24 @@ os.environ['API_MODE'] = 'mock'
 @pytest.fixture
 def client():
     """
-    建立一個 TestClient 實例。
-    透過在 fixture 內部延遲 TestClient 的實例化，
-    我們確保 conftest.py 中的 autouse mocks 已經生效。
+    建立一個 TestClient 實例，並為其設定一個乾淨的記憶體資料庫。
     """
+    # 設定環境變數，讓 database.py 使用記憶體資料庫
+    os.environ['TEST_DB_PATH'] = ':memory:'
+
+    # 匯入 database 模組並初始化
+    from src.db import database
+    conn = database.get_db_connection()
+    database.initialize_database(conn)
+    conn.close()
+
     # 延遲匯入和實例化，確保 mock 已被應用
     from src.api.api_server import app
     with TestClient(app) as test_client:
         yield test_client
+
+    # 測試結束後，清理環境變數
+    del os.environ['TEST_DB_PATH']
 
 
 # (Jules @ 2025-10-11) 移除對 mock_httpx_post 的依賴，因為 conftest.py 中的
@@ -57,13 +67,13 @@ def test_proxy_ingest_text_success(client: TestClient, mock_httpx_client: AsyncM
 
     # 2. 執行測試
     test_payload = {"text": "這是一段測試文字"}
-    response = client.post("/api/essay_performance/ingest_text", json=test_payload)
+    response = client.post("/api/line/ingest_text", json=test_payload)
 
     # 3. 進行斷言
     assert response.status_code == 200
     assert response.json()["message"] == "來自模擬微服務的回應"
     mock_httpx_client.assert_called_once_with(
-        "http://127.0.0.1:8001/ingest",
+        "http://127.0.0.1:8002/ingest",
         json=test_payload,
         timeout=30.0
     )
@@ -78,11 +88,11 @@ def test_proxy_ingest_text_service_unavailable(client: TestClient, mock_httpx_cl
 
     # 2. 執行測試
     test_payload = {"text": "測試文字"}
-    response = client.post("/api/essay_performance/ingest_text", json=test_payload)
+    response = client.post("/api/line/ingest_text", json=test_payload)
 
     # 3. 進行斷言
     assert response.status_code == 503
-    assert "後端擷取服務目前無法使用" in response.json()["detail"]
+    assert "後端解析服務目前無法使用" in response.json()["detail"]
 
 
 def test_proxy_ingest_text_service_returns_error(client: TestClient, mock_httpx_client: AsyncMock):
@@ -104,27 +114,11 @@ def test_proxy_ingest_text_service_returns_error(client: TestClient, mock_httpx_
 
     # 2. 執行測試
     test_payload = {"text": "一個會導致錯誤的請求"}
-    response = client.post("/api/essay_performance/ingest_text", json=test_payload)
+    response = client.post("/api/line/ingest_text", json=test_payload)
 
     # 3. 進行斷言
     assert response.status_code == 400
     assert response.json()["detail"] == {"detail": "微服務說你的請求格式錯誤"}
 
 
-def test_start_download_no_ids(client: TestClient):
-    """
-    測試當請求的 ID 列表為空時，/start_download 是否回傳 400 錯誤。
-    """
-    response = client.post("/api/essay_performance/start_download", json={"ids": []})
-    assert response.status_code == 400
-    assert "ID列表不可為空" in response.json()["detail"]
-
-
-def test_get_status_not_found(client: TestClient):
-    """
-    測試查詢一個不存在的任務 ID 時，/status/{task_id} 是否回傳 404 錯誤。
-    """
-    non_existent_task_id = "this-task-does-not-exist"
-    response = client.get(f"/api/essay_performance/status/{non_existent_task_id}")
-    assert response.status_code == 404
-    assert f"找不到任務ID: {non_existent_task_id}" in response.json()["detail"]
+# (Jules @ 2025-10-12) 移除舊的、與新架構無關的測試案例

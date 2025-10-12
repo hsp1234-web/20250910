@@ -1,4 +1,4 @@
-# services/essay_ingestion_service/logic.py
+# services/line_parser_service/logic.py
 import re
 import logging
 from typing import List, Dict, Optional
@@ -132,7 +132,7 @@ def save_parsed_data_to_db(parsed_data: List[Dict], source_text: str) -> List[Di
             "author": item['author'],
             "date": item.get('date'),
             "time": item.get('time'),
-            "source": "essay_performance"
+            "source": "line_importer"
         }
         for item in parsed_data
     ]

@@ -147,7 +147,7 @@ def launch_microservice(service_path: Path):
 
     # JULES (2025-10-09) 關鍵修復：
     # 1. 將工作目錄改為專案根目錄 (ROOT_DIR)。
-    # 2. 將 uvicorn 的 app 參數改為完整的模組路徑 (e.g., 'services.essay_ingestion_service.main:app')。
+    # 2. 將 uvicorn 的 app 參數改為完整的模組路徑 (e.g., 'services.line_parser_service.main:app')。
     # 這兩項修改共同確保 Python 能以正確的套件模式載入微服務，從而解決相對匯入的 ImportError。
     module_path = ".".join(service_path.relative_to(ROOT_DIR).parts)
     app_string = f"{module_path}.main:app"

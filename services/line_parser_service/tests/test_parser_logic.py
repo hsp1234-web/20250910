@@ -1,6 +1,6 @@
-# services/essay_ingestion_service/tests/test_parser_logic.py
+# services/line_parser_service/tests/test_parser_logic.py
 import pytest
-from services.essay_ingestion_service.logic import parse_chat_log
+from services.line_parser_service.logic import parse_chat_log
 
 # 使用者提供的真實聊天紀錄作為測試案例
 COMPLEX_CHAT_LOG = """

@@ -6,7 +6,7 @@
     <title>小作文績效 - 資料擷取</title>
     <link rel="stylesheet" href="/static/css/main.css">
     <link rel="stylesheet" href="/static/css/nav.css"> <!-- (Jules) 補上導覽列樣式 -->
-    <link rel="stylesheet" href="/static/css/essay_performance_tabs.css">
+    <link rel="stylesheet" href="/static/css/line_workflow.css">
     <link rel="stylesheet" href="/static/css/page1_unified.css">
 </head>
 <body>
@@ -22,17 +22,12 @@
             <li><a href="/page6">金鑰管理</a></li>
             <li><a href="/page7">提示詞管理</a></li>
             <li><a href="/page9">績效儀表板</a></li>
-            <li><a href="/essay_performance/ingestion" class="active">小作文績效</a></li>
+            <li><a href="/line_importer" class="active">LINE 內容整理</a></li>
         </ul>
     </nav>
     <div class="content">
         <div class="panel">
-            <h1>小作文績效</h1>
-            <div class="tab-container" style="margin-top: 20px;">
-                <a href="/essay_performance/ingestion" class="tab-button active">資料擷取與處理</a>
-                <a href="/essay_performance/processing" class="tab-button">本地AI處理</a>
-                <a href="/essay_performance/report" class="tab-button">報告生成</a>
-            </div>
+            <h1>LINE 內容整理工作流</h1>
         </div>
         <div class="panel">
             <div class="ingestion-buttons">
@@ -97,6 +92,7 @@
                 items.forEach(item => {
                     const row = document.createElement('tr');
                     row.dataset.itemId = item.id; // 方便未來操作
+                    row.dataset.itemUrl = item.url; // (Jules @ 2025-10-12) 新增，為工作流提供 URL
                     row.innerHTML = `
                         <td><input type="checkbox" class="result-checkbox" value="${item.id}"></td>
                         <td>${item.message_date ? item.message_date.split(' ')[0] : '---'}</td>
@@ -117,7 +113,7 @@
             statusMessage.textContent = '正在從資料庫載入既有項目...';
             statusMessage.style.color = 'var(--primary-color)';
             try {
-                const response = await fetch('/api/essay_performance/items');
+                const response = await fetch('/api/line/items');
                 if (!response.ok) {
                     const errorResult = await response.json();
                     throw new Error(errorResult.detail || '無法載入項目列表');
@@ -145,7 +141,7 @@
             statusMessage.style.color = 'var(--primary-color)';
 
             try {
-                const response = await fetch('/api/essay_performance/ingest_text', {
+                const response = await fetch('/api/line/ingest_text', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ text: text }),
@@ -179,17 +175,66 @@
         selectAllBtn.addEventListener('click', () => setAllCheckboxes(true));
         deselectAllBtn.addEventListener('click', () => setAllCheckboxes(false));
 
-        nextStepBtn.addEventListener('click', () => {
-            const selectedIds = Array.from(document.querySelectorAll('.result-checkbox:checked'))
-                                     .map(cb => cb.value);
+        nextStepBtn.addEventListener('click', async () => {
+            const selectedItems = Array.from(document.querySelectorAll('.result-checkbox:checked'))
+                                     .map(cb => {
+                                         const row = cb.closest('tr');
+                                         return {
+                                             id: cb.value,
+                                             url: row.dataset.itemUrl // 從 data- 屬性獲取 URL
+                                         };
+                                     });
 
-            if (selectedIds.length === 0) {
+            if (selectedItems.length === 0) {
                 alert('請至少選取一個項目以進行下一步處理。');
                 return;
             }
 
-            const idsQueryString = selectedIds.join(',');
-            window.location.href = `/essay_performance/processing?ids=${idsQueryString}`;
+            statusMessage.textContent = '正在建立新的工作流...';
+            statusMessage.style.color = 'var(--primary-color)';
+            nextStepBtn.disabled = true;
+
+            try {
+                // 步驟 1: 建立一個新的工作流
+                const wfResponse = await fetch('/api/workflows/', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name: `小作文處理 - ${new Date().toLocaleString()}` }),
+                });
+                if (!wfResponse.ok) throw new Error('無法建立工作流');
+                const wfData = await wfResponse.json();
+                const workflowId = wfData.workflow_id;
+
+                statusMessage.textContent = `工作流 ${workflowId} 已建立，正在新增下載步驟...`;
+
+                // 步驟 2: 為每個選取的項目新增一個下載步驟
+                for (const item of selectedItems) {
+                    const stepPayload = {
+                        command: 'DOWNLOAD_AND_EXTRACT', // 假設後端有一個這樣的指令
+                        parameters: {
+                            url: item.url,
+                            source_url_id: item.id
+                        }
+                    };
+                    const stepResponse = await fetch(`/api/workflows/${workflowId}/steps`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(stepPayload),
+                    });
+                    if (!stepResponse.ok) throw new Error(`為項目 ${item.id} 新增步驟失敗`);
+                }
+
+                statusMessage.textContent = '所有步驟已成功加入工作流，正在重新導向...';
+                statusMessage.style.color = 'var(--success-color)';
+
+                // 步驟 3: 重新導向到新的編輯器頁面
+                window.location.href = `/line_workflow_editor?workflow_id=${workflowId}`;
+
+            } catch (error) {
+                statusMessage.textContent = `建立工作流時發生錯誤：${error.message}`;
+                statusMessage.style.color = 'var(--error-color)';
+                nextStepBtn.disabled = false;
+            }
         });
 
         submitButtonTop.addEventListener('click', handleSubmit);

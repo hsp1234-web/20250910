@@ -1,4 +1,4 @@
-# services/essay_ingestion_service/main.py
+# services/line_parser_service/main.py
 import uvicorn
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
@@ -12,22 +12,22 @@ from .document_analyzer import process_local_document
 
 # --- 日誌設定 ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-log = logging.getLogger('essay_ingestion_service_main')
+log = logging.getLogger('line_parser_service_main')
 
 # --- 應用程式生命週期事件 ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """在應用程式啟動時執行的生命週期事件。"""
-    log.info("「小作文擷取服務」(無狀態版) 啟動中...")
+    log.info("「LINE 解析服務」啟動中...")
     log.info("✅ 服務已就緒，可以開始接收請求。")
     yield
-    log.info("「小作文擷取服務」正在關閉。")
+    log.info("「LINE 解析服務」正在關閉。")
 
 # --- FastAPI 應用實例 ---
 app = FastAPI(
-    title="小作文擷取服務 (Essay Ingestion Service)",
+    title="LINE 解析服務 (Line Parser Service)",
     description="一個多功能微服務，用於：1. 解析 LINE 聊天紀錄、2. 接收本地文件並進行圖文分析。",
-    version="3.0.0", # 版本升級，反映無狀態重構
+    version="4.0.0", # 版本升級，反映架構重構
     lifespan=lifespan
 )
 
