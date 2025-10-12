@@ -5,7 +5,7 @@ from typing import Dict, Any, Callable
 
 from src.db.client import DBClient
 # (Jules @ 2025-10-12) 匯入指令處理函式
-from .workflow_commands import command_download_and_extract
+from .workflow_commands import command_download_and_extract, command_analyze_text
 
 log = logging.getLogger(__name__)
 
@@ -23,7 +23,7 @@ class WorkflowEngine:
         將指令名稱與其對應的處理函式進行註冊。
         """
         self.register_command('DOWNLOAD_AND_EXTRACT', command_download_and_extract)
-        # self.register_command('ANALYZE_TEXT', command_analyze_text)
+        self.register_command('ANALYZE_TEXT', command_analyze_text)
         log.info("指令註冊表初始化完成。")
 
     def register_command(self, command_name: str, handler: Callable):

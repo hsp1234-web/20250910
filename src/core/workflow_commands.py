@@ -41,6 +41,49 @@ def command_download_and_extract(db: DBClient, url: str, source_url_id: int) -> 
         "source_url_id": source_url_id
     }
 
-# 未來可以在此處新增更多指令函式
-# def command_analyze_text(db: DBClient, local_path: str, source_url_id: int) -> Dict[str, Any]:
-#     ...
+# (Jules @ 2025-10-12) 新增分析指令
+def command_analyze_text(db: DBClient, local_path: str, source_url_id: int) -> Dict[str, Any]:
+    """
+    工作流指令：使用 line_parser_service 分析一個本地檔案。
+    注意：這個指令的實作有待改進。它直接呼叫了微服務的內部邏d輯，
+    理想情況下應該透過服務發現和 HTTP API 呼叫來解耦。
+    但為了快速實現功能，暫時採用此方式。
+    """
+    log.info(f"[指令:ANALYZE_TEXT] 開始處理檔案: {local_path} (源自 URL ID: {source_url_id})")
+
+    try:
+        # 這是一個捷徑，理想情況下應該是透過 HTTP 呼叫 line_parser_service
+        # 但由於時間限制和避免循環依賴，我們暫時直接呼叫其核心邏輯
+        from services.line_parser_service.document_analyzer import process_local_document
+        import asyncio
+
+        # 由於 process_local_document 是非同步的，我們需要一個事件迴圈來運行它
+        analysis_result = asyncio.run(process_local_document(file_path=local_path))
+
+        if analysis_result.get("error"):
+            raise ValueError(analysis_result.get("error_details", analysis_result["error"]))
+
+        analysis_data = analysis_result.get("analysis_data", {})
+        new_title = analysis_data.get("title")
+        new_author = analysis_data.get("author")
+
+        updates_for_db = {
+            "status": "completed",
+            "extracted_text": analysis_result.get("extracted_text"),
+            "extracted_image_paths": json.dumps(analysis_result.get("image_paths", [])),
+            "last_error_details": None
+        }
+        if new_title and "無法辨識" not in new_title:
+            updates_for_db["title"] = new_title
+        if new_author and "無法辨識" not in new_author:
+            updates_for_db["author"] = new_author
+
+        db.update_url(source_url_id, updates_for_db)
+        log.info(f"成功分析並更新了 URL ID {source_url_id} 的資料庫紀錄。")
+
+        return analysis_data
+
+    except Exception as e:
+        log.error(f"分析檔案 {local_path} 時發生錯誤: {e}", exc_info=True)
+        db.update_url(source_url_id, {"status": "analysis_failed", "last_error_details": str(e)})
+        raise
