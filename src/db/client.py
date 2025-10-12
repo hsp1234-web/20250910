@@ -195,6 +195,42 @@ class DBClient:
     def clear_all_tasks(self) -> bool:
         return self._send_request("clear_all_tasks")
 
+    # --- (Jules @ 2025-10-12) 新增：工作流 (Workflow) 客戶端方法 ---
+    def create_workflow(self, name: str) -> int:
+        """建立一個新的工作流並回傳其 ID。"""
+        return self._send_request("create_workflow", {"name": name})
+
+    def add_workflow_step(self, workflow_id: int, step_order: int, command: str, parameters: dict) -> int:
+        """在工作流中新增一個步驟。"""
+        return self._send_request("add_workflow_step", {
+            "workflow_id": workflow_id,
+            "step_order": step_order,
+            "command": command,
+            "parameters": parameters
+        })
+
+    def get_workflow(self, workflow_id: int) -> dict | None:
+        """獲取特定工作流的資訊。"""
+        return self._send_request("get_workflow", {"workflow_id": workflow_id})
+
+    def get_workflow_steps(self, workflow_id: int) -> list[dict]:
+        """獲取一個工作流的所有步驟。"""
+        return self._send_request("get_workflow_steps", {"workflow_id": workflow_id})
+
+    def update_workflow_status(self, workflow_id: int, status: str) -> bool:
+        """更新工作流的總體狀態。"""
+        return self._send_request("update_workflow_status", {"workflow_id": workflow_id, "status": status})
+
+    def update_workflow_step_status(self, step_id: int, status: str, result: dict = None, error_message: str = None) -> bool:
+        """更新單一步驟的狀態。"""
+        return self._send_request("update_workflow_step_status", {
+            "step_id": step_id,
+            "status": status,
+            "result": result,
+            "error_message": error_message
+        })
+    # --- 結束工作流方法 ---
+
 # --- V4 計畫書優化 (2025-09-18) ---
 #
 # 移除了舊有的 get_client() 單例模式。

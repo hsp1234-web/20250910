@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>工作流編輯器</title>
+    <link rel="stylesheet" href="/static/css/main.css">
+    <link rel="stylesheet" href="/static/css/nav.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <style>
+        .workflow-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1.5rem;
+        }
+        .workflow-actions button {
+            margin-left: 10px;
+        }
+        .steps-container {
+            border: 1px solid #dee2e6;
+            border-radius: 8px;
+            padding: 1.5rem;
+            background-color: #f8f9fa;
+        }
+        .step {
+            display: flex;
+            align-items: center;
+            padding: 1rem;
+            border-bottom: 1px solid #e9ecef;
+            transition: background-color 0.2s;
+        }
+        .step:last-child {
+            border-bottom: none;
+        }
+        .step-order {
+            font-size: 1.5em;
+            font-weight: bold;
+            color: #6c757d;
+            margin-right: 1.5rem;
+        }
+        .step-details {
+            flex-grow: 1;
+        }
+        .step-command {
+            font-weight: bold;
+            font-size: 1.1em;
+            margin-bottom: 0.5rem;
+        }
+        .step-parameters {
+            font-family: monospace;
+            font-size: 0.9em;
+            color: #343a40;
+            background-color: #e9ecef;
+            padding: 5px;
+            border-radius: 4px;
+            word-break: break-all;
+        }
+        .step-status {
+            display: flex;
+            align-items: center;
+            font-weight: bold;
+        }
+        .status-pending { color: #6c757d; }
+        .status-running { color: #007bff; }
+        .status-completed { color: #28a745; }
+        .status-failed { color: #dc3545; }
+        .status-icon {
+            margin-right: 8px;
+        }
+    </style>
+</head>
+<body>
+    <nav class="top-nav">
+        <ul>
+            <li><a href="/">鳳凰主頁</a></li>
+            <li><a href="/line_importer">LINE 內容整理</a></li>
+        </ul>
+    </nav>
+
+    <div class="content">
+        <div class="panel">
+            <div class="workflow-header">
+                <div>
+                    <h1>工作流編輯器</h1>
+                    <p id="workflow-info">正在載入工作流資訊...</p>
+                </div>
+                <div class="workflow-actions">
+                    <button id="add-step-btn" class="button-secondary">新增分析步驟</button>
+                    <button id="execute-btn" class="button-primary">開始執行</button>
+                </div>
+            </div>
+            <div id="steps-container">
+                <!-- 工作流步驟將由 JavaScript 動態填入 -->
+            </div>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // --- DOM 元素 ---
+            const workflowInfoEl = document.getElementById('workflow-info');
+            const stepsContainerEl = document.getElementById('steps-container');
+            const executeBtn = document.getElementById('execute-btn');
+            const addStepBtn = document.getElementById('add-step-btn');
+
+            // --- 狀態 ---
+            let workflowId = null;
+            let statusInterval = null;
+
+            // --- 圖示與樣式對應 ---
+            const statusMap = {
+                'pending': { icon: 'fa-regular fa-clock', colorClass: 'status-pending', text: '待處理' },
+                'running': { icon: 'fa-solid fa-spinner fa-spin', colorClass: 'status-running', text: '執行中' },
+                'completed': { icon: 'fa-solid fa-check-circle', colorClass: 'status-completed', text: '已完成' },
+                'failed': { icon: 'fa-solid fa-times-circle', colorClass: 'status-failed', text: '失敗' },
+            };
+
+            // --- 渲染函式 ---
+            const renderStep = (step) => {
+                const status = statusMap[step.status] || statusMap['pending'];
+                return `
+                    <div class="step" id="step-${step.id}">
+                        <div class="step-order">${step.step_order}</div>
+                        <div class="step-details">
+                            <div class="step-command">${step.command}</div>
+                            <div class="step-parameters">${JSON.stringify(step.parameters)}</div>
+                            ${step.error_message ? `<div class="step-error">${step.error_message}</div>` : ''}
+                        </div>
+                        <div class="step-status ${status.colorClass}">
+                            <i class="fas ${status.icon} status-icon"></i>
+                            <span>${status.text}</span>
+                        </div>
+                    </div>
+                `;
+            };
+
+            const renderWorkflow = (data) => {
+                const { workflow, steps } = data;
+                workflowInfoEl.textContent = `工作流 #${workflow.id}: ${workflow.name} | 狀態: ${workflow.status}`;
+                stepsContainerEl.innerHTML = steps.map(renderStep).join('');
+
+                // 如果工作流正在執行或已完成/失敗，則禁用執行按鈕
+                if (['running', 'completed', 'failed'].includes(workflow.status)) {
+                    executeBtn.disabled = true;
+                }
+            };
+
+            // --- API 呼叫 ---
+            const fetchWorkflowDetails = async () => {
+                if (!workflowId) return;
+                try {
+                    const response = await fetch(`/api/workflows/${workflowId}`);
+                    if (!response.ok) {
+                        throw new Error(`無法獲取工作流詳情: ${response.statusText}`);
+                    }
+                    const data = await response.json();
+                    renderWorkflow(data);
+
+                    // 如果工作流已完成或失敗，停止輪詢
+                    if (['completed', 'failed'].includes(data.workflow.status)) {
+                        clearInterval(statusInterval);
+                        statusInterval = null;
+                        executeBtn.disabled = true;
+                        addStepBtn.disabled = true; // 流程結束後，也不允許再新增步驟
+                        workflowInfoEl.textContent += ' (已結束)';
+                    }
+                } catch (error) {
+                    workflowInfoEl.textContent = `錯誤: ${error.message}`;
+                    clearInterval(statusInterval);
+                }
+            };
+
+            const executeWorkflow = async () => {
+                if (!workflowId || executeBtn.disabled) return;
+
+                executeBtn.disabled = true;
+                addStepBtn.disabled = true;
+                workflowInfoEl.textContent += ' (正在啟動執行...)'
+
+                try {
+                    const response = await fetch(`/api/workflows/${workflowId}/execute`, { method: 'POST' });
+                    if (!response.ok) {
+                        throw new Error('觸發執行失敗');
+                    }
+                    // 觸發成功後，立即獲取一次狀態並開始輪詢
+                    await fetchWorkflowDetails();
+                    statusInterval = setInterval(fetchWorkflowDetails, 3000);
+                } catch (error) {
+                    workflowInfoEl.textContent = `執行錯誤: ${error.message}`;
+                    executeBtn.disabled = false; // 允許重試
+                    addStepBtn.disabled = false;
+                }
+            };
+
+            // --- 初始化 ---
+            const addAnalysisStep = async () => {
+                if (!workflowId) return;
+
+                // 找到最後一個已完成的下載步驟
+                const lastStepEl = stepsContainerEl.querySelector('.step:last-child');
+                if (!lastStepEl) {
+                    alert("錯誤：找不到任何步驟。");
+                    return;
+                }
+
+                // 這裡我們需要從 API 重新獲取最新的步驟資料，以確保狀態正確
+                const response = await fetch(`/api/workflows/${workflowId}`);
+                const data = await response.json();
+                const lastStep = data.steps[data.steps.length - 1];
+
+                if (lastStep && lastStep.command === 'DOWNLOAD_AND_EXTRACT' && lastStep.status === 'completed') {
+                    addStepBtn.disabled = true;
+                    addStepBtn.textContent = '正在新增...';
+                    try {
+                        const stepPayload = {
+                            command: 'ANALYZE_TEXT',
+                            parameters: {
+                                local_path: lastStep.result.local_path,
+                                source_url_id: lastStep.result.source_url_id
+                            }
+                        };
+                        const stepResponse = await fetch(`/api/workflows/${workflowId}/steps`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(stepPayload),
+                        });
+                        if (!stepResponse.ok) throw new Error('新增分析步驟失敗');
+
+                        // 成功後，重新載入整個工作流以顯示新步驟
+                        await fetchWorkflowDetails();
+
+                    } catch (error) {
+                        alert(`錯誤: ${error.message}`);
+                    } finally {
+                        addStepBtn.disabled = false;
+                        addStepBtn.textContent = '新增分析步驟';
+                    }
+                } else {
+                    alert('請先等待前一個下載步驟成功完成。');
+                }
+            };
+
+            const init = () => {
+                const urlParams = new URLSearchParams(window.location.search);
+                workflowId = urlParams.get('workflow_id');
+                if (workflowId) {
+                    fetchWorkflowDetails();
+                    executeBtn.addEventListener('click', executeWorkflow);
+                    addStepBtn.addEventListener('click', addAnalysisStep);
+                } else {
+                    workflowInfoEl.textContent = '錯誤：URL 中未提供 workflow_id。';
+                    executeBtn.disabled = true;
+                    addStepBtn.disabled = true;
+                }
+            };
+
+            init();
+        });
+    </script>
+</body>
+</html>

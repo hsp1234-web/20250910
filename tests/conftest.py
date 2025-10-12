@@ -16,9 +16,9 @@ def create_test_service_registry():
     """
     registry_path = Path("/tmp/service_registry.json")
     registry_content = {
-        "essay_ingestion_service": {"port": 8001},
-        "document_processor_service": {"port": 8002},
-        "stock_id_extractor_service": {"port": 8003}
+        "line_parser_service": {"port": 8002},
+        "document_processor_service": {"port": 8003},
+        "stock_id_extractor_service": {"port": 8004}
     }
 
     # 確保目錄存在
