@@ -12,9 +12,8 @@
     margin: 0;
     padding: 0 10px; /* 左右留白，避免按鈕貼邊 */
     display: flex;
-    overflow-x: auto; /* 核心：啟用水平捲動 */
-    white-space: nowrap; /* 防止按鈕換行 */
-    -webkit-overflow-scrolling: touch; /* 在 iOS 上提供流暢的捲動體驗 */
+    flex-wrap: wrap; /* 允許項目換行 */
+    justify-content: center; /* 在換行時讓項目居中 */
 }
 
 /* 美化捲軸樣式 (適用於 Webkit 核心的瀏覽器，如 Chrome, Safari) */
