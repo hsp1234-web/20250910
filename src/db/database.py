@@ -228,7 +228,9 @@ def initialize_database(conn: sqlite3.Connection = None):
                 "extracted_text": "TEXT",
                 "extracted_image_paths": "TEXT",
                 "last_error_details": "TEXT",
-                "processing_history": "TEXT" # 新的歷程記錄欄位
+                "processing_history": "TEXT", # 新的歷程記錄欄位
+                "ocr_status": "TEXT DEFAULT 'pending'", # (Jules @ 2025-10-12) 補上缺少的遷移欄位
+                "ai_status": "TEXT DEFAULT 'pending'"   # (Jules @ 2025-10-12) 補上缺少的遷移欄位
             }
             # 輔助函式，避免重複程式碼
             def _add_column_if_not_exists(table, col, col_type):
@@ -351,7 +353,53 @@ def initialize_database(conn: sqlite3.Connection = None):
                         raise # 其他錯誤則需拋出
             # --- 結束 ---
 
-        log.info("✅ 資料庫初始化完成。`tasks`, `system_logs`, `app_state`, `extracted_urls`, `reports`, `analysis_tasks` 資料表已存在。")
+            # --- (Jules @ 2025-10-12) 新增工作流引擎相關資料表 ---
+            log.info("正在檢查並建立工作流 (workflow) 相關資料表...")
+            # 工作流主表
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS workflows (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            cursor.execute("""
+                CREATE TRIGGER IF NOT EXISTS update_workflows_updated_at
+                AFTER UPDATE ON workflows FOR EACH ROW
+                BEGIN
+                    UPDATE workflows SET updated_at = CURRENT_TIMESTAMP WHERE id = OLD.id;
+                END;
+            """)
+            # 工作流步驟表
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS workflow_steps (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    workflow_id INTEGER NOT NULL,
+                    step_order INTEGER NOT NULL,
+                    command TEXT NOT NULL,
+                    parameters TEXT,
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    result TEXT,
+                    error_message TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (workflow_id) REFERENCES workflows (id)
+                )
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_step_workflow_id ON workflow_steps (workflow_id)")
+            cursor.execute("""
+                CREATE TRIGGER IF NOT EXISTS update_workflow_steps_updated_at
+                AFTER UPDATE ON workflow_steps FOR EACH ROW
+                BEGIN
+                    UPDATE workflow_steps SET updated_at = CURRENT_TIMESTAMP WHERE id = OLD.id;
+                END;
+            """)
+            log.info("✅ 工作流資料表建立完成。")
+            # --- 結束 ---
+
+        log.info("✅ 資料庫初始化完成。`tasks`, `system_logs`, `app_state`, `extracted_urls`, `reports`, `analysis_tasks`, `workflows`, `workflow_steps` 資料表已存在。")
     except sqlite3.Error as e:
         log.error(f"初始化資料庫時發生錯誤: {e}")
     finally:
@@ -1155,3 +1203,141 @@ def get_all_app_states() -> dict[str, str]:
 if __name__ == "__main__":
     # 直接執行此檔案時，會進行初始化
     initialize_database()
+
+# --- (Jules @ 2025-10-12) 新增：工作流 (Workflow) 專用函式 ---
+
+def create_workflow(name: str) -> int | None:
+    """
+    建立一個新的工作流，並回傳其主鍵 ID。
+    """
+    sql = "INSERT INTO workflows (name) VALUES (?)"
+    conn = get_db_connection()
+    if not conn: return None
+    try:
+        with conn:
+            cursor = conn.cursor()
+            cursor.execute(sql, (name,))
+            new_id = cursor.lastrowid
+        log.info(f"✅ 已成功建立新的工作流 '{name}'，ID: {new_id}。")
+        return new_id
+    except sqlite3.Error as e:
+        log.error(f"❌ 建立工作流 '{name}' 時發生資料庫錯誤: {e}", exc_info=True)
+        return None
+    finally:
+        if conn:
+            conn.close()
+
+def add_workflow_step(workflow_id: int, step_order: int, command: str, parameters: dict) -> int | None:
+    """
+    在指定的工作流中新增一個步驟。
+    """
+    # 將參數字典序列化為 JSON 字串以便儲存
+    params_json = json.dumps(parameters)
+    sql = "INSERT INTO workflow_steps (workflow_id, step_order, command, parameters) VALUES (?, ?, ?, ?)"
+    conn = get_db_connection()
+    if not conn: return None
+    try:
+        with conn:
+            cursor = conn.cursor()
+            cursor.execute(sql, (workflow_id, step_order, command, params_json))
+            new_id = cursor.lastrowid
+        log.info(f"✅ 已在工作流 {workflow_id} 中新增步驟 {step_order}: {command}，步驟 ID: {new_id}。")
+        return new_id
+    except sqlite3.Error as e:
+        log.error(f"❌ 在工作流 {workflow_id} 中新增步驟時發生錯誤: {e}", exc_info=True)
+        return None
+    finally:
+        if conn:
+            conn.close()
+
+def get_workflow(workflow_id: int) -> dict | None:
+    """
+    根據 ID 獲取單一工作流的資訊。
+    """
+    sql = "SELECT * FROM workflows WHERE id = ?"
+    conn = get_db_connection()
+    if not conn: return None
+    try:
+        cursor = conn.cursor()
+        cursor.execute(sql, (workflow_id,))
+        row = cursor.fetchone()
+        return dict(row) if row else None
+    except sqlite3.Error as e:
+        log.error(f"❌ 查詢工作流 ID {workflow_id} 時發生錯誤: {e}", exc_info=True)
+        return None
+    finally:
+        if conn:
+            conn.close()
+
+def get_workflow_steps(workflow_id: int) -> list[dict]:
+    """
+    根據工作流 ID 獲取其所有步驟，並按順序排序。
+    """
+    sql = "SELECT * FROM workflow_steps WHERE workflow_id = ? ORDER BY step_order ASC"
+    conn = get_db_connection()
+    if not conn: return []
+    try:
+        cursor = conn.cursor()
+        cursor.execute(sql, (workflow_id,))
+        rows = cursor.fetchall()
+        # 將 parameters 字串反序列化回字典
+        steps = []
+        for row in rows:
+            step = dict(row)
+            if step['parameters']:
+                step['parameters'] = json.loads(step['parameters'])
+            if step['result']:
+                try:
+                    step['result'] = json.loads(step['result'])
+                except (json.JSONDecodeError, TypeError):
+                    # 如果 result 不是有效的 JSON，就保持原樣
+                    pass
+            steps.append(step)
+        return steps
+    except (sqlite3.Error, json.JSONDecodeError) as e:
+        log.error(f"❌ 查詢工作流 {workflow_id} 的步驟時發生錯誤: {e}", exc_info=True)
+        return []
+    finally:
+        if conn:
+            conn.close()
+
+def update_workflow_status(workflow_id: int, status: str) -> bool:
+    """
+    更新一個工作流的總體狀態。
+    """
+    sql = "UPDATE workflows SET status = ? WHERE id = ?"
+    conn = get_db_connection()
+    if not conn: return False
+    try:
+        with conn:
+            conn.execute(sql, (status, workflow_id))
+        log.info(f"✅ 工作流 {workflow_id} 狀態已更新為: {status}")
+        return True
+    except sqlite3.Error as e:
+        log.error(f"❌ 更新工作流 {workflow_id} 狀態時出錯: {e}", exc_info=True)
+        return False
+    finally:
+        if conn:
+            conn.close()
+
+def update_workflow_step_status(step_id: int, status: str, result: dict = None, error_message: str = None) -> bool:
+    """
+    更新一個工作流步驟的狀態、結果或錯誤訊息。
+    """
+    sql = "UPDATE workflow_steps SET status = ?, result = ?, error_message = ? WHERE id = ?"
+    result_json = json.dumps(result) if result else None
+    conn = get_db_connection()
+    if not conn: return False
+    try:
+        with conn:
+            conn.execute(sql, (status, result_json, error_message, step_id))
+        log.info(f"✅ 步驟 {step_id} 狀態已更新為: {status}")
+        return True
+    except sqlite3.Error as e:
+        log.error(f"❌ 更新步驟 {step_id} 狀態時出錯: {e}", exc_info=True)
+        return False
+    finally:
+        if conn:
+            conn.close()
+
+# --- 結束工作流函式 ---

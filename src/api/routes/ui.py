@@ -116,22 +116,12 @@ async def serve_primary_dealer_analysis(request: Request):
     return templates.TemplateResponse("primary_dealer_analysis.html", {"request": request})
 
 
-@router.get("/essay_performance", tags=["UI"])
-async def redirect_to_essay_performance_ingestion():
-    """重定向至小作文績效的第一個頁面"""
-    return RedirectResponse(url="/essay_performance/ingestion")
+@router.get("/line_importer", tags=["UI"])
+async def read_line_importer_page():
+    """(Jules @ 2025-10-12) 提供 LINE 匯入工具頁面"""
+    return FileResponse(os.path.join(STATIC_DIR, "line_importer.html"))
 
-@router.get("/essay_performance/ingestion", tags=["UI"])
-async def read_essay_performance_ingestion_page():
-    """提供 小作文績效 - 資料擷取與處理 頁面"""
-    return FileResponse(os.path.join(STATIC_DIR, "essay_performance_ingestion.html"))
-
-@router.get("/essay_performance/processing", tags=["UI"])
-async def read_essay_performance_processing_page():
-    """提供 小作文績效 - 本地AI處理 頁面"""
-    return FileResponse(os.path.join(STATIC_DIR, "essay_performance_processing.html"))
-
-@router.get("/essay_performance/report", tags=["UI"])
-async def read_essay_performance_report_page():
-    """提供 小作文績效 - 報告生成 頁面"""
-    return FileResponse(os.path.join(STATIC_DIR, "essay_performance_report.html"))
+@router.get("/line_workflow_editor", tags=["UI"])
+async def read_line_workflow_editor_page():
+    """(Jules @ 2025-10-12) 提供新的 LINE 工作流編輯器頁面"""
+    return FileResponse(os.path.join(STATIC_DIR, "line_workflow_editor.html"))
