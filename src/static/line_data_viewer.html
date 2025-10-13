@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LINE 資料檢視器</title>
+    <link rel="stylesheet" href="/static/css/main.css">
+    <link rel="stylesheet" href="/static/css/nav.css">
+    <link rel="stylesheet" href="/static/css/line_workflow.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <style>
+        .table-container {
+            width: 100%;
+            overflow-x: auto;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 1rem;
+        }
+        th, td {
+            padding: 12px 15px;
+            text-align: left;
+            border-bottom: 1px solid #dee2e6;
+        }
+        th {
+            background-color: #f8f9fa;
+            font-weight: bold;
+        }
+        tr:hover {
+            background-color: #f1f3f5;
+        }
+        .status-tag {
+            padding: 4px 8px;
+            border-radius: 12px;
+            font-size: 0.8em;
+            font-weight: bold;
+            color: #fff;
+        }
+        .status-completed { background-color: #28a745; }
+        .status-failed, .status-analysis_failed, .status-download_failed { background-color: #dc3545; }
+        .status-running, .status-downloading, .status-analyzing { background-color: #007bff; }
+        .status-pending { background-color: #6c757d; }
+        .status-downloaded { background-color: #17a2b8; }
+    </style>
+</head>
+<body>
+    <nav class="top-nav">
+        <ul>
+            <li><a href="/">鳳凰主頁</a></li>
+            <li><a href="/line_importer">LINE 內容整理</a></li>
+        </ul>
+    </nav>
+
+    <div class="content">
+        <div class="panel">
+             <nav class="tab-nav">
+                <a href="/line_importer">資料擷取與處理</a>
+                <a href="/line_workflow_editor">工作流編輯器</a>
+                <a href="/line_data_viewer" class="active">資料檢視器</a>
+            </nav>
+            <h1>LINE 資料檢視器</h1>
+            <p>此頁面顯示所有已匯入的 LINE 項目，並提供手動檢視與編輯的入口。</p>
+            <div class="table-container">
+                <table id="items-table">
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>發言者</th>
+                            <th>總體狀態</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="items-table-body">
+                        <!-- 資料將由 JavaScript 動態填入 -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const tableBody = document.getElementById('items-table-body');
+
+            const statusClassMap = {
+                'completed': 'status-completed',
+                'failed': 'status-failed',
+                'analysis_failed': 'status-failed',
+                'download_failed': 'status-failed',
+                'running': 'status-running',
+                'downloading': 'status-running',
+                'analyzing': 'status-running',
+                'pending': 'status-pending',
+                'downloaded': 'status-downloaded',
+            };
+
+            const fetchItems = async () => {
+                try {
+                    // 按作者進行智慧排序
+                    const response = await fetch('/api/line_data/items?sort_by=author&sort_order=asc');
+                    if (!response.ok) {
+                        throw new Error('無法獲取資料');
+                    }
+                    const items = await response.json();
+
+                    tableBody.innerHTML = ''; // 清空表格
+                    items.forEach(item => {
+                        const statusClass = statusClassMap[item.status] || 'status-pending';
+                        const row = `
+                            <tr>
+                                <td>${item.id}</td>
+                                <td>${item.author || 'N/A'}</td>
+                                <td><span class="status-tag ${statusClass}">${item.status || 'pending'}</span></td>
+                                <td>
+                                    <a href="/line_item_editor?id=${item.id}" class="button-small">查看/編輯</a>
+                                </td>
+                            </tr>
+                        `;
+                        tableBody.innerHTML += row;
+                    });
+                } catch (error) {
+                    tableBody.innerHTML = `<tr><td colspan="4" style="text-align:center; color: red;">錯誤: ${error.message}</td></tr>`;
+                }
+            };
+
+            fetchItems();
+        });
+    </script>
+</body>
+</html>
