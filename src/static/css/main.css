@@ -29,14 +29,14 @@
 body {
     font-family: var(--phoenix-font-family);
     margin: 0;
-    padding: 20px;
+    /* padding: 20px; (Jules @ 2025-10-12) 移除 body 的 padding，避免影響頂部導覽列 */
     background-color: var(--phoenix-background-color);
     color: var(--phoenix-text-color);
     line-height: 1.6;
 }
 
 .content {
-    padding: 0;
+    padding: 20px;
     max-width: 1400px;
     margin: 0 auto;
 }
