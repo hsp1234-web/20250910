@@ -292,7 +292,7 @@
             const fetchWorkflowStatus = async () => {
                 if (!workflowId) return;
                 try {
-                    const response = await fetch(`/api/workflows/${workflowId}/status`);
+                    const response = await fetch(`/api/line_data/workflow/${workflowId}/status`);
                     if (!response.ok) {
                         console.error(`獲取狀態失敗: ${response.statusText}`);
                         return;

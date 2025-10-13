@@ -223,7 +223,7 @@ from core import config_manager
 from api.routes import (
     ui, page1, page2_downloader, page3_processor, page4_analyzer,
     page5_backup, page6_keys, page7_prompts, page8_details, page9_dashboard,
-    page10_test, system, bond_service_proxy, line_workflow_api, workflow,
+    page10_test, system, bond_service_proxy, workflow,
     line_data_api
 )
 
@@ -248,8 +248,7 @@ app.include_router(page7_prompts.router, tags=["API: 提示詞管理"])
 app.include_router(page8_details.router, prefix="/api", tags=["API: 檔案總覽"])
 app.include_router(page9_dashboard.router, prefix="/api/dashboard", tags=["API: 績效儀表板"])
 app.include_router(page10_test.router, prefix="/api/service_test", tags=["API: 微服務測試"])
-app.include_router(line_workflow_api.router, prefix="/api/workflows")
-app.include_router(line_data_api.router)
+app.include_router(line_data_api.router, prefix="/api/line_data")
 app.include_router(workflow.router)
 
 # 債券服務代理
@@ -1394,7 +1393,7 @@ async def health_check():
 @app.get("/api/health/ready")
 async def readiness_check():
     """
-    檢查核心服務 (依賴安裝、金鑰驗證) 是否已完全準備就緒。
+    檢查核心依賴（如 yt-dlp）是否已準備就緒。
     前端將輪詢此端點以決定何時啟用 UI。
     """
     # 這是由 orchestrator 在準備好後建立的信號檔案

@@ -121,3 +121,45 @@ async def update_line_item(
     except Exception as e:
         log.error(f"更新項目 {item_id} 時發生錯誤: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="更新項目時發生伺服器內部錯誤。")
+
+@router.get("/workflow/{workflow_id}/status", summary="獲取工作流中所有項目的精細化狀態")
+async def get_workflow_status(
+    workflow_id: int,
+    db_client: DBClient = Depends(get_db_client)
+):
+    """
+    (Jules @ 2025-10-14) 新增的端點，用於獲取工作流中每個步驟對應項目的詳細狀態。
+    """
+    workflow = db_client.get_workflow(workflow_id)
+    if not workflow:
+        raise HTTPException(status_code=404, detail="找不到指定的工作流。")
+
+    steps = db_client.get_workflow_steps(workflow_id)
+
+    detailed_statuses = []
+    for step in steps:
+        source_url_id = step.get("parameters", {}).get("source_url_id")
+        if not source_url_id:
+            continue
+
+        # 從資料庫獲取該項目的最新、最詳細的狀態
+        item_details = db_client.get_url_by_id(source_url_id)
+        if not item_details:
+            continue
+
+        detailed_statuses.append({
+            "step_id": step["id"],
+            "source_url_id": source_url_id,
+            "status_download": item_details.get("status_download", "N/A"),
+            "status_extraction": item_details.get("status_extraction", "N/A"),
+            "status_ocr": item_details.get("status_ocr", "N/A"),
+            "status_ai_summary": item_details.get("status_ai_summary", "N/A"),
+            "overall_status": item_details.get("status", "N/A"), # 總體狀態
+            "last_error": item_details.get("last_error_details")
+        })
+
+    return {
+        "workflow_id": workflow_id,
+        "workflow_status": workflow.get("status"),
+        "steps": detailed_statuses
+    }

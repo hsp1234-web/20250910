@@ -78,7 +78,7 @@ def test_get_workflow_status_success(client: TestClient, mocker):
     mocker.patch('db.client.DBClient.get_url_by_id', return_value=mock_item_details)
 
     # 3. 執行 API 請求
-    response = client.get("/api/workflows/1/status")
+    response = client.get("/api/line_data/workflow/1/status")
 
     # 4. 斷言結果
     assert response.status_code == 200
