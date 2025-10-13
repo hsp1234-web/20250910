@@ -229,8 +229,14 @@ def initialize_database(conn: sqlite3.Connection = None):
                 "extracted_image_paths": "TEXT",
                 "last_error_details": "TEXT",
                 "processing_history": "TEXT", # 新的歷程記錄欄位
-                "ocr_status": "TEXT DEFAULT 'pending'", # (Jules @ 2025-10-12) 補上缺少的遷移欄位
-                "ai_status": "TEXT DEFAULT 'pending'"   # (Jules @ 2025-10-12) 補上缺少的遷移欄位
+                # --- (Jules @ 2025-10-14) 狀態追蹤升級 ---
+                "status_download": "TEXT DEFAULT 'pending'",
+                "status_extraction": "TEXT DEFAULT 'pending'",
+                "status_ocr": "TEXT DEFAULT 'not_applicable'", # 預設為不適用
+                "status_ai_summary": "TEXT DEFAULT 'pending'",
+                # --- 舊有狀態欄位，保留作為備用或總體狀態 ---
+                "ocr_status": "TEXT DEFAULT 'pending'",
+                "ai_status": "TEXT DEFAULT 'pending'"
             }
             # 輔助函式，避免重複程式碼
             def _add_column_if_not_exists(table, col, col_type):
