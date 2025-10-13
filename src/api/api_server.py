@@ -29,7 +29,7 @@ SRC_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SRC_DIR))
 
 # V4 循環導入修復：從新的依賴檔案中導入
-from .dependencies import db_client
+from api.dependencies import db_client
 from core import key_manager
 
 # --- JULES 於 2025-08-09 的修改：設定應用程式全域時區 ---
@@ -220,7 +220,12 @@ async def add_server_port_to_state(request: Request, call_next):
 
 # --- 整合模組化路由 ---
 from core import config_manager
-from api.routes import ui, page1, page2_downloader, page3_processor, page4_analyzer, page5_backup, page6_keys, page7_prompts, page8_details, page9_dashboard, page10_test, system, bond_service_proxy, line_workflow_api, workflow
+from api.routes import (
+    ui, page1, page2_downloader, page3_processor, page4_analyzer,
+    page5_backup, page6_keys, page7_prompts, page8_details, page9_dashboard,
+    page10_test, system, bond_service_proxy, line_workflow_api, workflow,
+    line_data_api
+)
 
 # --- JULES (2025-09-15): 在應用程式啟動時載入設定 ---
 # 將設定載入到 app.state 中，使其在整個應用程式中可用。
@@ -243,8 +248,9 @@ app.include_router(page7_prompts.router, tags=["API: 提示詞管理"])
 app.include_router(page8_details.router, prefix="/api", tags=["API: 檔案總覽"])
 app.include_router(page9_dashboard.router, prefix="/api/dashboard", tags=["API: 績效儀表板"])
 app.include_router(page10_test.router, prefix="/api/service_test", tags=["API: 微服務測試"])
-app.include_router(line_workflow_api.router) # (Jules @ 2025-10-12) Renamed from essay_performance
-app.include_router(workflow.router) # (Jules @ 2025-10-12) 新增工作流 API 路由
+app.include_router(line_workflow_api.router, prefix="/api/workflows")
+app.include_router(line_data_api.router)
+app.include_router(workflow.router)
 
 # 債券服務代理
 app.include_router(bond_service_proxy.router, prefix="/api/bond_service", tags=["API: Bond Service Proxy"]) # API 代理
