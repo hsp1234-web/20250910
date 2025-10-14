@@ -92,25 +92,17 @@ def launch_microservice(service_path: Path):
     else:
         log.info(f"[{log_prefix}] 虛擬環境已存在，跳過建立。")
 
-    # 步驟 2: 安裝依賴 (優化後)
-    lock_file = venv_dir / ".install_lock"
-    should_install = True
-    if lock_file.exists() and req_file.exists():
-        # 如果 lock 檔案的修改時間比 requirements.txt 新，則表示依賴未變更
-        if lock_file.stat().st_mtime > req_file.stat().st_mtime:
-            log.info(f"[{log_prefix}] 依賴未變更，跳過安裝。")
-            should_install = False
-
-    if should_install and req_file.exists():
-        log.info(f"[{log_prefix}] 正在安裝或更新依賴...")
+    # 步驟 2: 安裝依賴
+    # 根據使用者需求 (2025-10-14)，我們希望每次啟動都安裝最新套件，
+    # 特別是 yt-dlp，因此移除了 lock 檔案檢查，並強制執行安裝。
+    if req_file.exists():
+        log.info(f"[{log_prefix}] 正在強制安裝或更新依賴...")
         run_command([
             "uv", "pip", "install",
             "-p", str(python_exec),
             "-r", str(req_file)
         ], log_prefix=log_prefix)
-        # 成功安裝後，建立或更新 lock 檔案
-        lock_file.touch()
-    elif not req_file.exists():
+    else:
         log.warning(f"[{log_prefix}] 找不到 requirements.txt，跳過依賴安裝。")
 
     # 步驟 3: 啟動服務
@@ -323,31 +315,23 @@ def install_core_dependencies():
         "gemini.txt",
     ]
 
-    # 效能優化：為解決臨時環境中套件不保留的問題，暫時強制每次都安裝依賴。
-    lock_file = requirements_dir / ".install_lock"
-    should_install = True
-
-    if should_install:
-        for req_file_name in core_req_files:
-            req_file_path = requirements_dir / req_file_name
-            if req_file_path.exists():
-                log.info(f"正在從 {req_file_name} 安裝依賴...")
-                try:
-                    # 使用 uv 來快速安裝
-                    run_command([
-                        "uv", "pip", "install", "--system", "-r", str(req_file_path)
-                    ], log_prefix="CoreDeps")
-                except Exception as e:
-                    log.error(f"從 {req_file_name} 安裝依賴時失敗: {e}")
-                    raise RuntimeError(f"核心依賴安裝失敗: {req_file_name}")
-            else:
-                log.warning(f"找不到依賴文件 {req_file_path}，跳過。")
-
-        # 成功安裝後，建立或更新 lock 檔案
-        lock_file.touch()
-        log.info("✅ 核心依賴安裝完成。")
-    else:
-        log.info("✅ 核心依賴已是最新狀態。")
+    # 根據使用者需求 (2025-10-14)，我們希望每次啟動都安裝最新套件，
+    # 因此移除 lock 檔案檢查，並強制執行安裝。
+    for req_file_name in core_req_files:
+        req_file_path = requirements_dir / req_file_name
+        if req_file_path.exists():
+            log.info(f"正在從 {req_file_name} 安裝依賴...")
+            try:
+                # 使用 uv 來快速安裝，uv 預設會尋找最新版本
+                run_command([
+                    "uv", "pip", "install", "--system", "-r", str(req_file_path)
+                ], log_prefix="CoreDeps")
+            except Exception as e:
+                log.error(f"從 {req_file_name} 安裝依賴時失敗: {e}")
+                raise RuntimeError(f"核心依賴安裝失敗: {req_file_name}")
+        else:
+            log.warning(f"找不到依賴文件 {req_file_path}，跳過。")
+    log.info("✅ 核心依賴安裝完成。")
 
 
 def install_non_essential_dependencies_background():
