@@ -119,7 +119,7 @@
             statusMessage.textContent = '正在從資料庫載入既有項目...';
             statusMessage.style.color = 'var(--primary-color)';
             try {
-                const response = await fetch('/api/line/items');
+                const response = await fetch('/api/line_data/items');
                 if (!response.ok) {
                     const errorResult = await response.json();
                     throw new Error(errorResult.detail || '無法載入項目列表');
