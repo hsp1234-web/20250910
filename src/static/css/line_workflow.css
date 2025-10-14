@@ -61,3 +61,47 @@
     opacity: 1;
     box-shadow: 0 2px 4px rgba(0,0,0,0.1);
 }
+
+/* --- (Jules @ 2025-10-14) 新增響應式設計 --- */
+@media (max-width: 768px) {
+    /* 在 line_item_editor.html 中，將網格佈局改為單欄堆疊 */
+    .editor-grid {
+        grid-template-columns: 1fr; /* 在小螢幕上變為單欄 */
+        gap: 1.5rem; /* 縮小垂直間距 */
+    }
+
+    /* 在 line_workflow_editor.html 中，調整標頭佈局 */
+    .workflow-header {
+        flex-direction: column; /* 標題和按鈕垂直堆疊 */
+        align-items: flex-start; /* 左對齊 */
+        gap: 1rem;
+    }
+
+    .workflow-actions {
+        width: 100%;
+        display: flex;
+        justify-content: space-between; /* 讓按鈕分開 */
+    }
+
+    .workflow-actions button {
+        flex-grow: 1; /* 讓按鈕填滿可用空間 */
+        margin-left: 5px !important;
+    }
+
+    .workflow-actions button:first-child {
+        margin-left: 0 !important;
+    }
+
+    /* 調整步驟顯示，讓狀態區塊換行 */
+    .step {
+        flex-direction: column; /* 垂直堆疊 */
+        align-items: flex-start;
+        gap: 0.5rem;
+    }
+
+    .detailed-statuses {
+        padding-left: 0;
+        width: 100%; /* 佔滿整行 */
+        margin-top: 10px;
+    }
+}

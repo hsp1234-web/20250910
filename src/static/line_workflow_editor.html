@@ -143,7 +143,7 @@
             const addStepBtn = document.getElementById('add-step-btn');
 
             let workflowId = null;
-            let statusInterval = null;
+            let eventSource = null; // 將 statusInterval 替換為 eventSource
 
             const statusTextMap = {
                 'pending': '待處理',
@@ -237,18 +237,48 @@
                     }
                 });
 
-                // 如果工作流已結束，停止輪詢並禁用按鈕
+                // 如果工作流已結束，關閉 SSE 連線並禁用按鈕
                 const terminalStates = ['completed', 'completed_with_errors', 'failed'];
                 if (terminalStates.includes(workflow_status)) {
-                    if (statusInterval) {
-                        clearInterval(statusInterval);
-                        statusInterval = null;
-                        console.log("工作流執行結束，已停止輪詢。");
+                    if (eventSource) {
+                        eventSource.close();
+                        eventSource = null;
+                        console.log("工作流執行結束，已關閉 SSE 連線。");
                     }
                     executeBtn.disabled = true;
                     addStepBtn.disabled = true;
                     workflowInfoEl.textContent += ' (已結束)';
                 }
+            };
+
+            const startEventSource = () => {
+                if (eventSource) { // 防止重複建立連線
+                    return;
+                }
+                eventSource = new EventSource(`/api/workflows/${workflowId}/stream`);
+                console.log(`已建立對 /api/workflows/${workflowId}/stream 的 EventSource 連線。`);
+
+                eventSource.onmessage = (event) => {
+                    try {
+                        const data = JSON.parse(event.data);
+                         if (data.error) {
+                            console.error("從伺服器收到錯誤:", data.error);
+                            workflowInfoEl.textContent = `錯誤: ${data.error}`;
+                            eventSource.close();
+                            return;
+                        }
+                        updateUI(data);
+                    } catch (e) {
+                        console.error("解析 SSE 資料失敗:", e);
+                    }
+                };
+
+                eventSource.onerror = () => {
+                    console.error("EventSource 發生錯誤，連線已關閉。");
+                    workflowInfoEl.textContent += ' (與伺服器的即時連線中斷)';
+                    eventSource.close();
+                    eventSource = null; // 標記為已關閉
+                };
             };
 
             const fetchInitialDetails = async () => {
@@ -268,41 +298,22 @@
                     const terminalStates = ['completed', 'completed_with_errors', 'failed'];
                     if (!terminalStates.includes(workflow.status)) {
                         executeBtn.disabled = false;
-                        // addStepBtn.disabled = false; // Add step logic to be refined
                     } else {
                         executeBtn.disabled = true;
                         addStepBtn.disabled = true;
-                         workflowInfoEl.textContent += ' (已結束)';
-                         // 即使結束了，也要獲取一次最終狀態
-                         await fetchWorkflowStatus();
+                        workflowInfoEl.textContent += ' (已結束)';
+                        // 即使已結束，也啟動一次 SSE 來獲取最終的詳細狀態
+                        startEventSource();
+                        return; // 結束後不需再做後續處理
                     }
 
-                    // 如果載入時就在執行中，則開始輪詢
+                    // 如果載入時就在執行中，則開始監聽事件
                     if (workflow.status === 'running') {
-                         if (!statusInterval) {
-                            statusInterval = setInterval(fetchWorkflowStatus, 3000);
-                        }
+                         startEventSource();
                     }
 
                 } catch (error) {
                     workflowInfoEl.textContent = `錯誤: ${error.message}`;
-                }
-            };
-
-            const fetchWorkflowStatus = async () => {
-                if (!workflowId) return;
-                try {
-                    const response = await fetch(`/api/workflows/${workflowId}/status`);
-                    if (!response.ok) {
-                        console.error(`獲取狀態失敗: ${response.statusText}`);
-                        return;
-                    }
-                    const data = await response.json();
-                    updateUI(data);
-                } catch (error) {
-                    console.error('輪詢狀態時發生錯誤:', error);
-                    // 發生錯誤時停止輪詢，避免無限錯誤循環
-                    if(statusInterval) clearInterval(statusInterval);
                 }
             };
 
@@ -317,14 +328,12 @@
                     const response = await fetch(`/api/workflows/${workflowId}/execute`, { method: 'POST' });
                     if (!response.ok) throw new Error('觸發執行失敗');
 
-                    // 觸發成功後，立即獲取一次狀態並開始輪詢
-                    await fetchWorkflowStatus();
-                    if (!statusInterval) {
-                        statusInterval = setInterval(fetchWorkflowStatus, 2000); // 縮短輪詢間隔
-                    }
+                    // 觸發成功後，立即開始監聽 SSE 事件
+                    startEventSource();
+
                 } catch (error) {
                     workflowInfoEl.textContent = `執行錯誤: ${error.message}`;
-                    executeBtn.disabled = false;
+                    executeBtn.disabled = false; // 允許重試
                     addStepBtn.disabled = false;
                 }
             };
