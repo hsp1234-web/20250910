@@ -14,8 +14,8 @@ log = logging.getLogger('api_gateway')
 
 # --- FastAPI 路由器 ---
 router = APIRouter(
-    prefix="/api/line",
-    tags=["LINE Workflow"],
+    prefix="/api/workflows",
+    tags=["Workflows"],
 )
 
 # --- 微服務配置 ---
@@ -91,24 +91,21 @@ async def proxy_ingest_text(
         raise HTTPException(status_code=500, detail="代理請求時發生內部錯誤。")
 
 
-@router.get("/items", summary="獲取所有已匯入的 LINE 項目")
-async def get_all_ingested_items(db_client: DBClient = Depends(get_db_client)):
+@router.get("/", summary="獲取所有工作流的歷史紀錄")
+async def get_all_workflows(db_client: DBClient = Depends(get_db_client)):
     """
-    從資料庫中獲取所有已透過 LINE 聊天紀錄匯入功能處理過的項目。
+    從資料庫中檢索所有已建立的工作流，並按建立時間降序排序。
     """
     try:
-        # 使用 get_filtered_urls()，不帶任何參數以獲取所有紀錄
-        all_items = db_client.get_filtered_urls()
-        # 預設按 ID 降序排序，讓最新的項目顯示在最前面
-        if all_items:
-            return sorted(all_items, key=lambda item: item.get('id', 0), reverse=True)
-        return []
+        workflows = db_client.get_all_workflows()
+        return sorted(workflows, key=lambda w: w.get('created_at', ''), reverse=True)
     except Exception as e:
-        log.error(f"從資料庫獲取 LINE 項目時發生錯誤: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="無法從資料庫讀取項目清單。")
+        log.error(f"獲取所有工作流時發生錯誤: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="無法從資料庫讀取工作流列表。")
 
-@router.get("/{workflow_id}/status", summary="獲取工作流中所有項目的精細化狀態")
-async def get_workflow_status(
+
+@router.get("/{workflow_id}/line_status", summary="獲取工作流中所有 LINE 項目的精細化狀態")
+async def get_workflow_line_item_status(
     workflow_id: int,
     db_client: DBClient = Depends(get_db_client)
 ):
