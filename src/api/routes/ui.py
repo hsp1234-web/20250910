@@ -135,3 +135,8 @@ async def read_line_data_viewer_page():
 async def read_line_item_editor_page():
     """(Jules @ 2025-10-14) 提供新的 LINE 項目編輯器頁面"""
     return FileResponse(os.path.join(STATIC_DIR, "line_item_editor.html"))
+
+@router.get("/line_workflow_history", tags=["UI"])
+async def read_line_workflow_history_page():
+    """(Jules @ 2025-10-14) 提供新的 LINE 工作流歷史頁面"""
+    return FileResponse(os.path.join(STATIC_DIR, "line_workflow_history.html"))
