@@ -1,124 +1,98 @@
-# tests/api/routes/test_essay_performance.py
 import pytest
-from fastapi.testclient import TestClient
-from unittest.mock import AsyncMock, MagicMock
-import httpx
+from unittest.mock import patch, MagicMock
+from fastapi import HTTPException, BackgroundTasks
 
-# --- 測試設定 ---
-import os
-os.environ['API_MODE'] = 'mock'
+# 直接匯入我們要測試的函式
+from src.api.routes.line_workflow_api import (
+    create_workflow,
+    add_workflow_step,
+    get_workflow_details,
+    execute_workflow,
+    WorkflowCreateRequest,
+    WorkflowStepRequest
+)
 
-# (Jules @ 2025-10-11) 移除全域的 app 匯入。
-# 在全域範圍匯入 app 會導致在 conftest.py 的 mock 生效前就載入路由，
-# 使得 mock 失效。正確的做法是透過 fixture 延遲 app 的匯入與 TestClient 的實例化。
+@pytest.mark.asyncio
+@patch("src.api.routes.line_workflow_api.workflow_manager")
+async def test_create_workflow_success(mock_wm: MagicMock):
+    """直接測試 create_workflow 函式的成功路徑。"""
+    mock_wm.create_workflow.return_value = {"id": "wf_test_123"}
+    request = WorkflowCreateRequest(name="一個成功的測試")
 
-# --- 測試客戶端 Fixture ---
-@pytest.fixture
-def client():
-    """
-    建立一個 TestClient 實例，並為其設定一個乾淨的記憶體資料庫。
-    """
-    # 設定環境變數，讓 database.py 使用記憶體資料庫
-    os.environ['TEST_DB_PATH'] = ':memory:'
+    response = await create_workflow(request)
 
-    # 匯入 database 模組並初始化
-    from src.db import database
-    conn = database.get_db_connection()
-    database.initialize_database(conn)
-    conn.close()
+    assert response == {"workflow_id": "wf_test_123"}
+    mock_wm.create_workflow.assert_called_once_with(name="一個成功的測試")
 
-    # 延遲匯入和實例化，確保 mock 已被應用
-    from src.api.api_server import app
-    with TestClient(app) as test_client:
-        yield test_client
+@pytest.mark.asyncio
+@patch("src.api.routes.line_workflow_api.workflow_manager")
+async def test_create_workflow_fails(mock_wm: MagicMock):
+    """測試當 workflow_manager 回傳 None 時，create_workflow 是否引發 HTTPException。"""
+    mock_wm.create_workflow.return_value = None
+    request = WorkflowCreateRequest(name="一個失敗的測試")
 
-    # 測試結束後，清理環境變數
-    del os.environ['TEST_DB_PATH']
+    with pytest.raises(HTTPException) as excinfo:
+        await create_workflow(request)
 
+    assert excinfo.value.status_code == 500
+    assert "無法建立工作流檔案" in excinfo.value.detail
 
-# (Jules @ 2025-10-11) 移除對 mock_httpx_post 的依賴，因為 conftest.py 中的
-# 新 fixture 提供了更真實的服務發現機制。現在我們需要 mock httpx.post 來模擬
-# 對下游服務的呼叫。
+@pytest.mark.asyncio
+@patch("src.api.routes.line_workflow_api.workflow_manager")
+async def test_add_step_success(mock_wm: MagicMock):
+    """測試 add_workflow_step 的成功路徑。"""
+    step_data = {"id": "step_abc"}
+    mock_wm.add_step.return_value = step_data
+    request = WorkflowStepRequest(command="TEST_CMD", parameters={"p1": "v1"}, step_order=1)
 
-@pytest.fixture
-def mock_httpx_client(mocker):
-    """Mock aiohttp.ClientSession aenter and post methods."""
-    mock_post = AsyncMock()
-    mock_client = MagicMock()
-    mock_client.post = mock_post
+    response = await add_workflow_step("wf_123", request)
 
-    # We need to mock the context manager
-    mock_async_context_manager = MagicMock()
-    mock_async_context_manager.__aenter__.return_value = mock_client
-
-    mocker.patch('httpx.AsyncClient', return_value=mock_async_context_manager)
-    return mock_post
-
-def test_proxy_ingest_text_success(client: TestClient, mock_httpx_client: AsyncMock):
-    """
-    測試代理端點在成功情況下的行為。
-    """
-    # 1. 準備模擬的回應
-    mock_response = MagicMock(spec=httpx.Response)
-    mock_response.status_code = 200
-    mock_response.json.return_value = {"message": "來自模擬微服務的回應", "inserted_count": 1}
-    mock_response.raise_for_status.return_value = None
-    mock_httpx_client.return_value = mock_response
-
-    # 2. 執行測試
-    test_payload = {"text": "這是一段測試文字"}
-    response = client.post("/api/line/ingest_text", json=test_payload)
-
-    # 3. 進行斷言
-    assert response.status_code == 200
-    assert response.json()["message"] == "來自模擬微服務的回應"
-    mock_httpx_client.assert_called_once_with(
-        "http://127.0.0.1:8002/ingest",
-        json=test_payload,
-        timeout=30.0
+    assert response == {"step_id": "step_abc"}
+    mock_wm.add_step.assert_called_once_with(
+        workflow_id="wf_123",
+        command="TEST_CMD",
+        parameters={"p1": "v1"},
+        step_order=1
     )
 
+@pytest.mark.asyncio
+@patch("src.api.routes.line_workflow_api.workflow_manager")
+async def test_get_details_found(mock_wm: MagicMock):
+    """直接測試 get_workflow_details 函式的成功路徑。"""
+    mock_wm.get_workflow.return_value = {
+        "id": "wf_abc", "name": "一個存在的工作流", "steps": [{"id": "step1"}]
+    }
 
-def test_proxy_ingest_text_service_unavailable(client: TestClient, mock_httpx_client: AsyncMock):
-    """
-    測試當微服務無法連線時，代理端點是否回傳 503。
-    """
-    # 1. 設定 mock 以引發連線錯誤
-    mock_httpx_client.side_effect = httpx.RequestError("連線被拒", request=MagicMock())
+    response = await get_workflow_details(workflow_id="wf_abc")
 
-    # 2. 執行測試
-    test_payload = {"text": "測試文字"}
-    response = client.post("/api/line/ingest_text", json=test_payload)
+    assert response["workflow"]["id"] == "wf_abc"
+    assert len(response["steps"]) == 1
+    mock_wm.get_workflow.assert_called_once_with("wf_abc")
 
-    # 3. 進行斷言
-    assert response.status_code == 503
-    assert "後端解析服務目前無法使用" in response.json()["detail"]
+@pytest.mark.asyncio
+@patch("src.api.routes.line_workflow_api.workflow_manager")
+async def test_get_details_not_found(mock_wm: MagicMock):
+    """測試當工作流不存在時，get_workflow_details 是否引發 HTTPException。"""
+    mock_wm.get_workflow.return_value = None
 
+    with pytest.raises(HTTPException) as excinfo:
+        await get_workflow_details(workflow_id="wf_nonexistent")
 
-def test_proxy_ingest_text_service_returns_error(client: TestClient, mock_httpx_client: AsyncMock):
-    """
-    測試當微服務本身回傳一個錯誤狀態碼時，代理端點是否能正確轉發。
-    """
-    # 1. 準備模擬的錯誤回應
-    mock_error_response = MagicMock(spec=httpx.Response)
-    mock_error_response.status_code = 400
-    mock_error_response.text = '{"detail":"Bad Request"}'
-    mock_error_response.json.return_value = {"detail": "微服務說你的請求格式錯誤"}
+    assert excinfo.value.status_code == 404
+    mock_wm.get_workflow.assert_called_once_with("wf_nonexistent")
 
-    # 建立一個會引發 HTTPStatusError 的 mock
-    mock_error_response.raise_for_status.side_effect = httpx.HTTPStatusError(
-        "Bad Request", request=MagicMock(), response=mock_error_response
-    )
+@pytest.mark.asyncio
+@patch("src.api.routes.line_workflow_api.run_workflow_in_background")
+@patch("src.api.routes.line_workflow_api.workflow_manager")
+async def test_execute_workflow_logic(mock_wm: MagicMock, mock_run_bg: MagicMock):
+    """直接測試 execute_workflow 函式的邏輯。"""
+    workflow_id = "wf_to_execute"
+    mock_wm.get_workflow.return_value = {"id": workflow_id}
 
-    mock_httpx_client.return_value = mock_error_response
+    mock_background_tasks = MagicMock(spec=BackgroundTasks)
 
-    # 2. 執行測試
-    test_payload = {"text": "一個會導致錯誤的請求"}
-    response = client.post("/api/line/ingest_text", json=test_payload)
+    response = await execute_workflow(workflow_id, mock_background_tasks)
 
-    # 3. 進行斷言
-    assert response.status_code == 400
-    assert response.json()["detail"] == {"detail": "微服務說你的請求格式錯誤"}
-
-
-# (Jules @ 2025-10-12) 移除舊的、與新架構無關的測試案例
+    assert response["message"] == "工作流已成功觸發執行。"
+    mock_wm.get_workflow.assert_called_once_with(workflow_id)
+    mock_background_tasks.add_task.assert_called_once_with(mock_run_bg, workflow_id)
