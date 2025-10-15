@@ -183,9 +183,14 @@ def upload_to_gemini(genai_module, audio_path: Path, display_filename: str):
     def upload_task():
         log.info("正要呼叫 genai.upload_file...")
         try:
-            # 修正：移除不被支援的 'request_options' 參數。
-            # 超時控制完全由外部的 concurrent.futures.ThreadPoolExecutor 的 future.result(timeout=...) 來處理。
-            return genai_module.upload_file(path=str(audio_path), display_name=display_filename, mime_type=mime_type)
+            # 修正：根據 TypeError，我們必須提供 rag_store_name 參數。
+            # 由於我們並非真的要使用 RAG，因此傳入一個空字串來滿足 API 的要求。
+            return genai_module.upload_file(
+                path=str(audio_path),
+                display_name=display_filename,
+                mime_type=mime_type,
+                rag_store_name=""  # 提供必要的參數
+            )
         except Exception as e:
             log.error(f"檔案上傳執行緒內部發生錯誤: {e}", exc_info=True)
             raise

@@ -43,7 +43,7 @@ def download_media(
 
     if download_type == "audio":
         command.extend([
-            "-f", "bestaudio",
+            "-f", "bestaudio/best",
             "-x",  # --extract-audio
             "--audio-format", "mp3",
         ])
