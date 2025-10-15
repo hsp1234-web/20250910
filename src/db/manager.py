@@ -72,14 +72,7 @@ ACTION_MAP = {
     "get_filtered_urls": database.get_filtered_urls, # V4 優化 (2025-09-18)
     "get_urls_by_url_list": database.get_urls_by_url_list, # (Jules @ 2025-10-08) 新增
 
-    # --- 工作流引擎 Actions (Jules @ 2025-10-12) ---
-    "create_workflow": database.create_workflow,
-    "add_workflow_step": database.add_workflow_step,
-    "get_workflow": database.get_workflow,
-    "get_workflow_steps": database.get_workflow_steps,
-    "update_workflow_status": database.update_workflow_status,
-    "update_workflow_step_status": database.update_workflow_step_status,
-    # --- 結束 ---
+    # --- (Jules @ 2025-10-15) 移除：工作流相關的 actions 已不再需要 ---
 
     # For testing:
     "clear_all_tasks": database.clear_all_tasks,
