@@ -79,6 +79,9 @@ ACTION_MAP = {
     "get_workflow_steps": database.get_workflow_steps,
     "update_workflow_status": database.update_workflow_status,
     "update_workflow_step_status": database.update_workflow_step_status,
+    "get_all_workflows": database.get_all_workflows, # (Jules @ 2025-10-15) 新增
+    "get_latest_workflow": database.get_latest_workflow, # (Jules @ 2025-10-15) 新增
+    "reset_workflow": database.reset_workflow, # (Jules @ 2025-10-15) 新增
     # --- 結束 ---
 
     # For testing:

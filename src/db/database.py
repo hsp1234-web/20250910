@@ -1050,7 +1050,8 @@ def get_filtered_urls(start_date: str = None, end_date: str = None) -> list[dict
     """
     # Jules @ 2025-09-17: 新增 title, message_time, 和 status 欄位以支援卡片模式
     # Jules @ 2025-10-09: 新增 ocr_status 和 ai_status 欄位
-    query = "SELECT id, url, author, message_date, message_time, title, status, ocr_status, ai_status FROM extracted_urls"
+    # Jules @ 2025-10-15: 修正 - 新增所有詳細狀態欄位以修復資料檢視器
+    query = "SELECT id, url, author, message_date, message_time, title, status, ocr_status, ai_status, status_download, status_extraction, status_ocr, status_ai_summary FROM extracted_urls"
     filters = []
     params = []
 
@@ -1341,6 +1342,60 @@ def update_workflow_step_status(step_id: int, status: str, result: dict = None, 
         return True
     except sqlite3.Error as e:
         log.error(f"❌ 更新步驟 {step_id} 狀態時出錯: {e}", exc_info=True)
+        return False
+    finally:
+        if conn:
+            conn.close()
+
+def get_all_workflows() -> list[dict]:
+    """獲取所有工作流的列表。"""
+    sql = "SELECT * FROM workflows ORDER BY created_at DESC"
+    conn = get_db_connection()
+    if not conn: return []
+    try:
+        cursor = conn.cursor()
+        cursor.execute(sql)
+        rows = cursor.fetchall()
+        return [dict(row) for row in rows]
+    except sqlite3.Error as e:
+        log.error(f"❌ 獲取所有工作流時發生錯誤: {e}", exc_info=True)
+        return []
+    finally:
+        if conn:
+            conn.close()
+
+def get_latest_workflow() -> dict | None:
+    """獲取最新的（ID最大的）工作流。"""
+    sql = "SELECT * FROM workflows ORDER BY id DESC LIMIT 1"
+    conn = get_db_connection()
+    if not conn: return None
+    try:
+        cursor = conn.cursor()
+        cursor.execute(sql)
+        row = cursor.fetchone()
+        return dict(row) if row else None
+    except sqlite3.Error as e:
+        log.error(f"❌ 獲取最新工作流時發生錯誤: {e}", exc_info=True)
+        return None
+    finally:
+        if conn:
+            conn.close()
+
+def reset_workflow(workflow_id: int) -> bool:
+    """重置特定工作流及其所有步驟的狀態為 'pending'。"""
+    conn = get_db_connection()
+    if not conn: return False
+    try:
+        with conn:
+            cursor = conn.cursor()
+            # 重置工作流主表
+            cursor.execute("UPDATE workflows SET status = 'pending' WHERE id = ?", (workflow_id,))
+            # 重置所有相關步驟
+            cursor.execute("UPDATE workflow_steps SET status = 'pending', result = NULL, error_message = NULL WHERE workflow_id = ?", (workflow_id,))
+        log.info(f"✅ 工作流 {workflow_id} 已成功重置。")
+        return True
+    except sqlite3.Error as e:
+        log.error(f"❌ 重置工作流 {workflow_id} 時發生錯誤: {e}", exc_info=True)
         return False
     finally:
         if conn:

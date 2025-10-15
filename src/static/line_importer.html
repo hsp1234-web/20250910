@@ -185,8 +185,8 @@
                                      .map(cb => {
                                          const row = cb.closest('tr');
                                          return {
-                                             id: parseInt(cb.value), // 確保 ID 是數字
-                                             url: row.dataset.itemUrl
+                                             id: cb.value,
+                                             url: row.dataset.itemUrl // 從 data- 屬性獲取 URL
                                          };
                                      });
 
@@ -200,29 +200,40 @@
             nextStepBtn.disabled = true;
 
             try {
-                // (Jules @ 2025-10-15) 整合為單一 API 呼叫
-                const payload = {
-                    name: `小作文處理 - ${new Date().toLocaleString()}`,
-                    items: selectedItems
-                };
-
-                const response = await fetch('/api/workflows/create_from_items', {
+                // 步驟 1: 建立一個新的工作流
+                const wfResponse = await fetch('/api/workflows/', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload),
+                    body: JSON.stringify({ name: `小作文處理 - ${new Date().toLocaleString()}` }),
                 });
+                if (!wfResponse.ok) throw new Error('無法建立工作流');
+                const wfData = await wfResponse.json();
+                const workflowId = wfData.workflow_id;
 
-                if (!response.ok) {
-                    const errorData = await response.json();
-                    throw new Error(errorData.detail || '建立工作流失敗');
+                statusMessage.textContent = `工作流 ${workflowId} 已建立，正在新增下載步驟...`;
+
+                // 步驟 2: 為每個選取的項目新增一個下載步驟
+                for (const item of selectedItems) {
+                    const stepPayload = {
+                        command: 'DOWNLOAD_AND_EXTRACT', // 假設後端有一個這樣的指令
+                        parameters: {
+                            url: item.url,
+                            source_url_id: item.id
+                        }
+                    };
+                    const stepResponse = await fetch(`/api/workflows/${workflowId}/steps`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(stepPayload),
+                    });
+                    if (!stepResponse.ok) throw new Error(`為項目 ${item.id} 新增步驟失敗`);
                 }
 
-                const result = await response.json();
-                statusMessage.textContent = `${result.message} 正在重新導向...`;
+                statusMessage.textContent = '所有步驟已成功加入工作流，正在重新導向...';
                 statusMessage.style.color = 'var(--success-color)';
 
-                // 成功後直接重新導向到編輯器頁面
-                window.location.href = `/line_workflow_editor`;
+                // 步驟 3: 重新導向到新的編輯器頁面
+                window.location.href = `/line_workflow_editor?workflow_id=${workflowId}`;
 
             } catch (error) {
                 statusMessage.textContent = `建立工作流時發生錯誤：${error.message}`;

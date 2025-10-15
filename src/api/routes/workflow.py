@@ -2,6 +2,7 @@
 # src/api/routes/workflow.py
 import asyncio
 import json
+import logging
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
@@ -9,6 +10,9 @@ from typing import List, Dict, Any, AsyncGenerator
 
 from src.db.client import DBClient
 from src.core.workflow_engine import WorkflowEngine
+
+# --- 日誌設定 ---
+log = logging.getLogger('api_gateway')
 
 # --- 路由器與依賴注入 ---
 router = APIRouter(
@@ -58,8 +62,75 @@ class WorkflowDetailResponse(BaseModel):
 
 # --- API 端點 ---
 
-# (Jules @ 2025-10-15) 移除舊的、分散的建立工作流和新增步驟的端點。
-# 這些功能已被 line_workflow_api.py 中的 /create_from_items 端點整合並取代。
+@router.post("/", response_model=WorkflowCreateResponse, summary="建立一個新的工作流")
+async def create_new_workflow(
+    request: WorkflowCreateRequest,
+    db: DBClient = Depends(get_db_client)
+):
+    """
+    建立一個空的工作流容器，並回傳其唯一的 ID。
+    """
+    try:
+        workflow_id = db.create_workflow(name=request.name)
+        if workflow_id is None:
+            raise HTTPException(status_code=500, detail="無法在資料庫中建立工作流。")
+        return WorkflowCreateResponse(workflow_id=workflow_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"建立工作流時發生錯誤: {e}")
+
+@router.post("/{workflow_id}/steps", response_model=StepCreateResponse, summary="在工作流中新增一個步驟")
+async def add_step_to_workflow(
+    workflow_id: int,
+    request: StepCreateRequest,
+    db: DBClient = Depends(get_db_client)
+):
+    """
+    在指定的工作流中新增一個指令步驟。
+    """
+    try:
+        # 1. 取得目前工作流的步驟數量，以決定新步驟的順序
+        existing_steps = db.get_workflow_steps(workflow_id)
+        next_step_order = len(existing_steps) + 1
+
+        # 2. 新增步驟
+        step_id = db.add_workflow_step(
+            workflow_id=workflow_id,
+            step_order=next_step_order,
+            command=request.command,
+            parameters=request.parameters
+        )
+        if step_id is None:
+            raise HTTPException(status_code=500, detail="無法在資料庫中新增步驟。")
+        return StepCreateResponse(step_id=step_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"新增步驟時發生錯誤: {e}")
+
+@router.get("/latest", response_model=WorkflowDetailResponse, summary="獲取最新的工作流")
+async def get_latest_workflow(db: DBClient = Depends(get_db_client)):
+    """
+    (Jules @ 2025-10-15) 新增端點
+    檢索最新的（即最後建立的）工作流及其詳細步驟。
+    主要用於在不指定 ID 的情況下加載工作流編輯器。
+    """
+    try:
+        latest_workflow_data = db.get_latest_workflow()
+        if not latest_workflow_data:
+            raise HTTPException(status_code=404, detail="資料庫中沒有任何工作流。")
+
+        workflow_id = latest_workflow_data['id']
+        steps_data = db.get_workflow_steps(workflow_id)
+
+        response = {
+            "workflow": latest_workflow_data,
+            "steps": steps_data
+        }
+        return WorkflowDetailResponse(**response)
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error(f"獲取最新工作流時發生錯誤: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"獲取最新工作流時發生內部錯誤: {e}")
+
 
 @router.get("/{workflow_id}", response_model=WorkflowDetailResponse, summary="獲取工作流的詳細資訊")
 async def get_workflow_details(
@@ -109,6 +180,41 @@ async def execute_workflow(
     background_tasks.add_task(engine.run_workflow, workflow_id)
 
     return {"message": "工作流已成功接收並開始在背景執行。"}
+
+
+@router.post("/{workflow_id}/reset", status_code=200, summary="重置一個已結束的工作流")
+async def reset_workflow(
+    workflow_id: int,
+    db: DBClient = Depends(get_db_client)
+):
+    """
+    (Jules @ 2025-10-15) 新增端點
+    將一個已完成或失敗的工作流及其所有步驟的狀態重置為 'pending'。
+    這允許使用者從編輯器介面重新執行相同的工作流。
+    """
+    try:
+        success = db.reset_workflow(workflow_id)
+        if not success:
+            raise HTTPException(status_code=500, detail="重置工作流時資料庫操作失敗。")
+        return {"message": f"工作流 {workflow_id} 已成功重置。"}
+    except Exception as e:
+        log.error(f"重置工作流 {workflow_id} 時發生錯誤: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"重置工作流時發生內部伺服器錯誤: {e}")
+
+
+@router.get("/", response_model=List[Workflow], summary="獲取所有工作流的歷史紀錄")
+async def get_all_workflows(db: DBClient = Depends(get_db_client)):
+    """
+    從資料庫中檢索所有已建立的工作流，並按建立時間降序排序。
+    (Jules @ 2025-10-15) 從 line_workflow_api.py 移至此處。
+    """
+    try:
+        workflows_data = db.get_all_workflows()
+        # Pydantic 會自動驗證列表中的每個項目
+        return sorted(workflows_data, key=lambda w: w.get('created_at', ''), reverse=True)
+    except Exception as e:
+        log.error(f"獲取所有工作流時發生錯誤: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="無法從資料庫讀取工作流列表。")
 
 
 @router.get("/{workflow_id}/stream", summary="使用 SSE 串流傳輸工作流的即時狀態")
