@@ -58,48 +58,8 @@ class WorkflowDetailResponse(BaseModel):
 
 # --- API 端點 ---
 
-@router.post("/", response_model=WorkflowCreateResponse, summary="建立一個新的工作流")
-async def create_new_workflow(
-    request: WorkflowCreateRequest,
-    db: DBClient = Depends(get_db_client)
-):
-    """
-    建立一個空的工作流容器，並回傳其唯一的 ID。
-    """
-    try:
-        workflow_id = db.create_workflow(name=request.name)
-        if workflow_id is None:
-            raise HTTPException(status_code=500, detail="無法在資料庫中建立工作流。")
-        return WorkflowCreateResponse(workflow_id=workflow_id)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"建立工作流時發生錯誤: {e}")
-
-@router.post("/{workflow_id}/steps", response_model=StepCreateResponse, summary="在工作流中新增一個步驟")
-async def add_step_to_workflow(
-    workflow_id: int,
-    request: StepCreateRequest,
-    db: DBClient = Depends(get_db_client)
-):
-    """
-    在指定的工作流中新增一個指令步驟。
-    """
-    try:
-        # 1. 取得目前工作流的步驟數量，以決定新步驟的順序
-        existing_steps = db.get_workflow_steps(workflow_id)
-        next_step_order = len(existing_steps) + 1
-
-        # 2. 新增步驟
-        step_id = db.add_workflow_step(
-            workflow_id=workflow_id,
-            step_order=next_step_order,
-            command=request.command,
-            parameters=request.parameters
-        )
-        if step_id is None:
-            raise HTTPException(status_code=500, detail="無法在資料庫中新增步驟。")
-        return StepCreateResponse(step_id=step_id)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"新增步驟時發生錯誤: {e}")
+# (Jules @ 2025-10-15) 移除舊的、分散的建立工作流和新增步驟的端點。
+# 這些功能已被 line_workflow_api.py 中的 /create_from_items 端點整合並取代。
 
 @router.get("/{workflow_id}", response_model=WorkflowDetailResponse, summary="獲取工作流的詳細資訊")
 async def get_workflow_details(

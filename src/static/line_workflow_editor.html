@@ -26,81 +26,32 @@
         }
         .step {
             display: flex;
-            align-items: flex-start; /* 改為 flex-start 以對齊頂部 */
+            align-items: flex-start;
             padding: 1rem;
             border-bottom: 1px solid #e9ecef;
-            transition: background-color 0.2s;
         }
-        .step:last-child {
-            border-bottom: none;
-        }
+        .step:last-child { border-bottom: none; }
         .step-order {
-            font-size: 1.5em;
-            font-weight: bold;
-            color: #6c757d;
-            margin-right: 1.5rem;
-            padding-top: 5px; /* 微調使其對齊 */
+            font-size: 1.5em; font-weight: bold; color: #6c757d;
+            margin-right: 1.5rem; padding-top: 5px;
         }
-        .step-details {
-            flex-grow: 1;
-        }
-        .step-command {
-            font-weight: bold;
-            font-size: 1.1em;
-            margin-bottom: 0.5rem;
-        }
+        .step-details { flex-grow: 1; }
+        .step-command { font-weight: bold; font-size: 1.1em; margin-bottom: 0.5rem; }
         .step-parameters {
-            font-family: monospace;
-            font-size: 0.9em;
-            color: #343a40;
-            background-color: #e9ecef;
-            padding: 5px;
-            border-radius: 4px;
+            font-family: monospace; font-size: 0.9em; color: #343a40;
+            background-color: #e9ecef; padding: 5px; border-radius: 4px;
             word-break: break-all;
         }
-        .step-error {
-            color: #dc3545;
-            font-size: 0.9em;
-            margin-top: 8px;
-            white-space: pre-wrap;
-            word-break: break-all;
-        }
-        /* 新增的精細化狀態樣式 */
-        .detailed-statuses {
-            min-width: 200px;
-            padding-left: 1rem;
-        }
-        .status-item {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            font-size: 0.9em;
-            margin-bottom: 4px;
-        }
-        .status-label {
-            color: #495057;
-        }
-        .status-value {
-            font-weight: bold;
-            padding: 2px 6px;
-            border-radius: 4px;
-        }
-        .status-pending, .status-skipped, .status-not_applicable {
-            color: #6c757d;
-            background-color: #f8f9fa;
-        }
-        .status-running {
-            color: #007bff;
-            background-color: #e7f3ff;
-        }
-        .status-success, .status-completed {
-            color: #28a745;
-            background-color: #e9f7ef;
-        }
-        .status-failed {
-            color: #dc3545;
-            background-color: #fbeae
-        }
+        .step-error { color: #dc3545; font-size: 0.9em; margin-top: 8px; white-space: pre-wrap; word-break: break-all; }
+        .detailed-statuses { min-width: 200px; padding-left: 1rem; }
+        .status-item { display: flex; justify-content: space-between; align-items: center; font-size: 0.9em; margin-bottom: 4px; }
+        .status-label { color: #495057; }
+        .status-value { font-weight: bold; padding: 2px 6px; border-radius: 4px; }
+        .status-pending, .status-skipped, .status-not_applicable { color: #6c757d; background-color: #f8f9fa; }
+        .status-running { color: #007bff; background-color: #e7f3ff; }
+        .status-success, .status-completed { color: #28a745; background-color: #e9f7ef; }
+        .status-failed { color: #dc3545; background-color: #fbeae; }
+        .no-workflow-message { text-align: center; padding: 2rem; font-size: 1.1em; color: #6c757d; }
     </style>
 </head>
 <body>
@@ -117,16 +68,15 @@
                 <a href="/line_importer">資料擷取與處理</a>
                 <a href="/line_workflow_editor" class="active">工作流編輯器</a>
                 <a href="/line_data_viewer">資料檢視器</a>
-                <a href="/line_workflow_history">工作流歷史</a>
             </nav>
             <div class="workflow-header">
                 <div>
                     <h1 id="workflow-name-title">工作流編輯器</h1>
-                    <p id="workflow-info">正在載入工作流資訊...</p>
+                    <p id="workflow-info">正在載入最新的工作流...</p>
                 </div>
                 <div class="workflow-actions">
                     <button id="add-step-btn" class="button-secondary" disabled>新增分析步驟</button>
-                    <button id="execute-btn" class="button-primary" disabled>開始執行</button>
+                    <button id="execute-btn" class="button-primary" disabled>請稍候...</button>
                 </div>
             </div>
             <div id="steps-container">
@@ -144,15 +94,13 @@
             const addStepBtn = document.getElementById('add-step-btn');
 
             let workflowId = null;
-            let eventSource = null; // 將 statusInterval 替換為 eventSource
+            let workflowStatus = null;
+            let eventSource = null;
+            const TERMINAL_STATES = ['completed', 'completed_with_errors', 'failed'];
 
             const statusTextMap = {
-                'pending': '待處理',
-                'running': '執行中',
-                'success': '成功',
-                'completed': '完成',
-                'failed': '失敗',
-                'skipped': '已跳過',
+                'pending': '待處理', 'running': '執行中', 'success': '成功',
+                'completed': '完成', 'failed': '失敗', 'skipped': '已跳過',
                 'not_applicable': '不適用',
             };
 
@@ -163,40 +111,11 @@
                     { label: 'OCR', status: stepStatus.status_ocr },
                     { label: 'AI摘要', status: stepStatus.status_ai_summary },
                 ];
-
-                return `
-                    <div class="detailed-statuses">
-                        ${statuses.map(s => `
-                            <div class="status-item">
-                                <span class="status-label">${s.label}:</span>
-                                <span class="status-value status-${s.status || 'pending'}">
-                                    ${statusTextMap[s.status] || '未知'}
-                                </span>
-                            </div>
-                        `).join('')}
-                    </div>
-                `;
+                return `<div class="detailed-statuses">${statuses.map(s => `<div class="status-item"><span class="status-label">${s.label}:</span><span class="status-value status-${s.status || 'pending'}">${statusTextMap[s.status] || '未知'}</span></div>`).join('')}</div>`;
             };
 
-            const renderStep = (originalStep, detailedStatus) => {
-                let statusDetailsHTML;
-                if (detailedStatus) {
-                    statusDetailsHTML = renderDetailedStatuses(detailedStatus);
-                } else {
-                    // 如果沒有詳細狀態 (初始渲染時)，顯示一個基於原始步驟狀態的概括性狀態
-                    const overallStatus = originalStep.status || 'pending';
-                    const statusText = statusTextMap[overallStatus] || '未知';
-                    statusDetailsHTML = `
-                        <div class="detailed-statuses">
-                            <div class="status-item">
-                                <span class="status-label">總體狀態:</span>
-                                <span class="status-value status-${overallStatus}">${statusText}</span>
-                            </div>
-                        </div>
-                    `;
-                }
-
-                const lastError = detailedStatus ? detailedStatus.last_error : (originalStep.error_message || '');
+            const renderStep = (originalStep) => {
+                const lastError = originalStep.error_message || '';
                 return `
                     <div class="step" id="step-${originalStep.id}">
                         <div class="step-order">${originalStep.step_order}</div>
@@ -205,70 +124,62 @@
                             <div class="step-parameters">${JSON.stringify(originalStep.parameters)}</div>
                             <div class="step-error">${lastError ? `<strong>錯誤訊息:</strong> ${lastError}` : ''}</div>
                         </div>
-                        ${statusDetailsHTML}
-                    </div>
-                `;
+                        <div class="detailed-statuses">
+                             <div class="status-item"><span class="status-label">總體狀態:</span><span class="status-value status-${originalStep.status || 'pending'}">${statusTextMap[originalStep.status] || '未知'}</span></div>
+                        </div>
+                    </div>`;
             };
 
-            const updateUI = (data) => {
-                const { workflow_status, steps: detailedStatuses } = data;
+            const updateExecuteButton = () => {
+                if (TERMINAL_STATES.includes(workflowStatus)) {
+                    executeBtn.textContent = '重新執行';
+                    executeBtn.disabled = false;
+                } else if (workflowStatus === 'running') {
+                    executeBtn.textContent = '執行中...';
+                    executeBtn.disabled = true;
+                } else if (workflowStatus === 'pending') {
+                    executeBtn.textContent = '開始執行';
+                    executeBtn.disabled = false;
+                } else {
+                    executeBtn.textContent = '狀態未知';
+                    executeBtn.disabled = true;
+                }
+            };
 
-                // 更新總體狀態
-                workflowInfoEl.textContent = `工作流 #${workflowId} | 總體狀態: ${workflow_status || '未知'}`;
+            const updateUIWithStreamData = (data) => {
+                workflowStatus = data.workflow_status;
+                workflowInfoEl.textContent = `工作流 #${workflowId} | 總體狀態: ${workflowStatus || '未知'}`;
+                updateExecuteButton();
 
-                // 更新每個步驟的詳細狀態
-                detailedStatuses.forEach(status => {
+                data.steps.forEach(status => {
                     const stepEl = document.getElementById(`step-${status.step_id}`);
-                    if (stepEl) {
-                        const statusContainer = stepEl.querySelector('.detailed-statuses');
-                        const errorContainer = stepEl.querySelector('.step-error');
-
-                        if (statusContainer) {
-                           const renderedHTML = renderDetailedStatuses(status);
-                           if (statusContainer.innerHTML.trim() !== renderedHTML.trim()) {
-                                statusContainer.innerHTML = renderedHTML;
-                           }
-                        }
-                        if (errorContainer) {
-                            const errorHTML = status.last_error ? `<strong>錯誤訊息:</strong> ${status.last_error}` : '';
-                             if (errorContainer.innerHTML.trim() !== errorHTML.trim()) {
-                                errorContainer.innerHTML = errorHTML;
-                            }
-                        }
-                    }
+                    if (!stepEl) return;
+                    const statusContainer = stepEl.querySelector('.detailed-statuses');
+                    const errorContainer = stepEl.querySelector('.step-error');
+                    if (statusContainer) statusContainer.innerHTML = renderDetailedStatuses(status);
+                    if (errorContainer) errorContainer.innerHTML = status.last_error ? `<strong>錯誤訊息:</strong> ${status.last_error}` : '';
                 });
 
-                // 如果工作流已結束，關閉 SSE 連線並禁用按鈕
-                const terminalStates = ['completed', 'completed_with_errors', 'failed'];
-                if (terminalStates.includes(workflow_status)) {
+                if (TERMINAL_STATES.includes(workflowStatus)) {
                     if (eventSource) {
                         eventSource.close();
                         eventSource = null;
                         console.log("工作流執行結束，已關閉 SSE 連線。");
                     }
-                    executeBtn.disabled = true;
-                    addStepBtn.disabled = true;
                     workflowInfoEl.textContent += ' (已結束)';
                 }
             };
 
             const startEventSource = () => {
-                if (eventSource) { // 防止重複建立連線
-                    return;
-                }
-                eventSource = new EventSource(`/api/workflows/${workflowId}/stream`);
-                console.log(`已建立對 /api/workflows/${workflowId}/stream 的 EventSource 連線。`);
+                if (eventSource || !workflowId) return;
+                eventSource = new EventSource(`/api/workflows/${workflowId}/line_status`);
+                console.log(`已建立對 /api/workflows/${workflowId}/line_status 的 EventSource 連線。`);
 
                 eventSource.onmessage = (event) => {
                     try {
                         const data = JSON.parse(event.data);
-                         if (data.error) {
-                            console.error("從伺服器收到錯誤:", data.error);
-                            workflowInfoEl.textContent = `錯誤: ${data.error}`;
-                            eventSource.close();
-                            return;
-                        }
-                        updateUI(data);
+                        if (data.error) throw new Error(data.error);
+                        updateUIWithStreamData(data);
                     } catch (e) {
                         console.error("解析 SSE 資料失敗:", e);
                     }
@@ -277,80 +188,78 @@
                 eventSource.onerror = () => {
                     console.error("EventSource 發生錯誤，連線已關閉。");
                     workflowInfoEl.textContent += ' (與伺服器的即時連線中斷)';
-                    eventSource.close();
-                    eventSource = null; // 標記為已關閉
+                    if (eventSource) eventSource.close();
+                    eventSource = null;
                 };
             };
 
-            const fetchInitialDetails = async () => {
+            const handleExecuteClick = async () => {
                 if (!workflowId) return;
+                executeBtn.disabled = true;
+
                 try {
-                    const response = await fetch(`/api/workflows/${workflowId}`);
-                    if (!response.ok) throw new Error(`無法獲取工作流詳情: ${response.statusText}`);
+                    // 如果是終止狀態，先重置
+                    if (TERMINAL_STATES.includes(workflowStatus)) {
+                        executeBtn.textContent = '正在重置...';
+                        const resetResponse = await fetch(`/api/workflows/${workflowId}/reset`, { method: 'POST' });
+                        if (!resetResponse.ok) throw new Error('重置工作流失敗');
+                    }
+
+                    // 執行工作流
+                    executeBtn.textContent = '正在啟動...';
+                    const executeResponse = await fetch(`/api/workflows/${workflowId}/execute`, { method: 'POST' });
+                    if (!executeResponse.ok) throw new Error('觸發執行失敗');
+
+                    // 成功觸發後，開始監聽 SSE 事件
+                    startEventSource();
+
+                } catch (error) {
+                    workflowInfoEl.textContent = `操作錯誤: ${error.message}`;
+                    updateExecuteButton(); // 恢復按鈕狀態
+                }
+            };
+
+            const fetchLatestWorkflow = async () => {
+                try {
+                    const response = await fetch('/api/workflows/latest');
+                    if (response.status === 404) {
+                         stepsContainerEl.innerHTML = `<div class="no-workflow-message">尚未建立任何工作流。<br>請先至「<a href="/line_importer">資料擷取與處理</a>」頁面提交新內容。</div>`;
+                         workflowNameTitleEl.textContent = '無可用工作流';
+                         workflowInfoEl.textContent = '請先建立一個新任務。';
+                         executeBtn.disabled = true;
+                         addStepBtn.disabled = true;
+                         return;
+                    }
+                    if (!response.ok) throw new Error(`無法獲取最新工作流: ${response.statusText}`);
 
                     const data = await response.json();
                     const { workflow, steps } = data;
 
-                    workflowNameTitleEl.textContent = workflow.name;
+                    workflowId = workflow.id;
+                    workflowStatus = workflow.status;
+
+                    workflowNameTitleEl.textContent = workflow.name || `工作流 #${workflow.id}`;
                     workflowInfoEl.textContent = `工作流 #${workflow.id} | 總體狀態: ${workflow.status}`;
 
-                    stepsContainerEl.innerHTML = steps.map(step => renderStep(step, null)).join('');
+                    stepsContainerEl.innerHTML = steps.map(renderStep).join('');
 
-                    const terminalStates = ['completed', 'completed_with_errors', 'failed'];
-                    if (!terminalStates.includes(workflow.status)) {
-                        executeBtn.disabled = false;
-                    } else {
-                        executeBtn.disabled = true;
-                        addStepBtn.disabled = true;
-                        workflowInfoEl.textContent += ' (已結束)';
-                        // 即使已結束，也啟動一次 SSE 來獲取最終的詳細狀態
+                    updateExecuteButton();
+                    addStepBtn.disabled = true; // 暫時禁用
+
+                    // 如果載入時就在執行中，或已結束，則開始監聽以獲取詳細狀態
+                    if (workflowStatus === 'running' || TERMINAL_STATES.includes(workflowStatus)) {
                         startEventSource();
-                        return; // 結束後不需再做後續處理
-                    }
-
-                    // 如果載入時就在執行中，則開始監聽事件
-                    if (workflow.status === 'running') {
-                         startEventSource();
                     }
 
                 } catch (error) {
                     workflowInfoEl.textContent = `錯誤: ${error.message}`;
-                }
-            };
-
-            const executeWorkflow = async () => {
-                if (!workflowId || executeBtn.disabled) return;
-
-                executeBtn.disabled = true;
-                addStepBtn.disabled = true;
-                workflowInfoEl.textContent += ' (正在啟動執行...)';
-
-                try {
-                    const response = await fetch(`/api/workflows/${workflowId}/execute`, { method: 'POST' });
-                    if (!response.ok) throw new Error('觸發執行失敗');
-
-                    // 觸發成功後，立即開始監聽 SSE 事件
-                    startEventSource();
-
-                } catch (error) {
-                    workflowInfoEl.textContent = `執行錯誤: ${error.message}`;
-                    executeBtn.disabled = false; // 允許重試
-                    addStepBtn.disabled = false;
+                    executeBtn.disabled = true;
                 }
             };
 
             const init = () => {
-                const urlParams = new URLSearchParams(window.location.search);
-                workflowId = urlParams.get('workflow_id');
-                if (workflowId) {
-                    fetchInitialDetails();
-                    executeBtn.addEventListener('click', executeWorkflow);
-                    // addStepBtn.addEventListener('click', addAnalysisStep); // 暫時禁用新增步驟功能
-                } else {
-                    workflowInfoEl.textContent = '錯誤：URL 中未提供 workflow_id。';
-                    executeBtn.disabled = true;
-                    addStepBtn.disabled = true;
-                }
+                fetchLatestWorkflow();
+                executeBtn.addEventListener('click', handleExecuteClick);
             };
 
             init();
