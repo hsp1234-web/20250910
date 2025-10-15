@@ -173,27 +173,37 @@ def generate_content_with_timeout(model, prompt_parts: list, log_message: str, i
             raise
 
 def upload_to_gemini(genai_module, audio_path: Path, display_filename: str):
+    """
+    將檔案上傳到 Gemini Files API，並實作了穩健的超時控制。
+    V2 更新 (2025-10-15): 移除了 'rag_store_name' 參數，以符合新版 google-generativeai SDK 的 API。
+    舊版 SDK 需要此參數，但新版已將其移除，若繼續傳遞會導致 TypeError。
+    """
     log.info(f"☁️ Uploading '{display_filename}' to Gemini Files API with a hard timeout...")
     print_progress("uploading", f"正在上傳音訊檔案 {display_filename}...")
+
     ext = audio_path.suffix.lower()
-    mime_map = {'.mp3': 'audio/mp3', '.m4a': 'audio/m4a', '.aac': 'audio/aac', '.wav': 'audio/wav', '.ogg': 'audio/ogg', '.flac': 'audio/flac', '.webm': 'audio/webm', '.mp4': 'audio/mp4'}
+    mime_map = {'.mp3': 'audio/mp3', '.m4a': 'audio/m4a', '.aac': 'audio/aac', '.wav': 'audio/wav', '.ogg': 'audio/ogg', '.flac': 'audio/flac', '.webm': 'audio/webm', '.mp4': 'audio/video/mp4'}
     mime_type = mime_map.get(ext, 'application/octet-stream')
-    if mime_type in ['audio/m4a', 'audio/mp4']:
+
+    # Gemini API 對 M4A 的支援有時不穩定，官方文件建議使用 'audio/aac' 作為替代
+    if mime_type in ['audio/m4a']:
+        log.warning("將 M4A 的 MIME 類型從 'audio/m4a' 修正為 'audio/aac' 以增強相容性。")
         mime_type = 'audio/aac'
+
     def upload_task():
         log.info("正要呼叫 genai.upload_file...")
         try:
-            # 修正：根據 TypeError，我們必須提供 rag_store_name 參數。
-            # 由於我們並非真的要使用 RAG，因此傳入一個空字串來滿足 API 的要求。
+            # V2 修正: 根據最新的 google-generativeai SDK，`upload_file` 函式
+            # 不再接受 `rag_store_name` 參數。將其移除以解決 'unexpected keyword argument' 錯誤。
             return genai_module.upload_file(
                 path=str(audio_path),
                 display_name=display_filename,
-                mime_type=mime_type,
-                rag_store_name=""  # 提供必要的參數
+                mime_type=mime_type
             )
         except Exception as e:
             log.error(f"檔案上傳執行緒內部發生錯誤: {e}", exc_info=True)
             raise
+
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
         try:
             future = executor.submit(upload_task)
