@@ -8,7 +8,7 @@ import re
 import sys
 import time
 from pathlib import Path
-import google.generativeai as genai
+from google import genai
 import concurrent.futures
 
 # --- 日誌設定 ---
@@ -83,9 +83,9 @@ def list_models():
         api_key = os.getenv("GOOGLE_API_KEY")
         if not api_key:
             raise ValueError("API Key not found in environment variables.")
-        client = genai.Client(api_key=api_key)
+        genai.configure(api_key=api_key)
         models_list = []
-        for m in client.models.list():
+        for m in genai.list_models():
             if 'generateContent' in m.supported_generation_methods:
                  models_list.append({"id": m.name, "name": m.display_name})
         return models_list
@@ -109,11 +109,13 @@ def validate_key(api_key: str) -> bool:
     if not api_key:
         return False
     try:
-        client = genai.Client(api_key=api_key)
-        next(client.models.list(), None)
+        genai.configure(api_key=api_key)
+        # 透過一個輕量的 API 呼叫來驗證金鑰
+        next(genai.list_models(), None)
         log.info(f"金鑰驗證成功 (金鑰開頭: {api_key[:4]}...)")
         return True
     except Exception as e:
+        # 捕捉到 google.api_core.exceptions.PermissionDenied: API key not valid
         log.warning(f"金鑰驗證失敗 (金鑰開頭: {api_key[:4]}...): {e}")
         return False
 
@@ -136,13 +138,14 @@ def generate_content_with_timeout(model, prompt_parts: list, log_message: str, i
             log.critical(f"🔴 model.generate_content ({log_message}) 發生未預期的錯誤: {e}", exc_info=True)
             raise
 
-def upload_to_gemini(client, audio_path: Path):
-    """使用新的 Files API (client.files.upload) 上傳檔案。"""
+def upload_to_gemini(audio_path: Path):
+    """使用新的 Files API (genai.upload_file) 上傳檔案。"""
     log.info(f"☁️ 使用新的 Files API 上傳 '{audio_path.name}'...")
     print_progress("uploading", f"正在上傳音訊檔案 {audio_path.name}...")
     def upload_task():
         try:
-            return client.files.upload(file=audio_path)
+            # The new SDK's upload_file is simpler and direct
+            return genai.upload_file(path=audio_path)
         except Exception as e:
             log.error(f"檔案上傳執行緒內部發生錯誤: {e}", exc_info=True)
             raise
@@ -198,13 +201,13 @@ def process_audio_file(audio_path: Path, model_name: str, video_title: str, outp
     if not api_key:
         raise ValueError("GOOGLE_API_KEY environment variable not set.")
 
-    client = genai.Client(api_key=api_key)
+    genai.configure(api_key=api_key)
     task_list = [t.strip() for t in tasks.lower().split(',') if t.strip()]
     results = {}
     gemini_file_resource = None
     try:
-        gemini_file_resource = upload_to_gemini(client, audio_path)
-        model_instance = client.models.get(model_name)
+        gemini_file_resource = upload_to_gemini(audio_path)
+        model_instance = genai.GenerativeModel(model_name)
 
         def get_token_count(response):
             try: return response.usage_metadata.total_token_count
@@ -257,7 +260,7 @@ def process_audio_file(audio_path: Path, model_name: str, video_title: str, outp
         if gemini_file_resource:
             log.info(f"🗑️ 正在清理 Gemini 檔案: {gemini_file_resource.name}")
             try:
-                client.files.delete(name=gemini_file_resource.name)
+                genai.delete_file(name=gemini_file_resource.name)
                 log.info("✅ 檔案清理成功。")
             except Exception as e:
                 log.error(f"🔴 清理 Gemini 檔案 '{gemini_file_resource.name}' 失敗: {e}")
