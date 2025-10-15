@@ -229,6 +229,18 @@ class DBClient:
             "result": result,
             "error_message": error_message
         })
+
+    def get_all_workflows(self) -> list[dict]:
+        """獲取所有工作流的列表。"""
+        return self._send_request("get_all_workflows")
+
+    def get_latest_workflow(self) -> dict | None:
+        """(Jules @ 2025-10-15) 獲取最新的（最後建立的）工作流。"""
+        return self._send_request("get_latest_workflow")
+
+    def reset_workflow(self, workflow_id: int) -> bool:
+        """(Jules @ 2025-10-15) 重置工作流及其所有步驟的狀態以便重新執行。"""
+        return self._send_request("reset_workflow", {"workflow_id": workflow_id})
     # --- 結束工作流方法 ---
 
 # --- V4 計畫書優化 (2025-09-18) ---

@@ -233,8 +233,7 @@
                 statusMessage.style.color = 'var(--success-color)';
 
                 // 步驟 3: 重新導向到新的編輯器頁面
-                // (Jules @ 2025-10-15) 編輯器頁面現在會自動載入最新的工作流，不再需要ID
-                window.location.href = `/line_workflow_editor`;
+                window.location.href = `/line_workflow_editor?workflow_id=${workflowId}`;
 
             } catch (error) {
                 statusMessage.textContent = `建立工作流時發生錯誤：${error.message}`;
