@@ -37,10 +37,11 @@ async def get_http_client():
         yield client
 
 # --- 依賴注入 ---
+# (Jules @ 2025-10-15) 修正：直接將 DBClient 作為依賴項，FastAPI 會自動處理實例化
+# 這也使得在測試中覆寫它變得更直接
 def get_db_client():
     """提供一個 DBClient 的共享實例。"""
     return DBClient()
-
 
 # --- 資料模型 ---
 class IngestRequest(BaseModel):
@@ -50,13 +51,13 @@ class IngestRequest(BaseModel):
 @router.post("/ingest_text", summary="代理文字擷取請求至 line_parser_service")
 async def proxy_ingest_text(
     request_body: IngestRequest,
-    client: httpx.AsyncClient = Depends(get_http_client)
+    client: httpx.AsyncClient = Depends(get_http_client),
+    db_client: DBClient = Depends(get_db_client) # 新增 DBClient 依賴
 ):
     """
     代理端點，將來自 LINE 的聊天紀錄文字轉發至後端的 line_parser_service。
     """
     try:
-        # 動態獲取微服務 URL
         service_base_url = get_service_url_wrapper(SERVICE_NAME)
         target_url = f"{service_base_url}/ingest"
         log.info(f"代理請求至動態發現的 URL: {target_url}")
@@ -66,12 +67,10 @@ async def proxy_ingest_text(
             json=request_body.model_dump(),
             timeout=30.0
         )
-
         response.raise_for_status()
         return response.json()
 
     except HTTPException as e:
-        # 重新引發由 get_service_url 產生的 HTTPExceptions
         raise e
     except httpx.HTTPStatusError as e:
         log.error(f"微服務回傳錯誤狀態碼 {e.response.status_code}: {e.response.text}")
@@ -90,19 +89,45 @@ async def proxy_ingest_text(
         log.error(f"代理請求時發生未預期錯誤: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="代理請求時發生內部錯誤。")
 
+# --- 新的 API 端點 ---
 
-@router.get("/", summary="獲取所有工作流的歷史紀錄")
-async def get_all_workflows(db_client: DBClient = Depends(get_db_client)):
+@router.get("/latest", summary="獲取最新建立的工作流")
+async def get_latest_workflow(db_client: DBClient = Depends(get_db_client)):
     """
-    從資料庫中檢索所有已建立的工作流，並按建立時間降序排序。
+    檢索最新的一個工作流及其所有步驟的詳細資訊。
+    這是工作流編輯器頁面的主要資料來源。
     """
     try:
-        workflows = db_client.get_all_workflows()
-        return sorted(workflows, key=lambda w: w.get('created_at', ''), reverse=True)
-    except Exception as e:
-        log.error(f"獲取所有工作流時發生錯誤: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="無法從資料庫讀取工作流列表。")
+        workflow = db_client.get_latest_workflow()
+        if not workflow:
+            raise HTTPException(status_code=404, detail="尚未建立任何工作流。")
 
+        steps = db_client.get_workflow_steps(workflow["id"])
+        return {"workflow": workflow, "steps": steps}
+    except HTTPException as e:
+        raise e # 重新引發已知的 HTTP 錯誤
+    except Exception as e:
+        log.error(f"獲取最新工作流時發生錯誤: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="讀取最新工作流時發生內部錯誤。")
+
+
+@router.post("/{workflow_id}/reset", summary="重置指定工作流的狀態")
+async def reset_workflow(workflow_id: int, db_client: DBClient = Depends(get_db_client)):
+    """
+    將一個已完成或失敗的工作流狀態重置為 'pending'，以便可以重新執行。
+    """
+    try:
+        db_client.reset_workflow_status(workflow_id)
+        return {"message": f"工作流 #{workflow_id} 已成功重置。"}
+    except ValueError as e:
+        # 捕獲由 DBClient 引發的、表示找不到 ID 的錯誤
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        log.error(f"重置工作流 #{workflow_id} 時發生錯誤: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"重置工作流時發生內部錯誤。")
+
+
+# (Jules @ 2025-10-15) 根據需求，舊的 get_all_workflows 端點已被移除。
 
 @router.get("/{workflow_id}/line_status", summary="獲取工作流中所有 LINE 項目的精細化狀態")
 async def get_workflow_line_item_status(
@@ -124,7 +149,6 @@ async def get_workflow_line_item_status(
         if not source_url_id:
             continue
 
-        # 從資料庫獲取該項目的最新、最詳細的狀態
         item_details = db_client.get_url_by_id(source_url_id)
         if not item_details:
             continue
@@ -136,7 +160,7 @@ async def get_workflow_line_item_status(
             "status_extraction": item_details.get("status_extraction", "N/A"),
             "status_ocr": item_details.get("status_ocr", "N/A"),
             "status_ai_summary": item_details.get("status_ai_summary", "N/A"),
-            "overall_status": item_details.get("status", "N/A"), # 總體狀態
+            "overall_status": item_details.get("status", "N/A"),
             "last_error": item_details.get("last_error_details")
         })
 
