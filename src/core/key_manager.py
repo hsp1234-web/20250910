@@ -2,8 +2,6 @@
 import hashlib
 import os
 import sqlite3
-import sys
-import subprocess
 import time
 from pathlib import Path
 from typing import List, Dict, Optional, Any, Tuple, Callable
@@ -63,27 +61,14 @@ def _hash_key(key: str) -> str:
     """對金鑰進行 SHA256 雜湊，只取前 16 位以便於使用。"""
     return hashlib.sha256(key.encode()).hexdigest()[:16]
 
+from tools.gemini_processor import validate_key as validate_gemini_key
+
 def _validate_single_key(api_key: str) -> bool:
     """
-    (Gemini) 呼叫 gemini_processor.py 工具來驗證單一 Gemini 金鑰的有效性。
-    此版本已移除內部重試迴圈，僅執行單次驗證。
+    (Gemini) 直接呼叫 gemini_processor 中的函式來驗證單一 Gemini 金鑰的有效性。
+    這種方式避免了使用子程序 (subprocess) 造成的環境問題。
     """
-    tool_script_path = ROOT_DIR / "src" / "tools" / "gemini_processor.py"
-    cmd = [sys.executable, str(tool_script_path), "--command=validate_key"]
-    env = os.environ.copy()
-    env["GOOGLE_API_KEY"] = api_key
-
-    try:
-        result = subprocess.run(
-            cmd, capture_output=True, text=True, encoding='utf-8',
-            env=env, check=False, timeout=20  # 縮短單次超時
-        )
-        if result.returncode == 0:
-            return True
-        else:
-            return False
-    except (subprocess.TimeoutExpired, Exception):
-        return False
+    return validate_gemini_key(api_key)
 
 def _validate_fred_key(api_key: str) -> bool:
     """
