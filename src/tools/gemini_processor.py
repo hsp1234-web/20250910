@@ -172,19 +172,25 @@ def generate_content_with_timeout(model, prompt_parts: list, log_message: str, i
             log.critical(f"🔴 model.generate_content ({log_message}) 發生未預期的錯誤: {e}", exc_info=True)
             raise
 
-def upload_to_gemini(client, audio_path: Path, display_filename: str):
-    """使用新的 Files API (client.files.upload) 上傳檔案，避免觸發 RAG 相關的參數檢查。"""
-    log.info(f"☁️ 使用新的 Files API 上傳 '{display_filename}'...")
+def upload_to_gemini(genai_module, audio_path: Path, display_filename: str):
+    log.info(f"☁️ Uploading '{display_filename}' to Gemini Files API with a hard timeout...")
     print_progress("uploading", f"正在上傳音訊檔案 {display_filename}...")
-
+    ext = audio_path.suffix.lower()
+    mime_map = {'.mp3': 'audio/mp3', '.m4a': 'audio/m4a', '.aac': 'audio/aac', '.wav': 'audio/wav', '.ogg': 'audio/ogg', '.flac': 'audio/flac', '.webm': 'audio/webm', '.mp4': 'audio/mp4'}
+    mime_type = mime_map.get(ext, 'application/octet-stream')
+    if mime_type in ['audio/m4a', 'audio/mp4']:
+        mime_type = 'audio/aac'
     def upload_task():
-        log.info("正要呼叫 client.files.upload...")
+        log.info("正要呼叫 genai.upload_file...")
         try:
-            # 使用新的 client.files.upload API。
-            # 它接受一個 `file` 參數，這應該是一個路徑物件。
-            # `display_name` 和 `mime_type` 參數似乎已不再直接支援，
-            # API 會自動從檔案推斷。
-            return client.files.upload(file=audio_path)
+            # 修正：根據 TypeError，我們必須提供 rag_store_name 參數。
+            # 由於我們並非真的要使用 RAG，因此傳入一個空字串來滿足 API 的要求。
+            return genai_module.upload_file(
+                path=str(audio_path),
+                display_name=display_filename,
+                mime_type=mime_type,
+                rag_store_name=""  # 提供必要的參數
+            )
         except Exception as e:
             log.error(f"檔案上傳執行緒內部發生錯誤: {e}", exc_info=True)
             raise
@@ -242,15 +248,12 @@ def process_audio_file(audio_path: Path, model_name: str, video_title: str, outp
     api_key = os.getenv("GOOGLE_API_KEY")
     if not api_key:
         raise ValueError("GOOGLE_API_KEY environment variable not set.")
-
-    # 改為建立一個 client 物件
-    client = genai.Client(api_key=api_key)
+    genai.configure(api_key=api_key)
     task_list = [t.strip() for t in tasks.lower().split(',') if t.strip()]
     results = {}
     gemini_file_resource = None
     try:
-        # 將 client 物件傳遞給 upload_to_gemini
-        gemini_file_resource = upload_to_gemini(client, audio_path, audio_path.name)
+        gemini_file_resource = upload_to_gemini(genai, audio_path, audio_path.name)
         model_instance = genai.GenerativeModel(model_name)
         def get_token_count(response):
             try: return response.usage_metadata.total_token_count
@@ -315,22 +318,19 @@ def process_audio_file(audio_path: Path, model_name: str, video_title: str, outp
         raise
     finally:
         if gemini_file_resource:
-            log.info(f"🗑️ 正在清理 Gemini 檔案: {gemini_file_resource.name}")
+            log.info(f"🗑️ Cleaning up Gemini file: {gemini_file_resource.name}")
             try:
                 for attempt in range(3):
                     try:
-                        # 使用 client 物件來刪除檔案
-                        client.files.delete(gemini_file_resource.name)
-                        log.info("✅ 檔案清理成功。")
+                        genai.delete_file(gemini_file_resource.name)
+                        log.info("✅ Cleanup successful.")
                         break
                     except Exception as e_del:
-                        log.warning(f"第 {attempt+1} 次嘗試刪除檔案失敗: {e_del}")
-                        if attempt < 2:
-                            time.sleep(2)
-                        else:
-                            raise
+                        log.warning(f"Attempt {attempt+1} to delete file failed: {e_del}")
+                        if attempt < 2: time.sleep(2)
+                        else: raise
             except Exception as e:
-                log.error(f"🔴 重試多次後，清理 Gemini 檔案 '{gemini_file_resource.name}' 失敗: {e}")
+                log.error(f"🔴 Failed to clean up Gemini file '{gemini_file_resource.name}' after retries: {e}")
 
 def main():
     parser = argparse.ArgumentParser(description="Gemini AI 處理工具。")
