@@ -96,9 +96,9 @@ def list_models():
         api_key = os.getenv("GOOGLE_API_KEY")
         if not api_key:
             raise ValueError("API Key not found in environment variables.")
-        client = genai.Client(api_key=api_key)
+        genai.configure(api_key=api_key)
         models_list = []
-        for m in client.models.list():
+        for m in genai.list_models():
             if 'generateContent' in m.supported_generation_methods:
                  models_list.append({"id": m.name, "name": m.display_name})
         return models_list
@@ -130,9 +130,9 @@ def validate_key():
             print("錯誤：未在環境變數中提供 GOOGLE_API_KEY。", file=sys.stderr, flush=True)
             sys.exit(1)
 
-        client = genai.Client(api_key=api_key)
+        genai.configure(api_key=api_key)
         # 執行一個輕量級的 API 呼叫來觸發驗證
-        next(client.models.list(), None)
+        next(genai.list_models(), None)
 
         log.info("✅ API 金鑰驗證成功。")
         sys.exit(0)
@@ -251,7 +251,7 @@ def process_audio_file(audio_path: Path, model_name: str, video_title: str, outp
     try:
         # 將 client 物件傳遞給 upload_to_gemini
         gemini_file_resource = upload_to_gemini(client, audio_path, audio_path.name)
-        model_instance = client.models.get(model_name) # 使用 client 取得模型
+        model_instance = genai.GenerativeModel(model_name)
         def get_token_count(response):
             try: return response.usage_metadata.total_token_count
             except: return 0
