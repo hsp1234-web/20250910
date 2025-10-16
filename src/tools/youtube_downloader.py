@@ -50,9 +50,10 @@ def download_media(
 
     if download_type == "audio":
         command.extend([
-            "-f", "bestaudio/best",
+            # 優先下載 m4a 以提高效率，同時保留備用選項，避免需要 ffmpeg 轉檔
+            "-f", "bestaudio[ext=m4a]/bestaudio/best",
             "-x",  # --extract-audio
-            "--audio-format", "mp3",
+            # 移除 --audio-format，讓 yt-dlp 直接儲存下載的格式
         ])
     else: # video
         command.extend([
@@ -70,12 +71,14 @@ def download_media(
     log.info(f"執行 yt-dlp 指令: {' '.join(command)}")
 
     try:
+        # 根據使用者需求，增加 65 秒超時
         result = subprocess.run(
             command,
             capture_output=True,
             text=True,
             check=True,
-            encoding='utf-8'
+            encoding='utf-8',
+            timeout=65
         )
 
         video_info = json.loads(result.stdout)
