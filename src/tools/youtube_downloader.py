@@ -39,7 +39,12 @@ def download_media(
     # 為了處理複雜環境中 PATH 可能不一致的問題，我們不再直接呼叫 'yt-dlp' 執行檔。
     # 改為使用 `sys.executable -m yt_dlp` 的方式，這會利用當前運行的 Python 環境來尋找並執行 yt_dlp 模組，
     # 這種方法更為穩健，可以繞過對系統 PATH 的依賴。
-    command = [sys.executable, "-m", "yt_dlp", "--print-json", "--verbose"]
+    command = [
+        sys.executable, "-m", "yt_dlp",
+        "--print-json",
+        "--verbose",
+        "--restrict-filenames"  # 新增此旗標以確保檔案名稱安全
+    ]
 
     if download_type == "audio":
         command.extend([
