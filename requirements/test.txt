@@ -35,3 +35,6 @@ requests==2.32.4
 gdown==5.2.0
 filetype==1.2.0
 python-dateutil==2.9.0.post0
+yt-dlp==2025.10.14
+twstock==1.4.0
+ollama==0.6.0
