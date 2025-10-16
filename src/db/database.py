@@ -1050,7 +1050,8 @@ def get_filtered_urls(start_date: str = None, end_date: str = None) -> list[dict
     """
     # Jules @ 2025-09-17: 新增 title, message_time, 和 status 欄位以支援卡片模式
     # Jules @ 2025-10-09: 新增 ocr_status 和 ai_status 欄位
-    query = "SELECT id, url, author, message_date, message_time, title, status, ocr_status, ai_status FROM extracted_urls"
+    # Jules @ 2025-10-16: 修正 - 確保所有前端 line_data_viewer.html 需要的狀態欄位都被選取
+    query = "SELECT id, url, author, message_date, message_time, title, status, status_download, status_extraction, status_ocr, status_ai_summary FROM extracted_urls"
     filters = []
     params = []
 
