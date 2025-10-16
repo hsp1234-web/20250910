@@ -8,8 +8,10 @@ import re
 import sys
 import time
 from pathlib import Path
+import requests
 import google.generativeai as genai
 import concurrent.futures
+from types import SimpleNamespace
 
 # --- 日誌設定 ---
 logging.basicConfig(
@@ -173,40 +175,85 @@ def generate_content_with_timeout(model, prompt_parts: list, log_message: str, i
             raise
 
 def upload_to_gemini(genai_module, audio_path: Path, display_filename: str):
-    log.info(f"☁️ Uploading '{display_filename}' to Gemini Files API with a hard timeout...")
+    """
+    使用我們在 POC 中驗證的 REST API 可續傳上傳方法來上傳檔案。
+    這個方法比原本的 SDK 呼叫更穩定。
+    """
+    log.info(f"☁️ (REST) 上傳 '{display_filename}' 至 Gemini Files API...")
     print_progress("uploading", f"正在上傳音訊檔案 {display_filename}...")
+
+    api_key = os.getenv("GOOGLE_API_KEY")
+    if not api_key:
+        raise ValueError("無法從環境變數 GOOGLE_API_KEY 中獲取 API 金鑰。")
+
+    file_size = audio_path.stat().st_size
     ext = audio_path.suffix.lower()
     mime_map = {'.mp3': 'audio/mp3', '.m4a': 'audio/m4a', '.aac': 'audio/aac', '.wav': 'audio/wav', '.ogg': 'audio/ogg', '.flac': 'audio/flac', '.webm': 'audio/webm', '.mp4': 'audio/mp4'}
     mime_type = mime_map.get(ext, 'application/octet-stream')
     if mime_type in ['audio/m4a', 'audio/mp4']:
-        mime_type = 'audio/aac'
-    def upload_task():
-        log.info("正要呼叫 genai.upload_file...")
-        try:
-            # 修正：根據 TypeError，我們必須提供 rag_store_name 參數。
-            # 由於我們並非真的要使用 RAG，因此傳入一個空字串來滿足 API 的要求。
-            return genai_module.upload_file(
-                path=str(audio_path),
-                display_name=display_filename,
-                mime_type=mime_type,
-                rag_store_name=""  # 提供必要的參數
-            )
-        except Exception as e:
-            log.error(f"檔案上傳執行緒內部發生錯誤: {e}", exc_info=True)
-            raise
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-        try:
-            future = executor.submit(upload_task)
-            audio_file_resource = future.result(timeout=110)
-            log.info(f"✅ Upload successful. Gemini File URI: {audio_file_resource.uri}")
+        mime_type = 'audio/aac' # 根據舊有邏輯進行對應
+
+    # --- 步驟 1: 初始化可續傳上傳 ---
+    init_url = "https://generativelanguage.googleapis.com/upload/v1beta/files"
+    init_headers = {
+        "X-Goog-Upload-Protocol": "resumable",
+        "X-Goog-Upload-Command": "start",
+        "X-Goog-Upload-Header-Content-Length": str(file_size),
+        "X-Goog-Upload-Header-Content-Type": mime_type,
+        "Content-Type": "application/json",
+        "x-goog-api-key": api_key
+    }
+    init_data = {"file": {"display_name": display_filename}}
+
+    log.info("步驟 1: 發送初始化請求...")
+    init_response = requests.post(init_url, headers=init_headers, json=init_data, timeout=20)
+    init_response.raise_for_status() # HTTP 錯誤會在此處被拋出
+
+    upload_url = init_response.headers.get("X-Goog-Upload-URL")
+    if not upload_url:
+        raise IOError("❌ Gemini API 初始化回應中缺少上傳 URL。")
+    log.info("✅ 步驟 1 完成: 已獲取上傳 URL。")
+
+    # --- 步驟 2: 上傳檔案內容 ---
+    log.info("步驟 2: 開始上傳檔案位元組...")
+    with open(audio_path, 'rb') as f:
+        file_data = f.read()
+
+    upload_headers = {
+        "Content-Length": str(file_size),
+        "X-Goog-Upload-Offset": "0",
+        "X-Goog-Upload-Command": "upload, finalize"
+    }
+
+    upload_response = requests.put(upload_url, headers=upload_headers, data=file_data, timeout=100)
+    upload_response.raise_for_status() # HTTP 錯誤會在此處被拋出
+    log.info("✅ 步驟 2 完成: 檔案內容上傳成功。")
+
+    # --- 步驟 3: 處理回應並等待檔案變為 ACTIVE ---
+    file_info = upload_response.json().get("file", {})
+    file_name = file_info.get("name")
+    if not file_name:
+        raise IOError(f"❌ Gemini API 上傳後的回應格式不正確: {upload_response.text}")
+
+    log.info(f"步驟 3: 等待檔案 '{file_name}' 處理完成...")
+    get_url = f"https://generativelanguage.googleapis.com/v1beta/{file_name}"
+    get_params = {"key": api_key}
+
+    for i in range(10): # 最多等待 50 秒
+        get_response = requests.get(get_url, params=get_params, timeout=10)
+        get_response.raise_for_status() # HTTP 錯誤會在此處被拋出
+        file_status = get_response.json()
+        current_state = file_status.get("state")
+        log.info(f"   檔案目前狀態: {current_state} (嘗試 {i+1}/10)")
+        if current_state == "ACTIVE":
+            log.info("✅ 步驟 3 完成: 檔案已啟用！")
             print_progress("upload_complete", "音訊上傳成功。")
-            return audio_file_resource
-        except concurrent.futures.TimeoutError:
-            log.critical("🔴 檔案上傳超時！操作在 110 秒內未能完成。")
-            raise RuntimeError("檔案上傳操作超時，程序被強制終止。")
-        except Exception as e:
-            log.critical(f"🔴 Failed to upload file to Gemini: {e}", exc_info=True)
-            raise
+            return SimpleNamespace(**file_status)
+        elif current_state == "FAILED":
+             raise IOError(f"❌ Gemini API 報告檔案處理失敗: {file_status}")
+        time.sleep(5)
+
+    raise TimeoutError(f"檔案 '{file_name}' 在 50 秒內未能變為 ACTIVE 狀態。")
 
 def get_summary_and_transcript(gemini_file_resource, model, video_title: str, original_filename: str, timeout: int):
     log.info(f"🤖 Requesting summary and transcript from model '{model.model_name}'...")
@@ -253,7 +300,9 @@ def process_audio_file(audio_path: Path, model_name: str, video_title: str, outp
     results = {}
     gemini_file_resource = None
     try:
+        # 呼叫我們重構後的、更穩健的上傳函式
         gemini_file_resource = upload_to_gemini(genai, audio_path, audio_path.name)
+
         model_instance = genai.GenerativeModel(model_name)
         def get_token_count(response):
             try: return response.usage_metadata.total_token_count
@@ -315,9 +364,11 @@ def process_audio_file(audio_path: Path, model_name: str, video_title: str, outp
         print(json.dumps(final_result), flush=True)
     except Exception as e:
         log.critical(f"🔴 處理流程中發生未預期的嚴重錯誤: {e}", exc_info=True)
+        # 將原始異常再次拋出，以便 main 函式可以捕獲它並以失敗狀態退出
         raise
     finally:
-        if gemini_file_resource:
+        # 無論成功或失敗，只要 gemini_file_resource 物件已建立，就嘗試刪除它
+        if gemini_file_resource and hasattr(gemini_file_resource, 'name'):
             log.info(f"🗑️ Cleaning up Gemini file: {gemini_file_resource.name}")
             try:
                 for attempt in range(3):
