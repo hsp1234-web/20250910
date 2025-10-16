@@ -2258,52 +2258,66 @@
                 }
             };
 
-            // --- JULES'S NEW FEATURE (V2): Final Setup ---
+            // --- JULES'S V9 REFACTOR (2025-10-16): 全新的兩階段就緒檢查 ---
             const checkSystemReadiness = async () => {
-                const buttonsToDisable = [
-                    document.getElementById('start-download-btn'),
-                    document.getElementById('download-audio-only-btn'),
-                    document.getElementById('start-youtube-processing-btn'),
-                    document.getElementById('start-processing-btn')
-                ];
+                const overlay = document.getElementById('readiness-overlay');
+                const overlayText = overlay.querySelector('p');
 
-                buttonsToDisable.forEach(btn => {
-                    if (btn) {
+                // --- JULES'S V9 REFACTOR (2025-10-16): 預設禁用所有主要按鈕 ---
+                document.querySelectorAll('button, a.button, input[type="button"], input[type="submit"]').forEach(btn => {
+                    if (!btn.closest('.navbar')) {
                         btn.disabled = true;
-                        btn.title = '正在等待後端依賴安裝完成...';
+                        btn.title = '正在等待後端服務完全就緒...';
                     }
                 });
-                showStatusMessage('⏳ 正在等待後端服務完全就緒...', false, 0);
+                overlay.style.display = 'flex';
 
-                const maxRetries = 30; // 30 * 2s = 60s timeout
-                for (let i = 0; i < maxRetries; i++) {
-                    try {
-                        const response = await fetch('/api/system/readiness');
-                        if (response.ok) {
-                            const data = await response.json();
-                            if (data.ready) {
-                                buttonsToDisable.forEach(btn => {
-                                    if (btn && !btn.id.includes('start-processing')) { // Keep file upload button disabled initially
-                                        btn.disabled = false;
-                                        btn.title = '';
-                                    }
-                                });
-                                // Keep file upload button disabled until files are selected
-                                document.getElementById('start-processing-btn').disabled = uploadedFiles.length === 0;
 
-                                showStatusMessage('✅ 系統已就緒，所有功能可用！', false, 5000);
-                                logAction('system-ready-check-success');
-                                return;
-                            }
+                const poll = async (url, { maxRetries = 10, delay = 500, backoff = 1.5, timeout = 3000 }) => {
+                    for (let i = 0; i < maxRetries; i++) {
+                        try {
+                            const controller = new AbortController();
+                            const id = setTimeout(() => controller.abort(), timeout);
+                            const response = await fetch(url, { signal: controller.signal });
+                            clearTimeout(id);
+                            if (response.ok) return response;
+                        } catch (error) {
+                            console.warn(`[輪詢] 第 ${i + 1} 次請求 ${url} 失敗: ${error.message}`);
                         }
-                    } catch (error) {
-                        console.warn(`[${i+1}/${maxRetries}] 系統就緒檢查失敗:`, error.message);
+                        await new Promise(resolve => setTimeout(resolve, delay));
+                        delay *= backoff;
                     }
-                    await new Promise(resolve => setTimeout(resolve, 2000));
-                }
+                    throw new Error(`在 ${maxRetries} 次重試後，輪詢 ${url} 超時。`);
+                };
 
-                showStatusMessage('❌ 後端服務就緒檢查超時，部分功能可能無法使用。', true, 0);
-                logAction('system-ready-check-timeout');
+                try {
+                    // --- 階段一：等待 API 伺服器「活著」 ---
+                    overlayText.textContent = '正在連接後端 API 伺服器...';
+                    await poll('/api/system_stats', { maxRetries: 15, delay: 300, backoff: 1.3 });
+
+                    // --- 階段二：伺服器已啟動，移除遮罩，但 UI 仍部分禁用 ---
+                    logAction('readiness-stage1-api-alive');
+                    overlay.style.display = 'none'; // 移除遮罩
+                    showStatusMessage('⏳ 核心 API 已連線。正在等待背景服務就緒...', false, 0);
+
+                    // --- 階段三：等待後端發出「完全就緒」信號 ---
+                    await poll('/api/health/ready', { maxRetries: 60, delay: 1000, backoff: 1.1 });
+
+                    // --- 階段四：完全就緒 ---
+                    logAction('readiness-stage2-fully-ready');
+                    showStatusMessage('✅ 系統已完全就緒，所有功能可用！', false, 5000);
+                    // 在這裡啟用所有功能按鈕
+                    document.querySelectorAll('button, a.button, input[type="button"], input[type="submit"]').forEach(btn => {
+                         if (!btn.closest('.navbar')) btn.disabled = false;
+                    });
+                    // 特別處理：上傳按鈕需要有檔案才能啟用
+                    document.getElementById('start-processing-btn').disabled = uploadedFiles.length === 0;
+
+                } catch (error) {
+                    logAction('readiness-check-failed', error.message);
+                    overlayText.innerHTML = `❌ 連接後端失敗。<br><small>${error.message}</small><br><br>請檢查瀏覽器開發者工具中的網路請求，或稍後重新整理頁面。`;
+                    overlay.style.backgroundColor = 'rgba(121, 28, 28, 0.85)';
+                }
             };
 
 
@@ -2428,59 +2442,9 @@
         <p>系統正在初始化核心服務，請稍候...</p>
     </div>
     <script>
-        document.addEventListener('DOMContentLoaded', function() {
-            const overlay = document.getElementById('readiness-overlay');
-            const buttons = document.querySelectorAll('button, a.button, input[type="button"], input[type="submit"]');
-
-            // 輔助函數：啟用UI
-            function enableUI() {
-                overlay.style.display = 'none';
-                buttons.forEach(btn => {
-                    btn.disabled = false;
-                });
-                console.log('系統已就緒，UI 已啟用。');
-            }
-
-            // 檢查 sessionStorage 中是否已有就緒標記
-            if (sessionStorage.getItem('isSystemReady') === 'true') {
-                enableUI();
-                const overlayText = overlay.querySelector('p');
-                if(overlayText) {
-                    overlayText.innerText = '系統已就緒';
-                }
-                return; // 如果已就緒，則不執行後續的輪詢
-            }
-
-            // 1. 預設禁用所有按鈕並顯示遮罩
-            buttons.forEach(btn => {
-                if (!btn.closest('.navbar')) {
-                    btn.disabled = true;
-                }
-            });
-            overlay.style.display = 'flex';
-
-            // 2. 定期輪詢 /api/health/ready 端點
-            const readinessInterval = setInterval(() => {
-                fetch('/api/health/ready')
-                    .then(response => {
-                        if (response.ok) {
-                            // 3. 一旦請求成功，設定標記、啟用按鈕並隱藏遮罩
-                            clearInterval(readinessInterval);
-                            sessionStorage.setItem('isSystemReady', 'true'); // 設定標記
-                            enableUI();
-                        } else {
-                            console.log('等待核心服務就緒...');
-                        }
-                    })
-                    .catch(error => {
-                        console.error('輪詢就緒狀態時發生錯誤:', error);
-                        const overlayText = overlay.querySelector('p');
-                        if(overlayText) {
-                            overlayText.innerText = '無法連接到後端服務，請檢查連線或稍後重試。';
-                        }
-                    });
-            }, 2000); // 每 2 秒輪詢一次
-        });
+        // --- JULES'S V9 REFACTOR (2025-10-16): 移除舊的 Readiness Overlay 邏輯 ---
+        // 舊的邏輯已被 checkSystemReadiness() 函數取代，
+        // 新的函數提供了更穩健的兩階段就緒檢查和指數退避重試機制。
     </script>
     <!-- V5.5 Readiness Overlay End -->
 </body>

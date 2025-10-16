@@ -20,8 +20,9 @@ sys.path.insert(0, str(SRC_DIR))
 ROOT_DIR = SRC_DIR.parent
 
 # --- 現在可以安全地導入專案內部模組了 ---
-from db.client import DBClient
-from core import key_manager
+# JULES (2025-10-16) 延遲導入，直到依賴安裝完畢
+# from db.client import DBClient
+# from core import key_manager
 
 logging.basicConfig(
     level=logging.INFO,
@@ -189,15 +190,41 @@ def start_all_microservices():
     log.info(f"偵測到 {len(service_paths)} 個微服務，準備啟動...")
 
     service_registry = {}
-    # 順序啟動，也可以改為並行
-    for service_path in service_paths:
+    # 將服務分為核心服務和延遲啟動的服務
+    core_services = []
+    delayed_services = []
+    for path in service_paths:
+        if path.name == "bond_data_service":
+            delayed_services.append(path)
+        else:
+            core_services.append(path)
+
+    # 立即啟動核心服務
+    for service_path in core_services:
         try:
             service_name, port, process = launch_microservice(service_path)
             service_registry[service_name] = {"port": port, "status": "running"}
-            processes.append(process) # 將進程加入全域列表以便監控和清理
+            processes.append(process)
         except Exception as e:
-            log.error(f"啟動服務 {service_path.name} 失敗: {e}", exc_info=True)
+            log.error(f"啟動核心服務 {service_path.name} 失敗: {e}", exc_info=True)
             service_registry[service_path.name] = {"port": None, "status": "failed"}
+
+    # 在背景執行緒中延遲啟動非核心服務
+    def delayed_launch():
+        log.info("--- [延遲啟動] 等待 15 秒後啟動非核心服務 ---")
+        time.sleep(15)
+        for service_path in delayed_services:
+            try:
+                # 注意：這裡的 launch_microservice 會將 process 加入全域列表
+                launch_microservice(service_path)
+                # 我們不需要更新註冊表，因為它在啟動時已經被處理了
+            except Exception as e:
+                log.error(f"[延遲啟動] 啟動服務 {service_path.name} 失敗: {e}", exc_info=True)
+
+    if delayed_services:
+        delayed_thread = threading.Thread(target=delayed_launch, daemon=True)
+        threads.append(delayed_thread)
+        delayed_thread.start()
 
     # 將服務註冊資訊寫入檔案
     with open(SERVICE_REGISTRY_FILE, 'w', encoding='utf-8') as f:
@@ -227,17 +254,17 @@ def _background_setup_and_validate(api_port: int, api_ready_event: threading.Eve
             log.info("[背景任務] ✅ API 伺服器已完全就緒！")
 
 
-        # --- 步驟 2: 安裝非必要的重量級依賴 ---
-        # 這是觸發金鑰驗證前的必要步驟，確保驗證工具（如 google-generativeai）已安裝。
-        log.info("[背景任務] 開始安裝重量級依賴...")
-        install_non_essential_dependencies_background()
-        log.info("[背景任務] ✅ 重量級依賴安裝流程結束。")
-
-        # --- 步驟 3: 發送「完全就緒」信號 (提前發送) ---
-        # 為了改善冷啟動體驗，我們先宣告系統就緒，讓前端可以訪問。
+        # --- 步驟 2: 發送「完全就緒」信號 (真正提前發送) ---
+        # 為了改善冷啟動體驗，我們在所有耗時操作之前就宣告系統就緒。
         log.info("✅ [背景任務] 核心服務已啟動！提前發送『完全就緒』信號。")
         full_readiness_event.set()
         READINESS_SIGNAL_FILE.touch()
+
+        # --- 步驟 3: 安裝非必要的重量級依賴 (在發送就緒信號後) ---
+        # 這是觸發金鑰驗證前的必要步驟，確保驗證工具（如 google-generativeai）已安裝。
+        log.info("[背景任務] 開始在背景中安裝重量級依賴...")
+        install_non_essential_dependencies_background()
+        log.info("[背景任務] ✅ 重量級依賴安裝流程結束。")
 
         # --- 步驟 4: 在背景中非阻塞地觸發所有金鑰的自動驗證 ---
         log.info("[背景任務] 準備在背景中觸發所有金鑰的自動驗證...")
@@ -373,7 +400,7 @@ def main():
     parser.add_argument("--port", type=int, default=None, help="指定 API 伺服器運行的固定埠號。")
     args, _ = parser.parse_known_args()
 
-    global db_client
+    global db_client, key_manager
     try:
         log.info("--- [協調器啟動 V6.0] ---")
 
@@ -385,6 +412,10 @@ def main():
 
         # V6.1 新增：安裝核心依賴
         install_core_dependencies()
+
+        # JULES (2025-10-16) 在依賴安裝後才導入
+        from db.client import DBClient
+        from core import key_manager
 
         # 步驟 1: 啟動核心後端服務 (DB Manager, API Server)
         api_port = args.port if args.port else find_free_port()
