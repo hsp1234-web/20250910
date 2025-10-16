@@ -20,7 +20,8 @@ def download_media(
     output_dir: Path,
     download_type: str = "audio",
     custom_filename: str | None = None,
-    cookies_file: str | None = None
+    cookies_file: str | None = None,
+    raise_exceptions: bool = False
 ):
     """
     使用 yt-dlp 從 YouTube URL 下載媒體（音訊或影片）。
@@ -43,7 +44,8 @@ def download_media(
         sys.executable, "-m", "yt_dlp",
         "--print-json",
         "--verbose",
-        "--restrict-filenames"  # 新增此旗標以確保檔案名稱安全
+        "--restrict-filenames",      # 確保檔案名稱安全
+        "--fragment-retries", "infinite" # 無限次重試下載失敗的片段
     ]
 
     if download_type == "audio":
@@ -123,6 +125,8 @@ def download_media(
     except subprocess.CalledProcessError as e:
         log.error(f"❌ yt-dlp 執行失敗。返回碼: {e.returncode}")
         log.error(f"Stderr: {e.stderr}")
+        if raise_exceptions:
+            raise e
 
         # 增強錯誤偵測
         error_message = e.stderr
@@ -136,6 +140,8 @@ def download_media(
         sys.exit(1)
     except Exception as e:
         log.error(f"❌ 下載過程中發生未預期的錯誤: {e}", exc_info=True)
+        if raise_exceptions:
+            raise e
         error_result = {"type": "result", "status": "failed", "error": str(e)}
         print(json.dumps(error_result), flush=True)
         sys.exit(1)
