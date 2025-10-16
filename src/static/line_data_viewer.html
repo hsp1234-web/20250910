@@ -146,8 +146,69 @@
                 }
             };
 
-            fetchItems();
+            // fetchItems(); // 改由就緒檢查器觸發
         });
+    </script>
+    <!-- JULES'S V9 REFACTOR (2025-10-16): 新增的、更穩健的啟動邏輯 -->
+    <div id="readiness-overlay" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.7); color: white; display: flex; justify-content: center; align-items: center; font-size: 1.5em; z-index: 9999; flex-direction: column; text-align: center;">
+        <div class="spinner" style="border: 4px solid rgba(255, 255, 255, 0.3); border-radius: 50%; border-top: 4px solid #fff; width: 40px; height: 40px; animation: spin 1s linear infinite; margin-bottom: 20px;"></div>
+        <p>系統正在初始化核心服務，請稍候...</p>
+    </div>
+    <script>
+        const checkSystemReadiness = async () => {
+            const overlay = document.getElementById('readiness-overlay');
+            const overlayText = overlay.querySelector('p');
+
+            document.querySelectorAll('button, a.button').forEach(btn => {
+                if (!btn.closest('.top-nav')) {
+                    btn.disabled = true;
+                    btn.title = '正在等待後端服務完全就緒...';
+                }
+            });
+            overlay.style.display = 'flex';
+
+            const poll = async (url, { maxRetries = 10, delay = 500, backoff = 1.5, timeout = 3000 }) => {
+                for (let i = 0; i < maxRetries; i++) {
+                    try {
+                        const controller = new AbortController();
+                        const id = setTimeout(() => controller.abort(), timeout);
+                        const response = await fetch(url, { signal: controller.signal });
+                        clearTimeout(id);
+                        if (response.ok) return response;
+                    } catch (error) {
+                        console.warn(`[輪詢] 第 ${i + 1} 次請求 ${url} 失敗: ${error.message}`);
+                    }
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                    delay *= backoff;
+                }
+                throw new Error(`在 ${maxRetries} 次重試後，輪詢 ${url} 超時。`);
+            };
+
+            try {
+                overlayText.textContent = '正在連接後端 API 伺服器...';
+                await poll('/api/system_stats', { maxRetries: 15, delay: 300, backoff: 1.3 });
+                overlay.style.display = 'none';
+
+                await poll('/api/health/ready', { maxRetries: 60, delay: 1000, backoff: 1.1 });
+
+                document.dispatchEvent(new Event('app-ready'));
+
+            } catch (error) {
+                overlayText.innerHTML = `❌ 連接後端失敗。<br><small>${error.message}</small>`;
+                overlay.style.backgroundColor = 'rgba(121, 28, 28, 0.85)';
+            }
+        };
+
+        document.addEventListener('app-ready', () => {
+             // 找到 DOMContentLoaded 中的 fetchItems 函數並呼叫
+            const fetchItemsFunc = document.querySelector('script:not([src])').textContent.match(/const fetchItems = async \(\) => {([\s\S]*?)};/);
+            if(fetchItemsFunc) {
+                eval(fetchItemsFunc[0]); // 重新宣告
+                eval('fetchItems()'); // 呼叫
+            }
+        });
+
+        checkSystemReadiness();
     </script>
 </body>
 </html>

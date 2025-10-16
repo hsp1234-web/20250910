@@ -244,6 +244,12 @@
 
         submitButtonTop.addEventListener('click', handleSubmit);
         submitButtonBottom.addEventListener('click', handleSubmit);
+
+        // --- JULES'S V9 REFACTOR (2025-10-16): 整合新的啟動流程 ---
+        document.addEventListener('DOMContentLoaded', () => {
+            loadExistingItems();
+            checkSystemReadiness();
+        });
     </script>
 
     <!-- V5.5 Readiness Overlay -->
@@ -263,43 +269,90 @@
     </style>
     <div id="readiness-overlay"><div class="spinner"></div><p>系統正在初始化核心服務，請稍候...</p></div>
     <script>
-        document.addEventListener('DOMContentLoaded', function() {
-            // (Jules @ 2025-10-10) 在頁面載入後，立即載入既有項目
-            loadExistingItems();
+        // --- JULES'S V9 REFACTOR (2025-10-16): 新增的、更穩健的啟動邏輯 ---
+        const logAction = (action, value = null) => {
+            const message = value !== null ? `${action}: ${value}` : action;
+            console.log(`Logging action: ${message}`);
+            fetch('/api/log/action', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: message })
+            }).catch(err => console.error('logAction failed:', err));
+        };
 
+        const showStatusMessage = (message, isError = false, duration = 5000) => {
+            const statusDiv = document.getElementById('status-message');
+            if (!statusDiv) return;
+            statusDiv.textContent = message;
+            statusDiv.style.color = isError ? 'var(--error-color)' : 'var(--success-color)';
+            if (duration > 0) {
+                setTimeout(() => {
+                    if (statusDiv.textContent === message) {
+                        statusDiv.textContent = '';
+                    }
+                }, duration);
+            }
+        };
+
+        const checkSystemReadiness = async () => {
             const overlay = document.getElementById('readiness-overlay');
-            const buttons = document.querySelectorAll('button, a.button, input[type="button"], input[type="submit"]');
+            const overlayText = overlay.querySelector('p');
 
-            function enableUI() {
-                overlay.style.display = 'none';
-                buttons.forEach(btn => { btn.disabled = false; });
-            }
-
-            if (sessionStorage.getItem('isSystemReady') === 'true') {
-                enableUI();
-                const overlayText = overlay.querySelector('p');
-                if(overlayText) overlayText.innerText = '系統已就緒';
-                return;
-            }
-
-            buttons.forEach(btn => { if (!btn.closest('.navbar')) btn.disabled = true; });
+            document.querySelectorAll('button, a.button').forEach(btn => {
+                if (!btn.closest('.top-nav')) { // 不禁用頂部導覽列
+                    btn.disabled = true;
+                    btn.title = '正在等待後端服務完全就緒...';
+                }
+            });
             overlay.style.display = 'flex';
 
-            const readinessInterval = setInterval(() => {
-                fetch('/api/health/ready')
-                    .then(response => {
-                        if (response.ok) {
-                            clearInterval(readinessInterval);
-                            sessionStorage.setItem('isSystemReady', 'true');
-                            enableUI();
-                        }
-                    })
-                    .catch(error => {
-                        console.error('輪詢就緒狀態時發生錯誤:', error);
-                        const overlayText = overlay.querySelector('p');
-                        if(overlayText) overlayText.innerText = '無法連接到後端服務。';
-                    });
-            }, 2000);
+            const poll = async (url, { maxRetries = 10, delay = 500, backoff = 1.5, timeout = 3000 }) => {
+                for (let i = 0; i < maxRetries; i++) {
+                    try {
+                        const controller = new AbortController();
+                        const id = setTimeout(() => controller.abort(), timeout);
+                        const response = await fetch(url, { signal: controller.signal });
+                        clearTimeout(id);
+                        if (response.ok) return response;
+                    } catch (error) {
+                        console.warn(`[輪詢] 第 ${i + 1} 次請求 ${url} 失敗: ${error.message}`);
+                    }
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                    delay *= backoff;
+                }
+                throw new Error(`在 ${maxRetries} 次重試後，輪詢 ${url} 超時。`);
+            };
+
+            try {
+                // 階段一: 等待 API 伺服器「活著」
+                overlayText.textContent = '正在連接後端 API 伺服器...';
+                await poll('/api/system_stats', { maxRetries: 15, delay: 300, backoff: 1.3 });
+
+                // 階段二: 伺服器已啟動，移除遮罩
+                logAction('readiness-stage1-api-alive');
+                overlay.style.display = 'none';
+                showStatusMessage('⏳ 核心 API 已連線。正在等待背景服務就緒...', false, 0);
+
+                // 階段三: 等待後端發出「完全就緒」信號
+                await poll('/api/health/ready', { maxRetries: 60, delay: 1000, backoff: 1.1 });
+
+                // 階段四: 完全就緒
+                logAction('readiness-stage2-fully-ready');
+                showStatusMessage('✅ 系統已完全就緒，所有功能可用！', true, 5000);
+                document.querySelectorAll('button, a.button').forEach(btn => {
+                    if (!btn.closest('.top-nav')) btn.disabled = false;
+                });
+
+            } catch (error) {
+                logAction('readiness-check-failed', error.message);
+                overlayText.innerHTML = `❌ 連接後端失敗。<br><small>${error.message}</small><br><br>請檢查瀏覽器開發者工具中的網路請求，或稍後重新整理頁面。`;
+                overlay.style.backgroundColor = 'rgba(121, 28, 28, 0.85)';
+            }
+        };
+
+        document.addEventListener('DOMContentLoaded', function() {
+            loadExistingItems();
+            checkSystemReadiness(); // 執行新的就緒檢查
         });
     </script>
 </body>
