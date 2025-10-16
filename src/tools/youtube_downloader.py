@@ -35,7 +35,7 @@ def download_media(
     log.info(f"開始下載媒體，類型: {download_type}，URL: {youtube_url}")
 
     output_template = f"{str(output_dir / custom_filename)}.%(ext)s" if custom_filename else f"{str(output_dir / '%(title)s')}.%(ext)s"
-    final_suffix = ".mp3" if download_type == "audio" else ".mp4"
+    final_suffix = ".m4a" if download_type == "audio" else ".mp4"
 
     # 為了處理複雜環境中 PATH 可能不一致的問題，我們不再直接呼叫 'yt-dlp' 執行檔。
     # 改為使用 `sys.executable -m yt_dlp` 的方式，這會利用當前運行的 Python 環境來尋找並執行 yt_dlp 模組，
@@ -45,14 +45,15 @@ def download_media(
         "--print-json",
         "--verbose",
         "--restrict-filenames",      # 確保檔案名稱安全
-        "--fragment-retries", "infinite" # 無限次重試下載失敗的片段
+        "--fragment-retries", "infinite", # 無限次重試下載失敗的片段
+        "--no-part" # 不要使用 .part 檔案，直接寫入最終檔案
     ]
 
     if download_type == "audio":
         command.extend([
-            "-f", "bestaudio/best",
+            "-f", "bestaudio[ext=m4a]/bestaudio/best",
             "-x",  # --extract-audio
-            "--audio-format", "mp3",
+            "--audio-format", "m4a",
         ])
     else: # video
         command.extend([
@@ -70,16 +71,46 @@ def download_media(
     log.info(f"執行 yt-dlp 指令: {' '.join(command)}")
 
     try:
+        # --- 防禦性修復 ---
+        # 為避免因超長直播流導致的無限掛起，我們在子程序執行時設定一個內部超時（90秒）。
+        # 如果 yt-dlp 在此時間內未能完成（即使是元數據處理），我們就主動判定其失敗。
+        # 這比依賴外部的 pytest-timeout 更加穩健，因為它直接在呼叫點處理問題。
         result = subprocess.run(
             command,
             capture_output=True,
             text=True,
-            check=True,
-            encoding='utf-8'
+            check=False,
+            encoding='utf-8',
+            timeout=65  # 設定 65 秒的內部超時
         )
 
-        video_info = json.loads(result.stdout)
-        final_filepath_str = video_info.get('_filename')
+        if result.returncode != 0:
+            log.error(f"❌ yt-dlp 執行失敗。返回碼: {result.returncode}")
+            log.error(f"Stderr: {result.stderr}")
+            if raise_exceptions:
+                raise subprocess.CalledProcessError(
+                    result.returncode, result.args,
+                    output=result.stdout, stderr=result.stderr
+                )
+            error_result = {"type": "result", "status": "failed", "error": result.stderr}
+            print(json.dumps(error_result), flush=True)
+            sys.exit(1)
+
+        # 即使有可接受的錯誤，stdout 可能依然包含有效的 JSON
+        try:
+            video_info = json.loads(result.stdout)
+            final_filepath_str = video_info.get('_filename')
+        except json.JSONDecodeError:
+            log.error("無法從 yt-dlp 的輸出中解析 JSON。")
+            # 在這種情況下，我們需要手動構造檔案路徑，因為無法從 yt-dlp 獲取
+            # 這是後備方案
+            if custom_filename:
+                base_name = custom_filename
+            else:
+                # 嘗試從 URL 中提取一個可用的名稱 (非常粗略)
+                base_name = youtube_url.split("v=")[-1].split("&")[0]
+            final_filepath_str = str(output_dir / f"{base_name}{final_suffix}")
+            video_info = {} # 建立一個空的 info dict
 
         if not final_filepath_str:
             log.error("無法從 yt-dlp 的輸出中確定檔案名稱。")
@@ -136,6 +167,19 @@ def download_media(
             error_message = "此影片需要登入驗證。請提供 cookies.txt 檔案。"
 
         error_result = {"type": "result", "status": "failed", "error": error_message, "error_code": error_code}
+        print(json.dumps(error_result), flush=True)
+        sys.exit(1)
+    except subprocess.TimeoutExpired as e:
+        log.error(f"⏰ yt-dlp 執行超時（超過90秒）。這通常發生在處理超長直播存檔時。")
+        error_message = (
+            "下載超時：目標影片可能是結構過於複雜的超長直播存檔，"
+            "無法在合理時間內完成處理。建議尋找其他影片來源。"
+        )
+        if raise_exceptions:
+            # 在測試模式下，將 TimeoutExpired 重新包裝成一個包含清晰訊息的 RuntimeError
+            raise RuntimeError(error_message) from e
+
+        error_result = {"type": "result", "status": "failed", "error": error_message, "error_code": "TIMEOUT"}
         print(json.dumps(error_result), flush=True)
         sys.exit(1)
     except Exception as e:
