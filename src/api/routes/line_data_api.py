@@ -49,7 +49,7 @@ async def get_all_line_items(
     從資料庫中獲取所有已匯入的 LINE 項目，並提供靈活的排序選項。
     """
     try:
-        all_items = db_client.get_filtered_urls() # 獲取所有項目
+        all_items = db_client.get_filtered_urls(source="line_importer") # 只獲取 LINE 匯入的項目
         if not all_items:
             return []
 

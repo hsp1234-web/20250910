@@ -1043,14 +1043,16 @@ def get_urls_by_url_list(url_list: list[str]) -> list[dict]:
         if conn:
             conn.close()
 
-def get_filtered_urls(start_date: str = None, end_date: str = None) -> list[dict]:
+def get_filtered_urls(start_date: str = None, end_date: str = None, source: str = None) -> list[dict]:
     """
-    (V4 優化新增) 根據日期範圍獲取 URL 紀錄。
+    (V4 優化新增) 根據日期範圍和來源獲取 URL 紀錄。
     (Jules @ 2025-09-17) 修改以回傳卡片所需的所有欄位。
+    (Jules @ 2025-10-16) 增加 source 篩選條件。
     """
     # Jules @ 2025-09-17: 新增 title, message_time, 和 status 欄位以支援卡片模式
     # Jules @ 2025-10-09: 新增 ocr_status 和 ai_status 欄位
-    query = "SELECT id, url, author, message_date, message_time, title, status, ocr_status, ai_status FROM extracted_urls"
+    # Jules @ 2025-10-16: 修正 - 確保所有前端 line_data_viewer.html 需要的狀態欄位都被選取
+    query = "SELECT id, url, author, message_date, message_time, title, status, status_download, status_extraction, status_ocr, status_ai_summary FROM extracted_urls"
     filters = []
     params = []
 
@@ -1060,6 +1062,9 @@ def get_filtered_urls(start_date: str = None, end_date: str = None) -> list[dict
     if end_date:
         filters.append("message_date <= ?")
         params.append(end_date)
+    if source:
+        filters.append("source = ?")
+        params.append(source)
 
     if filters:
         query += " WHERE " + " AND ".join(filters)
