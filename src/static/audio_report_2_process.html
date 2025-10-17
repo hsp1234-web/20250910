@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>音訊報告生成器 - 步驟2：分析與處理</title>
+    <style>
+        :root {
+            --bg-color: #F8F9FA;
+            --text-color: #202124;
+            --card-bg-color: rgba(255, 255, 255, 0.9);
+            --card-border-color: #e0e0e0;
+            --button-bg-color: #28a745; /* Green for go */
+            --button-hover-bg-color: #218838;
+            --secondary-btn-bg: #6c757d;
+            --secondary-btn-hover-bg: #5a6268;
+            --info-bg-color: #e9ecef;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            padding: 20px;
+            font-size: 100%;
+            line-height: 1.6;
+        }
+        .container { max-width: 1200px; margin: auto; display: flex; flex-direction: column; gap: 24px; }
+        .card {
+            border: 1px solid var(--card-border-color);
+            border-radius: 12px;
+            padding: 24px;
+            background-color: var(--card-bg-color);
+            box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+        }
+        .grid-2-col {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 24px;
+        }
+        @media (max-width: 992px) {
+            .grid-2-col { grid-template-columns: 1fr; }
+        }
+        .flex-col { display: flex; flex-direction: column; gap: 20px; }
+        h1 { font-size: 2em; font-weight: 700; }
+        h2 { font-size: 1.4em; font-weight: 600; margin-bottom: 16px; }
+        .home-button {
+            display: inline-block;
+            text-decoration: none;
+            padding: 8px 16px;
+            font-size: 0.9em;
+            color: #fff;
+            background-color: var(--secondary-btn-bg);
+            border-radius: 5px;
+            transition: background-color 0.3s;
+        }
+        .home-button:hover { background-color: var(--secondary-btn-hover-bg); }
+        select, input[type="text"] {
+            width: 100%;
+            padding: 10px;
+            border-radius: 6px;
+            border: 1px solid #ccc;
+            box-sizing: border-box;
+        }
+        button {
+            padding: 15px 24px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            background-color: var(--button-bg-color);
+            color: white;
+            font-weight: 600;
+            font-size: 1.2em;
+            transition: all 0.2s;
+            width: 100%;
+        }
+        button:hover:not(:disabled) { background-color: var(--button-hover-bg-color); }
+        button:disabled { background-color: #ccc; cursor: not-allowed; }
+        .log-output {
+            min-height: 200px;
+            background-color: var(--info-bg-color);
+            padding: 16px;
+            border-radius: 8px;
+            white-space: pre-wrap;
+            font-family: monospace;
+            color: #495057;
+            overflow-y: auto;
+        }
+        .checkbox-group label {
+            display: block;
+            margin-bottom: 10px;
+            background-color: #fff;
+            padding: 10px;
+            border-radius: 6px;
+            border: 1px solid #ddd;
+            cursor: pointer;
+        }
+        .checkbox-group label:hover { background-color: #f8f9fa; }
+        .api-key-status {
+            padding: 16px;
+            background-color: var(--info-bg-color);
+            border-radius: 8px;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header class="card" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px;">
+            <div>
+                <h1>步驟二：分析與處理中心</h1>
+                <p>請選擇要分析的音訊檔案，並設定 AI 處理任務。</p>
+            </div>
+            <a href="/audio_report/main" class="home-button">返回功能主頁</a>
+        </header>
+
+        <div class="grid-2-col">
+            <!-- 左側：主要設定與操作 -->
+            <main class="card flex-col">
+                <div>
+                    <label for="audio-file-select"><strong>1. 選擇要分析的音訊檔案</strong></label>
+                    <select id="audio-file-select">
+                        <option value="">請從已暫存列表中選擇一個檔案...</option>
+                        <!-- 動態載入的音訊檔案會顯示在這裡 -->
+                    </select>
+                </div>
+
+                <div>
+                    <label for="model-select"><strong>2. 選擇 AI 模型</strong></label>
+                    <select id="model-select">
+                        <option value="gemini-1.5-flash">Gemini 1.5 Flash (推薦)</option>
+                        <option value="gemini-1.5-pro">Gemini 1.5 Pro (更強大)</option>
+                    </select>
+                </div>
+
+                <div>
+                    <label><strong>3. 勾選要執行的任務</strong></label>
+                    <div class="checkbox-group">
+                        <label><input type="checkbox" name="ai-task" value="summary" checked> 產生重點摘要</label>
+                        <label><input type="checkbox" name="ai-task" value="transcript" checked> 生成逐字稿</label>
+                        <label><input type="checkbox" name="ai-task" value="translate_zh"> 翻譯成繁體中文 (基於逐字稿)</label>
+                    </div>
+                </div>
+
+                <button id="start-analysis-btn" disabled>🚀 開始分析</button>
+            </main>
+
+            <!-- 右側：狀態與日誌 -->
+            <aside class="flex-col">
+                <div class="card api-key-status">
+                    <h2>API 金鑰狀態</h2>
+                    <p id="api-key-status-text">正在檢查...</p>
+                    <a href="/page6" style="font-size: 0.9em;">前往金鑰管理頁面</a>
+                </div>
+                <div class="card flex-col" style="flex-grow: 1;">
+                    <h2>即時進度</h2>
+                    <div id="progress-log" class="log-output">
+                        等待任務開始...
+                    </div>
+                </div>
+            </aside>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            console.log("分析與處理中心頁面已載入。");
+            const audioSelect = document.getElementById('audio-file-select');
+            const startBtn = document.getElementById('start-analysis-btn');
+
+            // 監聽下拉選單的變化，以啟用/禁用開始按鈕
+            audioSelect.addEventListener('change', () => {
+                startBtn.disabled = !audioSelect.value;
+            });
+
+            // 未來將在此處添加與後端互動的 JavaScript 邏輯，
+            // 例如：
+            // 1. 從 API 獲取「已暫存音訊列表」並填充到 #audio-file-select。
+            // 2. 從 API 獲取金鑰狀態並更新 #api-key-status-text。
+            // 3. 點擊「開始分析」時，將所有設定發送到後端。
+            // 4. 使用 WebSocket 或輪詢來更新 #progress-log 的內容。
+        });
+    </script>
+</body>
+</html>
