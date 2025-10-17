@@ -35,7 +35,7 @@ def download_media(
     log.info(f"開始下載媒體，類型: {download_type}，URL: {youtube_url}")
 
     output_template = f"{str(output_dir / custom_filename)}.%(ext)s" if custom_filename else f"{str(output_dir / '%(title)s')}.%(ext)s"
-    final_suffix = ".mp3" if download_type == "audio" else ".mp4"
+    final_suffix = ".m4a" if download_type == "audio" else ".mp4"
 
     # 為了處理複雜環境中 PATH 可能不一致的問題，我們不再直接呼叫 'yt-dlp' 執行檔。
     # 改為使用 `sys.executable -m yt_dlp` 的方式，這會利用當前運行的 Python 環境來尋找並執行 yt_dlp 模組，
@@ -45,14 +45,15 @@ def download_media(
         "--print-json",
         "--verbose",
         "--restrict-filenames",      # 確保檔案名稱安全
-        "--fragment-retries", "infinite" # 無限次重試下載失敗的片段
+        "--fragment-retries", "infinite", # 無限次重試下載失敗的片段
+        "--no-part", # 不使用 .part 暫存檔
     ]
 
     if download_type == "audio":
         command.extend([
-            "-f", "bestaudio/best",
+            "-f", "bestaudio[ext=m4a]/bestaudio", # 優先下載 m4a 格式
             "-x",  # --extract-audio
-            "--audio-format", "mp3",
+            "--audio-format", "m4a", # 輸出為 m4a，避免轉檔
         ])
     else: # video
         command.extend([
