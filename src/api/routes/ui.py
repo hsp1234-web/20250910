@@ -140,3 +140,26 @@ async def read_line_item_editor_page():
 async def read_line_workflow_history_page():
     """(Jules @ 2025-10-14) 提供新的 LINE 工作流歷史頁面"""
     return FileResponse(os.path.join(STATIC_DIR, "line_workflow_history.html"))
+
+
+# --- 音訊報告生成器 (Audio Report Generator) 路由 ---
+
+@router.get("/audio_report/main", response_class=HTMLResponse)
+async def serve_audio_report_main(request: Request):
+    """提供音訊報告生成器 - 主頁"""
+    return templates.TemplateResponse("audio_report_0_main.html", {"request": request})
+
+@router.get("/audio_report/source", response_class=HTMLResponse)
+async def serve_audio_report_source(request: Request):
+    """提供音訊報告生成器 - 步驟1：來源管理"""
+    return templates.TemplateResponse("audio_report_1_source.html", {"request": request})
+
+@router.get("/audio_report/process", response_class=HTMLResponse)
+async def serve_audio_report_process(request: Request):
+    """提供音訊報告生成器 - 步驟2：分析與處理"""
+    return templates.TemplateResponse("audio_report_2_process.html", {"request": request})
+
+@router.get("/audio_report/results", response_class=HTMLResponse)
+async def serve_audio_report_results(request: Request):
+    """提供音訊報告生成器 - 結果瀏覽"""
+    return templates.TemplateResponse("audio_report_3_results.html", {"request": request})

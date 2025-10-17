@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>音訊報告生成器 - 結果瀏覽</title>
+    <style>
+        :root {
+            --bg-color: #F8F9FA;
+            --text-color: #202124;
+            --card-bg-color: rgba(255, 255, 255, 0.9);
+            --card-border-color: #e0e0e0;
+            --button-bg-color: #007bff;
+            --button-hover-bg-color: #0056b3;
+            --secondary-btn-bg: #6c757d;
+            --secondary-btn-hover-bg: #5a6268;
+            --danger-btn-bg: #dc3545;
+            --danger-btn-hover-bg: #c82333;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            padding: 20px;
+            font-size: 100%;
+            line-height: 1.6;
+        }
+        .container { max-width: 1200px; margin: auto; display: flex; flex-direction: column; gap: 24px; }
+        .card {
+            border: 1px solid var(--card-border-color);
+            border-radius: 12px;
+            padding: 24px;
+            background-color: var(--card-bg-color);
+            box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+        }
+        h1 { font-size: 2em; font-weight: 700; }
+        .home-button {
+            display: inline-block;
+            text-decoration: none;
+            padding: 8px 16px;
+            font-size: 0.9em;
+            color: #fff;
+            background-color: var(--secondary-btn-bg);
+            border-radius: 5px;
+            transition: background-color 0.3s;
+        }
+        .home-button:hover { background-color: var(--secondary-btn-hover-bg); }
+        .report-list { min-height: 200px; max-height: 60vh; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; }
+        .report-item {
+            padding: 16px;
+            border-radius: 8px;
+            background-color: #f9f9f9;
+            border: 1px solid #eee;
+            display: grid;
+            grid-template-columns: 1fr auto;
+            gap: 16px;
+            align-items: center;
+        }
+        .report-info .name { font-weight: 600; display: block; margin-bottom: 4px; }
+        .report-info .time { font-size: 0.85em; color: #666; }
+        .report-actions { display: flex; gap: 10px; }
+        .report-actions .action-btn {
+            text-decoration: none;
+            padding: 8px 16px;
+            border-radius: 6px;
+            color: white;
+            font-size: 0.9em;
+            transition: all 0.2s;
+            border: none;
+            cursor: pointer;
+        }
+        .btn-preview { background-color: var(--button-bg-color); }
+        .btn-preview:hover { background-color: var(--button-hover-bg-color); }
+        .btn-download { background-color: var(--success-color, #28a745); }
+        .btn-download:hover { background-color: #218838; }
+        .btn-delete { background-color: var(--danger-btn-bg); }
+        .btn-delete:hover { background-color: var(--danger-btn-hover-bg); }
+
+        @media (max-width: 600px) {
+            .report-item { grid-template-columns: 1fr; }
+            .report-actions { justify-content: flex-start; margin-top: 10px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header class="card" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px;">
+            <div>
+                <h1>結果瀏覽</h1>
+                <p>查看、預覽、下載或刪除已生成的音訊報告。</p>
+            </div>
+            <a href="/audio_report/main" class="home-button">返回功能主頁</a>
+        </header>
+
+        <main class="card">
+            <div id="report-list" class="report-list">
+                <p id="no-reports-message">目前尚無已完成的報告。</p>
+                <!-- 範例項目 -->
+                <div class="report-item">
+                    <div class="report-info">
+                        <span class="name">範例報告_20250101-123000.html</span>
+                        <span class="time">生成時間: 2025-01-01 12:30:00</span>
+                    </div>
+                    <div class="report-actions">
+                        <button class="action-btn btn-preview">預覽</button>
+                        <a href="#" class="action-btn btn-download" download>下載</a>
+                        <button class="action-btn btn-delete">刪除</button>
+                    </div>
+                </div>
+                <!-- 動態載入的報告會顯示在這裡 -->
+            </div>
+        </main>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            console.log("結果瀏覽頁面已載入。");
+            // 未來將在此處添加與後端互動的 JavaScript 邏輯，
+            // 例如：
+            // 1. 從 API 獲取已完成的報告列表並填充到 #report-list。
+            // 2. 為「預覽」、「下載」、「刪除」按鈕添加事件監聽器，以觸發相應的後端 API。
+        });
+    </script>
+</body>
+</html>
