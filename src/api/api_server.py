@@ -224,8 +224,9 @@ from api.routes import (
     ui, page1, page2_downloader, page3_processor, page4_analyzer,
     page5_backup, page6_keys, page7_prompts, page8_details, page9_dashboard,
     page10_test, system, bond_service_proxy, line_workflow_api, workflow,
-    line_data_api # (Jules @ 2025-10-14) 新增 line_data_api 路由
+    line_data_api
 )
+from api.routes import audio_report_api # (Jules @ 2025-10-17) 獨立匯入以避免循環依賴
 
 # --- JULES (2025-09-15): 在應用程式啟動時載入設定 ---
 # 將設定載入到 app.state 中，使其在整個應用程式中可用。
@@ -251,6 +252,7 @@ app.include_router(page10_test.router, prefix="/api/service_test", tags=["API: �
 app.include_router(workflow.router) # (Jules @ 2025-10-12) 新增工作流 API 路由
 app.include_router(line_workflow_api.router) # (Jules @ 2025-10-12) Renamed from essay_performance
 app.include_router(line_data_api.router) # (Jules @ 2025-10-14) 註冊新的 LINE 資料 API 路由
+app.include_router(audio_report_api.router) # (Jules @ 2025-10-17) 註冊新的音訊報告 API 路由
 
 # 債券服務代理
 app.include_router(bond_service_proxy.router, prefix="/api/bond_service", tags=["API: Bond Service Proxy"]) # API 代理
