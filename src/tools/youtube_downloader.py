@@ -40,7 +40,7 @@ def download_media(
     command = [
         sys.executable, "-m", "yt_dlp",
         "--print-json",
-        "--verbose",
+        # "--verbose",  # (Jules @ 2025-10-18) 移除詳細日誌，避免日誌過多
         "--restrict-filenames",
         "--fragment-retries", "infinite",
         "--no-part",
@@ -70,10 +70,23 @@ def download_media(
         result = subprocess.run(command, capture_output=True, text=True, check=True, encoding='utf-8')
         video_info = json.loads(result.stdout)
 
-        # 由於我們已經讓 yt-dlp 產生了最終檔名，我們可以直接從 video_info 中獲取它
-        final_filepath_str = video_info.get('_filename')
+        # (Jules @ 2025-10-18) 增強修復：
+        # 對於某些影片類型（如 YouTube Shorts），'filepath' 和 '_filename' 可能都不存在於頂層 JSON 物件中。
+        # 根據 yt-dlp 的行為，最可靠的方式是從 'requested_downloads' 陣列中獲取最終檔案路徑。
+        # 這個陣列記錄了所有實際下載和處理過的檔案。
+        final_filepath_str = None
+        if 'requested_downloads' in video_info and video_info['requested_downloads']:
+            # 通常，轉換後的最終檔案會是這個列表中的最後一個
+            final_filepath_str = video_info['requested_downloads'][-1].get('filepath')
+
+        # 如果上述方法失敗，則退回至先前的方法作為備用
+        if not final_filepath_str:
+            final_filepath_str = video_info.get('filepath') or video_info.get('_filename')
+
         if not final_filepath_str or not Path(final_filepath_str).exists():
-             raise FileNotFoundError(f"yt-dlp 報告的檔案路徑不存在: {final_filepath_str}")
+            # 增加更詳細的錯誤日誌，以便未來偵錯
+            log.error(f"檔案驗證失敗。yt-dlp 回傳的資訊: {json.dumps(video_info, indent=2)}")
+            raise FileNotFoundError(f"yt-dlp 處理完成後，無法在指定路徑找到檔案: {final_filepath_str}")
 
         final_path = Path(final_filepath_str)
         final_result = {
