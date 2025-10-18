@@ -43,8 +43,8 @@ def download_media(
     command = [
         sys.executable, "-m", "yt_dlp",
         "--print-json",
-        "--verbose",
-        "--restrict-filenames",
+        "--quiet",  # 使用 --quiet 取代 --verbose，減少不必要的日誌輸出
+        # "--restrict-filenames", # 移除此選項以支援非 ASCII 字元檔名
         "--fragment-retries", "infinite",
         "--no-part",
     ]
@@ -76,25 +76,33 @@ def download_media(
         result = subprocess.run(command, capture_output=True, text=True, check=True, encoding='utf-8')
         video_info = json.loads(result.stdout)
 
-        # 從 yt-dlp 的輸出中獲取它實際使用的檔案路徑
-        original_filepath_str = video_info.get('_filename')
-        if not original_filepath_str:
-            raise RuntimeError("yt-dlp did not provide the output filename in its JSON.")
+        # -- 檔案路徑處理邏輯修正 --
+        # 舊方法 (_filename) 在音訊轉檔後會指向已被刪除的原始檔，不可靠。
+        # 新方法：從 `requested_downloads` 陣列中獲取最終檔案的路徑。
+        # 這個陣列記錄了所有下載步驟，最後一個通常是我們想要的最終檔案。
+        if video_info.get("requested_downloads") and len(video_info["requested_downloads"]) > 0:
+            final_filepath_str = video_info["requested_downloads"][-1].get("filepath")
+        else:
+            # 作為備用，如果 requested_downloads 不存在，嘗試回退到 _filename
+            final_filepath_str = video_info.get('_filename')
 
-        original_path = Path(original_filepath_str)
+        if not final_filepath_str:
+            raise RuntimeError("yt-dlp 的 JSON 輸出中未提供有效的檔案路徑。")
+
+        original_path = Path(final_filepath_str)
+
+        # 如果檔案不存在，這是一個嚴重的問題，直接報錯
+        if not original_path.exists():
+            log.error(f"下載後找不到預期的檔案: {original_path}")
+            raise FileNotFoundError(f"yt-dlp 聲稱已下載完成，但找不到檔案: {original_path}")
 
         # 現在我們手動加上標籤並重新命名檔案
         new_filename = f"{tag}{original_path.stem}{final_suffix}"
         final_path = original_path.with_name(new_filename)
 
-        if original_path.exists():
-            original_path.rename(final_path)
-            log.info(f"檔案已成功重新命名為: {final_path}")
-        else:
-            log.warning(f"找不到原始下載檔案 {original_path}，無法重新命名。")
-            # 作為備用，嘗試直接尋找已命名的檔案
-            if not final_path.exists():
-                 raise FileNotFoundError(f"找不到原始檔案或已重新命名的檔案。")
+        # 執行重新命名
+        original_path.rename(final_path)
+        log.info(f"檔案已成功重新命名為: {final_path}")
 
         final_result = {
             "type": "result",
