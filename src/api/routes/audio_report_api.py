@@ -166,8 +166,9 @@ async def get_all_download_tasks():
     獲取所有音訊下載任務的歷史紀錄。
     """
     try:
-        # 我們只獲取此功能相關的任務
-        tasks = db_client.get_tasks_by_type('audio_download')
+        # 獲取所有任務，然後在記憶體中過濾
+        all_tasks = db_client.get_all_tasks()
+        tasks = [task for task in all_tasks if task.get("task_type") == 'audio_download']
 
         # 為了前端方便處理，我們對 payload 和 result 進行解析
         for task in tasks:

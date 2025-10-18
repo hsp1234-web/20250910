@@ -70,10 +70,15 @@ def download_media(
         result = subprocess.run(command, capture_output=True, text=True, check=True, encoding='utf-8')
         video_info = json.loads(result.stdout)
 
-        # 由於我們已經讓 yt-dlp 產生了最終檔名，我們可以直接從 video_info 中獲取它
-        final_filepath_str = video_info.get('_filename')
+        # (Jules @ 2025-10-18) 修正：
+        # yt-dlp 在進行格式轉換時 (例如 -x)，'filepath' 鍵會指向最終的檔案路徑 (如 .m4a)，
+        # 而 '_filename' 鍵則可能指向轉換前的臨時檔案 (如 .webm)，導致 FileNotFoundError。
+        # 因此，我們優先使用 'filepath'，如果不存在，再使用 '_filename' 作為備用。
+        final_filepath_str = video_info.get('filepath') or video_info.get('_filename')
         if not final_filepath_str or not Path(final_filepath_str).exists():
-             raise FileNotFoundError(f"yt-dlp 報告的檔案路徑不存在: {final_filepath_str}")
+            # 增加更詳細的錯誤日誌，以便未來偵錯
+            log.error(f"檔案驗證失敗。yt-dlp 回傳的資訊: {json.dumps(video_info, indent=2)}")
+            raise FileNotFoundError(f"yt-dlp 處理完成後，無法在指定路徑找到檔案: {final_filepath_str}")
 
         final_path = Path(final_filepath_str)
         final_result = {
