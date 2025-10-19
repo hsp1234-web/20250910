@@ -1,6 +1,5 @@
-# tools/youtube_downloader.py
+# src/tools/youtube_downloader.py
 import argparse
-import json
 import logging
 import sys
 import subprocess
@@ -10,143 +9,87 @@ from pathlib import Path
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[logging.StreamHandler(sys.stderr)]
+    handlers=[logging.StreamHandler(sys.stdout)] # 改為 stdout
 )
-log = logging.getLogger('youtube_downloader_tool')
+log = logging.getLogger('youtube_downloader_worker')
 
-def download_media(
-    youtube_url: str,
-    output_dir: Path,
-    download_type: str = "audio",
-    audio_format: str = "m4a",
-    video_resolution: str = "best",
-    custom_filename: str | None = None,
-    cookies_file: str | None = None,
-    raise_exceptions: bool = False
-):
+# --- 常數設定 ---
+# 下載超時設定為 30 分鐘
+DOWNLOAD_TIMEOUT_SECONDS = 1800
+
+def download_audio_worker(youtube_url: str, output_dir: Path, task_hash: str):
     """
-    使用 yt-dlp 從 URL 下載媒體，支援音訊和影片，以及不同的格式和解析度。
+    一個單一職責的背景工作函式，專門負責下載音訊。
+    它會嘗試下載最高品質的原生 M4A 音訊，以下載速度最快。
+    檔案將被直接下載到指定的目錄中，並以任務雜湊命名。
     """
-    log.info(f"開始下載媒體。類型: {download_type}, URL: {youtube_url}, 音訊格式: {audio_format}, 影片解析度: {video_resolution}")
+    log.info(f"背景下載工人已啟動。URL: {youtube_url}, 目標目錄: {output_dir}, 任務雜湊: {task_hash}")
 
-    # 決定最終的檔案副檔名和檔名標籤
-    if download_type == "video":
-        final_suffix = ".mp4"
-        tag = "[mp4]"
-    else: # audio
-        final_suffix = f".{audio_format}"
-        tag = f"[{audio_format}]"
+    # 確保輸出目錄存在
+    output_dir.mkdir(parents=True, exist_ok=True)
 
-    # 建立一個基礎的檔名模板，稍後會在其前面加上標籤
-    base_output_template = f"%(title)s"
+    # 輸出範本，使用傳入的 task_hash 作為檔名（不含副檔名）
+    output_template = str(output_dir / task_hash) + ".%(ext)s"
 
     command = [
         sys.executable, "-m", "yt_dlp",
-        "--print-json",
-        "--verbose",
-        "--restrict-filenames",
-        "--fragment-retries", "infinite",
-        "--no-part",
+        # --- 指令優化 ---
+        # 1. -f bestaudio[ext=m4a]/bestaudio:
+        #    優先選擇原生就是 m4a 的最佳音訊，如果沒有，再選擇其他格式的最佳音訊。
+        #    這能最大程度地避免下載後再轉換格式，提升速度並減少錯誤。
+        "-f", "bestaudio[ext=m4a]/bestaudio",
+        # 2. -x, --audio-format m4a:
+        #    如果找不到原生的 m4a，這個指令會確保將下載的音訊轉換為 m4a。
+        #    這是確保最終檔案格式一致性的備用方案。
+        "-x", "--audio-format", "m4a",
+        # --- 其他穩定性選項 ---
+        "--quiet",                     # 只輸出關鍵資訊
+        "--no-part",                   # 不使用 .part 暫存檔，直接寫入最終檔案
+        "--fragment-retries", "infinite", # 無限次重試片段
+        # --- 輸出路徑 ---
+        "-o", output_template,
+        youtube_url
     ]
-
-    if download_type == "audio":
-        command.extend(["-x", "--audio-format", audio_format])
-        command.extend(["-f", "bestaudio/best"])
-    else: # video
-        resolution_filter = ""
-        if video_resolution != "best":
-            height = video_resolution.replace('p', '')
-            if height.isdigit():
-                resolution_filter = f"[height<={height}]"
-
-        video_format_string = f"bestvideo{resolution_filter}[ext=mp4]+bestaudio[ext=m4a]/best{resolution_filter}[ext=mp4]/best"
-        command.extend(["-f", video_format_string, "--merge-output-format", "mp4"])
-
-    if cookies_file and Path(cookies_file).is_file():
-        log.info(f"使用 Cookies 檔案: {cookies_file}")
-        command.extend(["--cookies", cookies_file])
-
-    # 我們先不指定完整的輸出路徑，讓 yt-dlp 使用預設的標題
-    # 這樣可以避免因自訂檔名導致的潛在問題
-    command.extend(["-o", f"{output_dir / base_output_template}.%(ext)s", youtube_url])
 
     log.info(f"執行 yt-dlp 指令: {' '.join(command)}")
 
     try:
-        result = subprocess.run(command, capture_output=True, text=True, check=True, encoding='utf-8')
-        video_info = json.loads(result.stdout)
+        # 執行指令並設定超時
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            check=True,
+            encoding='utf-8',
+            timeout=DOWNLOAD_TIMEOUT_SECONDS
+        )
+        log.info(f"✅ 下載成功。URL: {youtube_url}。標準輸出:\n{result.stdout}")
 
-        # 從 yt-dlp 的輸出中獲取它實際使用的檔案路徑
-        original_filepath_str = video_info.get('_filename')
-        if not original_filepath_str:
-            raise RuntimeError("yt-dlp did not provide the output filename in its JSON.")
-
-        original_path = Path(original_filepath_str)
-
-        # 現在我們手動加上標籤並重新命名檔案
-        new_filename = f"{tag}{original_path.stem}{final_suffix}"
-        final_path = original_path.with_name(new_filename)
-
-        if original_path.exists():
-            original_path.rename(final_path)
-            log.info(f"檔案已成功重新命名為: {final_path}")
-        else:
-            log.warning(f"找不到原始下載檔案 {original_path}，無法重新命名。")
-            # 作為備用，嘗試直接尋找已命名的檔案
-            if not final_path.exists():
-                 raise FileNotFoundError(f"找不到原始檔案或已重新命名的檔案。")
-
-        final_result = {
-            "type": "result",
-            "status": "已完成",
-            "output_path": str(final_path),
-            "video_title": video_info.get("title", "Unknown Title"),
-            "duration_seconds": video_info.get("duration", 0)
-        }
-        print(json.dumps(final_result), flush=True)
-        log.info(f"✅ 媒體下載成功: {final_path}")
-
+    except subprocess.TimeoutExpired:
+        log.error(f"❌ 下載超時 ({DOWNLOAD_TIMEOUT_SECONDS}秒)。URL: {youtube_url}")
+        # 超時也需要退出，並返回非零碼表示錯誤
+        sys.exit(1)
     except subprocess.CalledProcessError as e:
-        log.error(f"❌ yt-dlp 執行失敗。返回碼: {e.returncode}\nStderr: {e.stderr}")
-        if raise_exceptions: raise e
-        error_message = e.stderr
-        error_code = "GENERAL_ERROR"
-        if "authentication" in error_message.lower() or "login required" in error_message.lower():
-            error_code = "AUTH_REQUIRED"
-            error_message = "此影片需要登入驗證。請提供 cookies.txt 檔案。"
-        print(json.dumps({"type": "result", "status": "failed", "error": error_message, "error_code": error_code}), flush=True)
+        # check=True 會在返回碼非0時拋出此例外
+        log.error(f"❌ yt-dlp 執行失敗。URL: {youtube_url}。返回碼: {e.returncode}\nStderr: {e.stderr}")
         sys.exit(1)
     except Exception as e:
-        log.error(f"❌ 下載過程中發生未預期的錯誤: {e}", exc_info=True)
-        if raise_exceptions: raise e
-        print(json.dumps({"type": "result", "status": "failed", "error": str(e)}), flush=True)
+        log.error(f"❌ 下載過程中發生未預期的錯誤。URL: {youtube_url}。錯誤: {e}", exc_info=True)
         sys.exit(1)
 
 def main():
-    parser = argparse.ArgumentParser(description="媒體下載工具 (使用 yt-dlp)。")
-    parser.add_argument("--url", type=str, required=True)
-    parser.add_argument("--output-dir", type=str, required=True)
-    parser.add_argument("--download-type", type=str, default="audio", choices=['audio', 'video'])
-    parser.add_argument("--audio-format", type=str, default="m4a")
-    parser.add_argument("--video-resolution", type=str, default="best")
-    # custom-filename 暫時不從 main 函式中直接使用，因為新的邏輯是基於 title
-    # parser.add_argument("--custom-filename", type=str, default=None)
-    parser.add_argument("--cookies-file", type=str, default=None)
-
+    """
+    腳本主進入點，用於從命令列執行下載工人。
+    """
+    parser = argparse.ArgumentParser(description="單一職責的媒體下載工人。")
+    parser.add_argument("--url", type=str, required=True, help="要下載的 YouTube 影片網址。")
+    parser.add_argument("--output-dir", type=str, required=True, help="儲存下載檔案的目錄。")
+    parser.add_argument("--task-hash", type=str, required=True, help="用於命名檔案的唯一任務雜湊值。")
     args = parser.parse_args()
 
     output_path = Path(args.output_dir)
-    output_path.mkdir(parents=True, exist_ok=True)
 
-    download_media(
-        args.url,
-        output_path,
-        args.download_type,
-        args.audio_format,
-        args.video_resolution,
-        None, # custom_filename 設為 None
-        args.cookies_file
-    )
+    download_audio_worker(args.url, output_path, args.task_hash)
 
 if __name__ == "__main__":
     main()
