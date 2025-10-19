@@ -31,6 +31,7 @@ sys.path.insert(0, str(SRC_DIR))
 # V4 循環導入修復：從新的依賴檔案中導入
 from .dependencies import db_client
 from core import key_manager
+from core import download_worker # <-- 匯入新的工人模組
 
 # --- JULES 於 2025-08-09 的修改：設定應用程式全域時區 ---
 # 為了確保所有日誌和資料庫時間戳都使用一致的時區，我們在應用程式啟動的
@@ -165,7 +166,10 @@ async def lifespan(app: FastAPI):
     broadcaster_task = asyncio.create_task(notification_broadcaster(app))
     app.state.broadcaster_task = broadcaster_task
 
-    # 4. 方案D優化：移除預熱流程，立即發送就緒信號
+    # 4. 啟動下載工人執行緒
+    app.state.download_worker_thread = download_worker.start_worker_thread()
+
+    # 5. 方案D優化：移除預熱流程，立即發送就緒信號
     # 實現真正的延遲載入 (Lazy Loading)，讓重型模組在首次使用時才被導入。
     log.info("[SYSTEM_READY] All modules are fully initialized.")
 
@@ -179,6 +183,12 @@ async def lifespan(app: FastAPI):
         await app.state.broadcaster_task
     except asyncio.CancelledError:
         log.info("訊息廣播員已成功關閉。")
+
+    # 2. 停止下載工人 (透過發送一個 'None' 任務作為毒丸)
+    # 這裡我們不需要明確停止執行緒，因為它是 daemon 執行緒，
+    # 主程式結束時它會自動退出。但發送毒丸是更優雅的作法。
+    download_worker.task_queue.put(None)
+    log.info("已發送停止信號給下載工人執行緒。")
 
 # --- FastAPI 應用實例 ---
 app = FastAPI(title="鳳凰音訊轉錄儀 API (v3 - 重構)", version="3.0", lifespan=lifespan)

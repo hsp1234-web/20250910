@@ -32,3 +32,4 @@ lxml
 plotly
 PyMuPDF
 python-pptx
+sse-starlette

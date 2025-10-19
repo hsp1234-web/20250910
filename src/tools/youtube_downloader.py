@@ -1,152 +1,113 @@
-# tools/youtube_downloader.py
-import argparse
-import json
+# src/tools/youtube_downloader.py
 import logging
 import sys
 import subprocess
+import json
+import shutil
 from pathlib import Path
 
+# 確保能從根目錄正確匯入
+try:
+    from src.db import database as db
+except ImportError:
+    project_root = Path(__file__).parent.parent.parent
+    if str(project_root) not in sys.path:
+        sys.path.insert(0, str(project_root))
+    from src.db import database as db
+
 # --- 日誌設定 ---
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[logging.StreamHandler(sys.stderr)]
-)
-log = logging.getLogger('youtube_downloader_tool')
+log = logging.getLogger('YoutubeDownloaderTool')
 
-def download_media(
-    youtube_url: str,
-    output_dir: Path,
-    download_type: str = "audio",
-    audio_format: str = "m4a",
-    video_resolution: str = "best",
-    custom_filename: str | None = None,
-    cookies_file: str | None = None,
-    raise_exceptions: bool = False
-):
+# --- 常數設定 ---
+DOWNLOAD_TIMEOUT_SECONDS = 1800  # 30 分鐘
+INCOMING_DIR = Path("downloads/incoming")
+FINAL_AUDIO_DIR = Path("downloads/audio")
+
+import asyncio
+from src.core.sse_manager import sse_manager
+
+async def publish_sse_update(topic: str, status: str, message: str, **kwargs):
+    """一個輔助函式，用於格式化並發布 SSE 訊息。"""
+    payload = {"status": status, "message": message, **kwargs}
+    await sse_manager.publish(topic, json.dumps(payload))
+
+async def execute_full_download_workflow(task: dict):
     """
-    使用 yt-dlp 從 URL 下載媒體，支援音訊和影片，以及不同的格式和解析度。
+    一個完整的、自包含的下載工作流函式 (非同步版本)。
+    它接收一個任務字典，並處理從下載到最終狀態更新的所有步驟。
     """
-    log.info(f"開始下載媒體。類型: {download_type}, URL: {youtube_url}, 音訊格式: {audio_format}, 影片解析度: {video_resolution}")
+    task_hash = task.get("task_hash")
+    payload_str = task.get("payload", "{}")
 
-    # 決定最終的檔案副檔名和檔名標籤
-    if download_type == "video":
-        final_suffix = ".mp4"
-        tag = "[mp4]"
-    else: # audio
-        final_suffix = f".{audio_format}"
-        tag = f"[{audio_format}]"
-
-    # 建立一個基礎的檔名模板，稍後會在其前面加上標籤
-    base_output_template = f"%(title)s"
-
-    command = [
-        sys.executable, "-m", "yt_dlp",
-        "--print-json",
-        "--verbose",
-        "--restrict-filenames",
-        "--fragment-retries", "infinite",
-        "--no-part",
-    ]
-
-    if download_type == "audio":
-        command.extend(["-x", "--audio-format", audio_format])
-        command.extend(["-f", "bestaudio/best"])
-    else: # video
-        resolution_filter = ""
-        if video_resolution != "best":
-            height = video_resolution.replace('p', '')
-            if height.isdigit():
-                resolution_filter = f"[height<={height}]"
-
-        video_format_string = f"bestvideo{resolution_filter}[ext=mp4]+bestaudio[ext=m4a]/best{resolution_filter}[ext=mp4]/best"
-        command.extend(["-f", video_format_string, "--merge-output-format", "mp4"])
-
-    if cookies_file and Path(cookies_file).is_file():
-        log.info(f"使用 Cookies 檔案: {cookies_file}")
-        command.extend(["--cookies", cookies_file])
-
-    # 我們先不指定完整的輸出路徑，讓 yt-dlp 使用預設的標題
-    # 這樣可以避免因自訂檔名導致的潛在問題
-    command.extend(["-o", f"{output_dir / base_output_template}.%(ext)s", youtube_url])
-
-    log.info(f"執行 yt-dlp 指令: {' '.join(command)}")
+    if not task_hash:
+        log.error("任務字典中缺少 'task_hash'，無法處理。")
+        return
 
     try:
-        result = subprocess.run(command, capture_output=True, text=True, check=True, encoding='utf-8')
+        payload = json.loads(payload_str)
+        url = payload.get("original_url")
+        if not url:
+            raise ValueError("任務 payload 中缺少 'original_url'")
+
+        await publish_sse_update(task_hash, "processing", "開始執行完整下載工作流...")
+        log.info(f"[{task_hash}] 開始執行完整下載工作流。URL: {url}")
+
+        # --- 步驟 1: 執行 yt-dlp 下載 ---
+        INCOMING_DIR.mkdir(parents=True, exist_ok=True)
+        temp_output_template = str(INCOMING_DIR / f"{task_hash}.%(ext)s")
+        command = [
+            sys.executable, "-m", "yt_dlp", "--print-json",
+            "-f", "bestaudio[ext=m4a]/bestaudio", "-x", "--audio-format", "m4a",
+            "--quiet", "--no-part", "--fragment-retries", "infinite",
+            "-o", temp_output_template, url
+        ]
+
+        await publish_sse_update(task_hash, "processing", "正在執行 yt-dlp 指令...")
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(
+            None, lambda: subprocess.run(
+                command, capture_output=True, text=True, check=True,
+                encoding='utf-8', timeout=DOWNLOAD_TIMEOUT_SECONDS
+            )
+        )
+
+        # --- 步驟 2: 解析結果並找到下載的檔案 ---
+        await publish_sse_update(task_hash, "processing", "下載完成，正在解析檔案資訊...")
         video_info = json.loads(result.stdout)
+        downloaded_filepath_str = video_info.get("requested_downloads", [{}])[-1].get("filepath")
+        if not downloaded_filepath_str:
+            raise FileNotFoundError("yt-dlp 的輸出中找不到最終檔案路徑。")
 
-        # 從 yt-dlp 的輸出中獲取它實際使用的檔案路徑
-        original_filepath_str = video_info.get('_filename')
-        if not original_filepath_str:
-            raise RuntimeError("yt-dlp did not provide the output filename in its JSON.")
+        temp_file_path = Path(downloaded_filepath_str)
+        if not temp_file_path.exists():
+            raise FileNotFoundError(f"下載完成後，找不到預期的暫存檔案: {temp_file_path}")
+        log.info(f"[{task_hash}] 檔案已成功下載至暫存位置: {temp_file_path}")
 
-        original_path = Path(original_filepath_str)
+        # --- 步驟 3: 重新命名與移動 ---
+        await publish_sse_update(task_hash, "processing", "準備重新命名並移動檔案...")
+        original_title = video_info.get("title", "Unknown_Title")
+        safe_title = "".join(c for c in original_title if c.isalnum() or c in (' ', '_', '-')).rstrip()
+        final_filename = f"[m4a]{safe_title}{temp_file_path.suffix}"
 
-        # 現在我們手動加上標籤並重新命名檔案
-        new_filename = f"{tag}{original_path.stem}{final_suffix}"
-        final_path = original_path.with_name(new_filename)
+        FINAL_AUDIO_DIR.mkdir(parents=True, exist_ok=True)
+        final_path = FINAL_AUDIO_DIR / final_filename
 
-        if original_path.exists():
-            original_path.rename(final_path)
-            log.info(f"檔案已成功重新命名為: {final_path}")
-        else:
-            log.warning(f"找不到原始下載檔案 {original_path}，無法重新命名。")
-            # 作為備用，嘗試直接尋找已命名的檔案
-            if not final_path.exists():
-                 raise FileNotFoundError(f"找不到原始檔案或已重新命名的檔案。")
+        shutil.move(str(temp_file_path), str(final_path))
+        log.info(f"[{task_hash}] 成功移動檔案至: {final_path}")
 
-        final_result = {
-            "type": "result",
-            "status": "已完成",
+        # --- 步驟 4: 更新資料庫並發送最終成功訊息 ---
+        result_payload = {
             "output_path": str(final_path),
-            "video_title": video_info.get("title", "Unknown Title"),
-            "duration_seconds": video_info.get("duration", 0)
+            "original_title": original_title,
+            "duration": video_info.get("duration", 0)
         }
-        print(json.dumps(final_result), flush=True)
-        log.info(f"✅ 媒體下載成功: {final_path}")
+        db.update_task_status(task_hash, "已完成", result=json.dumps(result_payload))
+        await publish_sse_update(task_hash, "completed", "✅ 工作流成功完成！", data=result_payload)
 
-    except subprocess.CalledProcessError as e:
-        log.error(f"❌ yt-dlp 執行失敗。返回碼: {e.returncode}\nStderr: {e.stderr}")
-        if raise_exceptions: raise e
-        error_message = e.stderr
-        error_code = "GENERAL_ERROR"
-        if "authentication" in error_message.lower() or "login required" in error_message.lower():
-            error_code = "AUTH_REQUIRED"
-            error_message = "此影片需要登入驗證。請提供 cookies.txt 檔案。"
-        print(json.dumps({"type": "result", "status": "failed", "error": error_message, "error_code": error_code}), flush=True)
-        sys.exit(1)
+        log.info(f"✅ [{task_hash}] 工作流成功完成！")
+
     except Exception as e:
-        log.error(f"❌ 下載過程中發生未預期的錯誤: {e}", exc_info=True)
-        if raise_exceptions: raise e
-        print(json.dumps({"type": "result", "status": "failed", "error": str(e)}), flush=True)
-        sys.exit(1)
-
-def main():
-    parser = argparse.ArgumentParser(description="媒體下載工具 (使用 yt-dlp)。")
-    parser.add_argument("--url", type=str, required=True)
-    parser.add_argument("--output-dir", type=str, required=True)
-    parser.add_argument("--download-type", type=str, default="audio", choices=['audio', 'video'])
-    parser.add_argument("--audio-format", type=str, default="m4a")
-    parser.add_argument("--video-resolution", type=str, default="best")
-    # custom-filename 暫時不從 main 函式中直接使用，因為新的邏輯是基於 title
-    # parser.add_argument("--custom-filename", type=str, default=None)
-    parser.add_argument("--cookies-file", type=str, default=None)
-
-    args = parser.parse_args()
-
-    output_path = Path(args.output_dir)
-    output_path.mkdir(parents=True, exist_ok=True)
-
-    download_media(
-        args.url,
-        output_path,
-        args.download_type,
-        args.audio_format,
-        args.video_resolution,
-        None, # custom_filename 設為 None
-        args.cookies_file
-    )
-
-if __name__ == "__main__":
-    main()
+        error_message = f"處理過程中發生未預期的錯誤: {str(e)}"
+        log.error(f"[{task_hash}] {error_message}", exc_info=True)
+        db.update_task_status(task_hash, "failed", result=json.dumps({"error": error_message}))
+        await publish_sse_update(task_hash, "failed", error_message)

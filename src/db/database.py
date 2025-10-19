@@ -62,7 +62,7 @@ def initialize_database(conn: sqlite3.Connection = None):
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS tasks (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    task_id TEXT NOT NULL UNIQUE,
+                    task_hash TEXT NOT NULL UNIQUE,
                     status TEXT NOT NULL DEFAULT '處理中',
                     progress INTEGER DEFAULT 0,
                     payload TEXT,
@@ -73,6 +73,20 @@ def initialize_database(conn: sqlite3.Connection = None):
                     depends_on TEXT
                 )
             """)
+            # --- 綱要遷移：將舊的 task_id 欄位安全地改名為 task_hash ---
+            try:
+                # 檢查舊欄位是否存在
+                cursor.execute("PRAGMA table_info(tasks)")
+                columns = [info['name'] for info in cursor.fetchall()]
+                if 'task_id' in columns and 'task_hash' not in columns:
+                    log.info("偵測到舊的 'task_id' 欄位，正在遷移至 'task_hash'...")
+                    cursor.execute("ALTER TABLE tasks RENAME COLUMN task_id TO task_hash")
+                    log.info("✅ 成功將欄位 'task_id' 重新命名為 'task_hash'。")
+            except sqlite3.Error as e:
+                # 如果發生錯誤，記錄下來但不要中斷初始化流程
+                log.warning(f"在遷移 'task_id' 欄位時發生非致命錯誤: {e}")
+
+
             # Add columns if they don't exist (for migration)
             migrations = {
                 "progress": "INTEGER DEFAULT 0",
@@ -90,7 +104,7 @@ def initialize_database(conn: sqlite3.Connection = None):
                         raise
             # 建立索引以加速查詢
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_status ON tasks (status)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_task_id ON tasks (task_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_task_hash ON tasks (task_hash)")
 
             # 新增一個觸發器來自動更新 updated_at 時間戳
             cursor.execute("""
@@ -457,30 +471,30 @@ def get_app_state(key: str) -> str | None:
 
 # --- 任務佇列核心功能 ---
 
-def add_task(task_id: str, payload: str, task_type: str = 'transcribe', depends_on: str = None) -> bool:
+def add_task(task_hash: str, payload: str, task_type: str = 'transcribe', depends_on: str = None) -> bool:
     """
     新增一個新任務到佇列中。
 
-    :param task_id: 唯一的任務 ID。
+    :param task_hash: 唯一的任務雜湊值。
     :param payload: 任務的內容，通常是 JSON 字串。
     :param task_type: 任務類型 ('transcribe' 或 'download').
-    :param depends_on: 此任務所依賴的另一個任務的 task_id。
+    :param depends_on: 此任務所依賴的另一個任務的 task_hash。
     :return: 如果成功新增則回傳 True，否則回傳 False。
     """
-    sql = "INSERT INTO tasks (task_id, payload, status, type, depends_on) VALUES (?, ?, '處理中', ?, ?)"
+    sql = "INSERT INTO tasks (task_hash, payload, status, type, depends_on) VALUES (?, ?, '處理中', ?, ?)"
     conn = get_db_connection()
     if not conn: return False
-    log.info(f"DB:{DB_FILE} 準備新增 '{task_type}' 任務: {task_id} (依賴: {depends_on or '無'})")
+    log.info(f"DB:{DB_FILE} 準備新增 '{task_type}' 任務: {task_hash} (依賴: {depends_on or '無'})")
     try:
         with conn:
-            conn.execute(sql, (task_id, payload, task_type, depends_on))
-        log.info(f"✅ 已成功新增任務到佇列: {task_id}")
+            conn.execute(sql, (task_hash, payload, task_type, depends_on))
+        log.info(f"✅ 已成功新增任務到佇列: {task_hash}")
         return True
     except sqlite3.IntegrityError:
-        log.warning(f"⚠️ 嘗試新增一個已存在的任務 ID: {task_id}")
+        log.warning(f"⚠️ 嘗試新增一個已存在的任務雜湊: {task_hash}")
         return False
     except sqlite3.Error as e:
-        log.error(f"❌ 新增任務 {task_id} 時發生資料庫錯誤: {e}", exc_info=True)
+        log.error(f"❌ 新增任務 {task_hash} 時發生資料庫錯誤: {e}", exc_info=True)
         return False
     finally:
         if conn:
@@ -505,11 +519,11 @@ def fetch_and_lock_task() -> dict | None:
             #    - 優先處理無依賴的任務 (例如下載任務)
             #    - 對於有依賴的任務，只有在其依賴的任務已完成時才選取
             sql = """
-                SELECT id, task_id, payload, type
+                SELECT id, task_hash, payload, type
                 FROM tasks
                 WHERE status = '處理中' AND (
                     depends_on IS NULL OR
-                    depends_on IN (SELECT task_id FROM tasks WHERE status = '已完成')
+                    depends_on IN (SELECT task_hash FROM tasks WHERE status = '已完成')
                 )
                 ORDER BY depends_on NULLS FIRST, created_at
                 LIMIT 1
@@ -520,7 +534,7 @@ def fetch_and_lock_task() -> dict | None:
             if task:
                 # 2. 如果找到任務，立刻更新其狀態
                 task_id_to_process = task["id"]
-                log.info(f"🔒 找到並鎖定任務 ID: {task['task_id']} (資料庫 id: {task_id_to_process})")
+                log.info(f"🔒 找到並鎖定任務雜湊: {task['task_hash']} (資料庫 id: {task_id_to_process})")
                 cursor.execute(
                     "UPDATE tasks SET status = 'processing' WHERE id = ?", (task_id_to_process,)
                 )
@@ -537,87 +551,87 @@ def fetch_and_lock_task() -> dict | None:
             conn.close()
 
 
-def update_task_progress(task_id: str, progress: int, partial_result: str):
+def update_task_progress(task_hash: str, progress: int, partial_result: str):
     """
     更新任務的即時進度和部分結果。
     """
     # 將部分結果打包成與最終結果相同的 JSON 結構
     result_payload = json.dumps({"transcript": partial_result})
-    sql = "UPDATE tasks SET progress = ?, result = ? WHERE task_id = ?"
+    sql = "UPDATE tasks SET progress = ?, result = ? WHERE task_hash = ?"
     conn = get_db_connection()
     if not conn: return
 
     try:
         with conn:
-            conn.execute(sql, (progress, result_payload, task_id))
-        log.debug(f"📈 任務 {task_id} 進度已更新為: {progress}%")
+            conn.execute(sql, (progress, result_payload, task_hash))
+        log.debug(f"📈 任務 {task_hash} 進度已更新為: {progress}%")
     except sqlite3.Error as e:
-        log.error(f"❌ 更新任務 {task_id} 進度時出錯: {e}", exc_info=True)
+        log.error(f"❌ 更新任務 {task_hash} 進度時出錯: {e}", exc_info=True)
     finally:
         if conn:
             conn.close()
 
-def update_task_status(task_id: str, status: str, result: str = None):
+def update_task_status(task_hash: str, status: str, result: str = None):
     """
     更新一個任務的狀態和結果。
 
-    :param task_id: 要更新的任務 ID。
+    :param task_hash: 要更新的任務雜湊。
     :param status: 新的狀態 ('已完成', 'failed')。
     :param result: 任務的結果或錯誤訊息。
     """
-    sql = "UPDATE tasks SET status = ?, result = ? WHERE task_id = ?"
+    sql = "UPDATE tasks SET status = ?, result = ? WHERE task_hash = ?"
     conn = get_db_connection()
     if not conn: return
 
     try:
         with conn:
-            conn.execute(sql, (status, result, task_id))
-        log.info(f"✅ 任務 {task_id} 狀態已更新為: {status}")
+            conn.execute(sql, (status, result, task_hash))
+        log.info(f"✅ 任務 {task_hash} 狀態已更新為: {status}")
     except sqlite3.Error as e:
-        log.error(f"❌ 更新任務 {task_id} 狀態時出錯: {e}", exc_info=True)
+        log.error(f"❌ 更新任務 {task_hash} 狀態時出錯: {e}", exc_info=True)
     finally:
         if conn:
             conn.close()
 
-def get_task_status(task_id: str) -> dict | None:
+def get_task_status(task_hash: str) -> dict | None:
     """
-    根據 task_id 查詢任務的狀態。
+    根據 task_hash 查詢任務的狀態。
 
-    :param task_id: 要查詢的任務 ID。
+    :param task_hash: 要查詢的任務雜湊。
     :return: 包含任務狀態的字典，或如果找不到則回傳 None。
     """
-    sql = "SELECT task_id, status, progress, type, payload, result, created_at, updated_at FROM tasks WHERE task_id = ?"
+    sql = "SELECT task_hash, status, progress, type, payload, result, created_at, updated_at FROM tasks WHERE task_hash = ?"
     conn = get_db_connection()
     if not conn: return None
     try:
         cursor = conn.cursor()
-        cursor.execute(sql, (task_id,))
+        cursor.execute(sql, (task_hash,))
         task = cursor.fetchone()
         return dict(task) if task else None
     except sqlite3.Error as e:
-        log.error(f"❌ 查詢任務 {task_id} 時發生錯誤: {e}", exc_info=True)
+        log.error(f"❌ 查詢任務 {task_hash} 時發生錯誤: {e}", exc_info=True)
         return None
     finally:
         if conn:
             conn.close()
 
-def find_dependent_task(parent_task_id: str) -> str | None:
+def find_dependent_task(parent_task_hash: str) -> str | None:
     """
     尋找依賴於某個父任務的任務。
 
-    :param parent_task_id: 依賴的父任務 ID。
-    :return: 依賴任務的 task_id，如果找不到則回傳 None。
+    :param parent_task_hash: 依賴的父任務雜湊。
+    :return: 依賴任務的 task_hash，如果找不到則回傳 None。
     """
-    sql = "SELECT task_id FROM tasks WHERE depends_on = ?"
+    sql = "SELECT task_hash FROM tasks WHERE depends_on = ?"
     conn = get_db_connection()
     if not conn: return None
     try:
         cursor = conn.cursor()
-        cursor.execute(sql, (parent_task_id,))
+        cursor.execute(sql, (parent_task_hash,))
         task = cursor.fetchone()
-        return task['task_id'] if task else None
+        return task['task_hash'] if task else None
     except sqlite3.Error as e:
-        log.error(f"❌ 尋找依賴於 {parent_task_id} 的任務時出錯: {e}", exc_info=True)
+        log.error(f"❌ 尋找依賴於 {parent_task_hash} 的任務時出錯: {e}", exc_info=True)
         return None
     finally:
         if conn:
@@ -652,7 +666,7 @@ def get_all_tasks() -> list[dict]:
 
     :return: 一個包含所有任務字典的列表。
     """
-    sql = "SELECT task_id, status, progress, type, payload, result, created_at, updated_at FROM tasks ORDER BY created_at DESC"
+    sql = "SELECT task_hash, status, progress, type, payload, result, created_at, updated_at FROM tasks ORDER BY created_at DESC"
     conn = get_db_connection()
     if not conn: return []
     try:
