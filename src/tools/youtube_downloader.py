@@ -4,6 +4,7 @@ import json
 import logging
 import sys
 import subprocess
+import re  # 導入 re 模組
 from pathlib import Path
 
 # --- 日誌設定 ---
@@ -13,6 +14,42 @@ logging.basicConfig(
     handlers=[logging.StreamHandler(sys.stderr)]
 )
 log = logging.getLogger('youtube_downloader_tool')
+
+def sanitize_filename(filename: str) -> str:
+    """
+    清理檔名，以確保其在各種檔案系統中的相容性和安全性。
+    - 移除大多數特殊字元。
+    - 將空格替換為底線。
+    - 保留中日韓文、英文、數字、底線、連字號和點。
+    """
+    # 移除 URL 中的協議部分，以防意外傳入 URL
+    filename = re.sub(r'https?://.*', '', filename)
+
+    # 定義一個包含所有不安全字元和空白字元的正規表示式模式。
+    # \s 匹配任何空白字元（空格、tab、換行等）。
+    # 其餘部分匹配所有之前定義的不安全特殊字元。
+    # `+` 表示匹配一個或多個連續的此類字元。
+    SEPARATOR_PATTERN = r'[\s\\/:*?"<>|&%$!@#^()\[\]{}【】！]+'
+
+    # 將一個或多個連續的分隔符直接替換為單一的底線
+    filename = re.sub(SEPARATOR_PATTERN, '_', filename)
+
+    # 避免檔名以 '.' 或 '_' 開頭，這在某些系統中可能是隱藏檔案
+    filename = filename.lstrip('._')
+
+    # 限制檔名長度（許多檔案系統的限制是 255 個位元組，此處保守取 180）
+    if len(filename.encode('utf-8')) > 180:
+        # 採用從後方截斷的方式，以保留檔名開頭的辨識度
+        while len(filename.encode('utf-8')) > 180:
+            filename = filename[:-1]
+
+    # 如果清理後檔名變為空，提供一個預設名稱
+    if not filename:
+        return "downloaded_media"
+
+    # 移除可能在字串开头或结尾产生的底线
+    return filename.strip('_')
+
 
 def download_media(
     youtube_url: str,
@@ -43,10 +80,10 @@ def download_media(
     command = [
         sys.executable, "-m", "yt_dlp",
         "--print-json",
-        "--verbose",
-        "--restrict-filenames",
+        "--quiet",  # 使用 --quiet 模式以減少不必要的日誌
         "--fragment-retries", "infinite",
         "--no-part",
+        # --restrict-filenames 已被移除，以允許 Unicode 檔名
     ]
 
     if download_type == "audio":
@@ -84,7 +121,11 @@ def download_media(
         original_path = Path(original_filepath_str)
 
         # 現在我們手動加上標籤並重新命名檔案
-        new_filename = f"{tag}{original_path.stem}{final_suffix}"
+        # 步驟 1: 清理原始檔名的主幹部分
+        sanitized_stem = sanitize_filename(original_path.stem)
+
+        # 步驟 2: 組合新的、安全的檔名
+        new_filename = f"{tag}{sanitized_stem}{final_suffix}"
         final_path = original_path.with_name(new_filename)
 
         if original_path.exists():
@@ -107,14 +148,32 @@ def download_media(
         log.info(f"✅ 媒體下載成功: {final_path}")
 
     except subprocess.CalledProcessError as e:
-        log.error(f"❌ yt-dlp 執行失敗。返回碼: {e.returncode}\nStderr: {e.stderr}")
+        # 當 yt-dlp 失敗時，它會將錯誤訊息寫入 stderr
+        error_output = e.stderr.strip()
+        log.error(f"❌ yt-dlp 執行失敗。返回碼: {e.returncode}\nStderr: {error_output}")
         if raise_exceptions: raise e
-        error_message = e.stderr
+
+        error_message = error_output
         error_code = "GENERAL_ERROR"
-        if "authentication" in error_message.lower() or "login required" in error_message.lower():
+
+        # 檢查 stderr 的內容以判斷是否為驗證錯誤
+        if "authentication" in error_output.lower() or "login required" in error_output.lower() or "sign in" in error_output.lower():
             error_code = "AUTH_REQUIRED"
-            error_message = "此影片需要登入驗證。請提供 cookies.txt 檔案。"
-        print(json.dumps({"type": "result", "status": "failed", "error": error_message, "error_code": error_code}), flush=True)
+            # 即使設定了 error_code，我們仍然傳遞原始的 yt-dlp 錯誤訊息，
+            # 讓後端和前端可以根據需要顯示它。
+            error_message = error_output
+
+        # 建立一個結構化的 JSON 錯誤物件，並將其列印到 stdout
+        # 這樣呼叫此腳本的父程序就可以解析它
+        error_payload = {
+            "type": "result",
+            "status": "failed",
+            "error": error_message,
+            "error_code": error_code
+        }
+        print(json.dumps(error_payload), flush=True)
+
+        # 以非零返回碼退出，表示失敗
         sys.exit(1)
     except Exception as e:
         log.error(f"❌ 下載過程中發生未預期的錯誤: {e}", exc_info=True)

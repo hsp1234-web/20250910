@@ -91,9 +91,24 @@ async def run_download_task(task_id: str, url: str, download_type: str, audio_fo
         stdout, stderr = await process.communicate()
 
         if process.returncode != 0:
-            error_message = stderr.decode('utf-8', errors='ignore').strip()
+            stdout_str = stdout.decode('utf-8', errors='ignore').strip()
+            stderr_str = stderr.decode('utf-8', errors='ignore').strip()
+            error_message = stderr_str  # 預設使用 stderr
+            error_code = "GENERAL_ERROR"
+
+            # 嘗試從 stdout 解析 JSON 錯誤，這是更佳的錯誤來源
+            if stdout_str:
+                try:
+                    error_json = json.loads(stdout_str)
+                    error_message = error_json.get("error", error_message)
+                    error_code = error_json.get("error_code", error_code)
+                except json.JSONDecodeError:
+                    # 如果 stdout 不是 JSON，則退回到使用原始的 stderr
+                    log.warning(f"任務 {task_id} 的 stdout 不是有效的 JSON，將使用 stderr 作為錯誤訊息。")
+                    # 在這種情況下，error_message 已經是 stderr_str，所以不用再賦值
+
             log.error(f"任務 {task_id} 失敗。返回碼: {process.returncode}。錯誤: {error_message}")
-            await broadcast_status(task_id, url, "failed", message=error_message)
+            await broadcast_status(task_id, url, "failed", message=error_message, error_code=error_code)
             return
 
         result = json.loads(stdout.decode('utf-8'))
