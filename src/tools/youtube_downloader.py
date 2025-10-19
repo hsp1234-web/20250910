@@ -51,6 +51,24 @@ def sanitize_filename(filename: str) -> str:
     return filename.strip('_')
 
 
+def _execute_yt_dlp_command(command: list) -> dict:
+    """
+    執行一個 yt-dlp 命令並處理其輸出。
+    成功時返回解析後的 JSON 物件。
+    失敗時拋出 subprocess.CalledProcessError。
+    """
+    log.info(f"執行 yt-dlp 指令: {' '.join(command)}")
+    result = subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        check=True, # 如果返回碼非零，則會拋出 CalledProcessError
+        encoding='utf-8'
+    )
+    # yt-dlp 在成功時會將 JSON 輸出到 stdout
+    return json.loads(result.stdout)
+
+
 def download_media(
     youtube_url: str,
     output_dir: Path,
@@ -62,119 +80,112 @@ def download_media(
     raise_exceptions: bool = False
 ):
     """
-    使用 yt-dlp 從 URL 下載媒體，支援音訊和影片，以及不同的格式和解析度。
+    使用 yt-dlp 從 URL 下載媒體（採用兩階段策略以確保檔名正確）。
+    1.  第一階段：僅獲取媒體元數據（如標題）。
+    2.  第二階段：使用元數據建構最終檔名，並指示 yt-dlp 直接下載到該路徑。
+    此方法同時整合了音訊下載的智慧備援機制。
     """
-    log.info(f"開始下載媒體。類型: {download_type}, URL: {youtube_url}, 音訊格式: {audio_format}, 影片解析度: {video_resolution}")
-
-    # 決定最終的檔案副檔名和檔名標籤
-    if download_type == "video":
-        final_suffix = ".mp4"
-        tag = "[mp4]"
-    else: # audio
-        final_suffix = f".{audio_format}"
-        tag = f"[{audio_format}]"
-
-    # 建立一個基礎的檔名模板，稍後會在其前面加上標籤
-    base_output_template = f"%(title)s"
-
-    command = [
-        sys.executable, "-m", "yt_dlp",
-        "--print-json",
-        "--quiet",  # 使用 --quiet 模式以減少不必要的日誌
-        "--fragment-retries", "infinite",
-        "--no-part",
-        # --restrict-filenames 已被移除，以允許 Unicode 檔名
-    ]
-
-    if download_type == "audio":
-        command.extend(["-x", "--audio-format", audio_format])
-        command.extend(["-f", "bestaudio/best"])
-    else: # video
-        resolution_filter = ""
-        if video_resolution != "best":
-            height = video_resolution.replace('p', '')
-            if height.isdigit():
-                resolution_filter = f"[height<={height}]"
-
-        video_format_string = f"bestvideo{resolution_filter}[ext=mp4]+bestaudio[ext=m4a]/best{resolution_filter}[ext=mp4]/best"
-        command.extend(["-f", video_format_string, "--merge-output-format", "mp4"])
-
-    if cookies_file and Path(cookies_file).is_file():
-        log.info(f"使用 Cookies 檔案: {cookies_file}")
-        command.extend(["--cookies", cookies_file])
-
-    # 我們先不指定完整的輸出路徑，讓 yt-dlp 使用預設的標題
-    # 這樣可以避免因自訂檔名導致的潛在問題
-    command.extend(["-o", f"{output_dir / base_output_template}.%(ext)s", youtube_url])
-
-    log.info(f"執行 yt-dlp 指令: {' '.join(command)}")
+    log.info(f"開始處理媒體。類型: {download_type}, URL: {youtube_url}")
 
     try:
-        result = subprocess.run(command, capture_output=True, text=True, check=True, encoding='utf-8')
-        video_info = json.loads(result.stdout)
+        # --- 第一階段：僅獲取元數據 ---
+        log.info("階段 1/2: 正在獲取媒體元數據...")
+        info_command = [
+            sys.executable, "-m", "yt_dlp",
+            "--print-json", "--quiet", "--skip-download",
+            youtube_url
+        ]
+        if cookies_file and Path(cookies_file).is_file():
+            info_command.extend(["--cookies", cookies_file])
 
-        # 從 yt-dlp 的輸出中獲取它實際使用的檔案路徑
-        original_filepath_str = video_info.get('_filename')
-        if not original_filepath_str:
-            raise RuntimeError("yt-dlp did not provide the output filename in its JSON.")
+        video_info = _execute_yt_dlp_command(info_command)
+        video_title = video_info.get("title", "downloaded_media")
 
-        original_path = Path(original_filepath_str)
+        log.info(f"獲取到影片標題: {video_title}")
 
-        # 現在我們手動加上標籤並重新命名檔案
-        # 步驟 1: 清理原始檔名的主幹部分
-        sanitized_stem = sanitize_filename(original_path.stem)
+        # --- 建構最終檔案路徑 ---
+        if download_type == "video":
+            final_suffix = ".mp4"
+            tag = "[mp4]"
+        else: # audio
+            final_suffix = f".{audio_format}"
+            tag = f"[{audio_format}]"
 
-        # 步驟 2: 組合新的、安全的檔名
-        new_filename = f"{tag}{sanitized_stem}{final_suffix}"
-        final_path = original_path.with_name(new_filename)
+        sanitized_stem = sanitize_filename(video_title)
+        final_filename = f"{tag}{sanitized_stem}{final_suffix}"
+        final_path = output_dir / final_filename
 
-        if original_path.exists():
-            original_path.rename(final_path)
-            log.info(f"檔案已成功重新命名為: {final_path}")
-        else:
-            log.warning(f"找不到原始下載檔案 {original_path}，無法重新命名。")
-            # 作為備用，嘗試直接尋找已命名的檔案
-            if not final_path.exists():
-                 raise FileNotFoundError(f"找不到原始檔案或已重新命名的檔案。")
+        # --- 第二階段：執行實際下載 ---
+        log.info(f"階段 2/2: 開始下載媒體到 -> {final_path}")
+
+        # 準備基礎下載指令
+        download_base_command = [
+            sys.executable, "-m", "yt_dlp",
+            "--quiet", "--fragment-retries", "infinite", "--no-part",
+            "-o", str(final_path), youtube_url
+        ]
+        if cookies_file and Path(cookies_file).is_file():
+            download_base_command.extend(["--cookies", cookies_file])
+
+        if download_type == "video":
+            resolution_filter = ""
+            if video_resolution != "best":
+                height = video_resolution.replace('p', '')
+                if height.isdigit():
+                    resolution_filter = f"[height<={height}]"
+            video_format_string = f"bestvideo{resolution_filter}[ext=mp4]+bestaudio[ext=m4a]/best{resolution_filter}[ext=mp4]/best"
+            download_command = download_base_command + ["-f", video_format_string, "--merge-output-format", "mp4"]
+            # 影片下載不回傳 JSON，所以我們用 subprocess.run
+            subprocess.run(download_command, check=True, capture_output=True, text=True, encoding='utf-8')
+
+        else: # 音訊下載（含備援邏輯）
+            # 主要方案：直接下載音訊
+            primary_audio_command = download_base_command + ["-x", "--audio-format", audio_format, "-f", "bestaudio/best"]
+            try:
+                log.info("音訊下載：執行主要方案...")
+                subprocess.run(primary_audio_command, check=True, capture_output=True, text=True, encoding='utf-8')
+                log.info("主要方案成功。")
+            except subprocess.CalledProcessError as e:
+                error_output = e.stderr.strip().lower()
+                if any(keyword in error_output for keyword in ["authentication", "login required", "sign in", "403 forbidden"]):
+                    log.warning("主要方案失敗，偵測到平台限制。啟動備援方案...")
+                    # 備援方案：下載影片再提取音訊
+                    fallback_format = "bestvideo[height<=144][ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]"
+                    fallback_audio_command = download_base_command + ["-x", "--audio-format", audio_format, "-f", fallback_format, "--merge-output-format", "mp4"]
+                    subprocess.run(fallback_audio_command, check=True, capture_output=True, text=True, encoding='utf-8')
+                    log.info("備援方案成功。")
+                else:
+                    raise e # 如果是其他錯誤，則重新拋出
+
+        # --- 統一下載成功後的回報 ---
+        if not final_path.exists():
+            raise FileNotFoundError(f"下載完成後，在預期路徑找不到檔案: {final_path}")
 
         final_result = {
-            "type": "result",
-            "status": "已完成",
+            "type": "result", "status": "已完成",
             "output_path": str(final_path),
-            "video_title": video_info.get("title", "Unknown Title"),
+            "video_title": video_title,
             "duration_seconds": video_info.get("duration", 0)
         }
         print(json.dumps(final_result), flush=True)
-        log.info(f"✅ 媒體下載成功: {final_path}")
+        log.info(f"✅ 媒體已成功下載並儲存於: {final_path}")
 
     except subprocess.CalledProcessError as e:
-        # 當 yt-dlp 失敗時，它會將錯誤訊息寫入 stderr
         error_output = e.stderr.strip()
         log.error(f"❌ yt-dlp 執行失敗。返回碼: {e.returncode}\nStderr: {error_output}")
         if raise_exceptions: raise e
 
-        error_message = error_output
         error_code = "GENERAL_ERROR"
-
-        # 檢查 stderr 的內容以判斷是否為驗證錯誤
-        if "authentication" in error_output.lower() or "login required" in error_output.lower() or "sign in" in error_output.lower():
+        if any(keyword in error_output.lower() for keyword in ["authentication", "login required", "sign in"]):
             error_code = "AUTH_REQUIRED"
-            # 即使設定了 error_code，我們仍然傳遞原始的 yt-dlp 錯誤訊息，
-            # 讓後端和前端可以根據需要顯示它。
-            error_message = error_output
 
-        # 建立一個結構化的 JSON 錯誤物件，並將其列印到 stdout
-        # 這樣呼叫此腳本的父程序就可以解析它
         error_payload = {
-            "type": "result",
-            "status": "failed",
-            "error": error_message,
-            "error_code": error_code
+            "type": "result", "status": "failed",
+            "error": error_output, "error_code": error_code
         }
         print(json.dumps(error_payload), flush=True)
-
-        # 以非零返回碼退出，表示失敗
         sys.exit(1)
+
     except Exception as e:
         log.error(f"❌ 下載過程中發生未預期的錯誤: {e}", exc_info=True)
         if raise_exceptions: raise e
