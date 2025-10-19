@@ -463,7 +463,24 @@ def main():
         # 步驟 2: 啟動所有微服務
         start_all_microservices()
 
-        # 步驟 3: 啟動整合式的背景設定與驗證任務
+        # 步驟 3: 啟動檔案監控服務
+        log.info("🔧 正在啟動檔案監控服務...")
+        try:
+            from services import file_watcher_service
+            file_watcher_thread = threading.Thread(
+                target=file_watcher_service.start_file_watcher_service,
+                daemon=True
+            )
+            threads.append(file_watcher_thread)
+            file_watcher_thread.start()
+            log.info("✅ 檔案監控服務已在背景執行緒中啟動。")
+        except ImportError as e:
+            log.error(f"❌ 無法導入或啟動檔案監控服務: {e}。下載的檔案將不會被自動處理。")
+        except Exception as e:
+            log.error(f"❌ 啟動檔案監控服務時發生未預期的錯誤: {e}", exc_info=True)
+
+
+        # 步驟 4: 啟動整合式的背景設定與驗證任務
         log.info("🚀 正在啟動背景任務 (依賴安裝與金鑰驗證)...")
         background_thread = threading.Thread(target=_background_setup_and_validate, args=(api_port, api_ready_event, api_fully_ready_event), daemon=True)
         threads.append(background_thread)
