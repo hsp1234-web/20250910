@@ -331,40 +331,79 @@ async def start_analysis(req: AnalysisRequest):
 
     return {"task_id": task_id, "message": f"已成功建立分析任務: {task_name}"}
 
-# --- 新增：報告瀏覽功能 ---
-REPORTS_DIR = Path("downloads/reports")
-
+# --- 改造後的報告瀏覽功能 ---
 @router.get("/reports", status_code=200)
-async def get_generated_reports():
+async def get_detailed_analysis_reports():
     """
-    獲取所有已生成的音訊分析報告列表，並提供可供 Web 存取的路徑。
+    從資料庫獲取所有已完成的音訊分析任務，並回傳詳細的報告內容。
     """
-    if not REPORTS_DIR.exists():
-        # 如果目錄不存在，回傳一個帶有 'reports' 鍵的空列表，以符合前端期望的格式
-        return {"reports": []}
-
     try:
-        report_files = []
-        for filename in os.listdir(REPORTS_DIR):
-            if filename.endswith(".md"):
-                file_path = REPORTS_DIR / filename
-                stat = file_path.stat()
-                # 建立一個相對於 'downloads' 目錄的 URL 路徑
-                # 這樣前端就可以透過 /downloads/reports/filename.md 來存取
-                web_accessible_path = f"/downloads/reports/{filename}"
+        # 1. 從資料庫讀取所有 'audio_analysis' 類型的任務
+        tasks = db.get_all_tasks(task_type="audio_analysis")
 
-                report_files.append({
-                    "name": filename,
-                    "path": web_accessible_path, # 使用 Web 可存取路徑
-                    "size": stat.st_size,
-                    "modified_time": datetime.fromtimestamp(stat.st_mtime).isoformat()
-                })
+        # 2. 過濾出已完成的任務並進行資料轉換
+        detailed_reports = []
+        for task in tasks:
+            if task.get('status') != 'completed':
+                continue
 
-        # 根據修改時間降序排序，最新的在最前面
-        report_files.sort(key=lambda x: x['modified_time'], reverse=True)
+            try:
+                # 解析 payload 和 result 中的 JSON 字串
+                payload = json.loads(task.get('payload', '{}'))
+                result = json.loads(task.get('result', '{}'))
 
-        # 將結果包裝在 'reports' 鍵中，以匹配前端的期望
-        return {"reports": report_files}
+                # 建立Web可存取路徑的輔助函式
+                def to_web_path(local_path_str):
+                    if not local_path_str: return None
+                    p = Path(local_path_str)
+                    # 假設路徑是 'downloads/reports/...' or 'downloads/audio/...'
+                    if 'downloads' in p.parts:
+                        # 找到 'downloads' 之後的所有部分並重新組合
+                        relative_parts = p.parts[p.parts.index('downloads'):]
+                        return Path(*relative_parts).as_posix()
+                    return None # 如果路徑格式不符，則返回 None
+
+                # 提取前端需要的資訊
+                report_card_data = {
+                    "taskId": task.get('task_id'),
+                    "reportTitle": task.get('task_name', '未命名報告'),
+                    "sourceFilename": Path(payload.get('file_path', '未知來源')).name,
+                    "modelUsed": payload.get('model', '未知模型'),
+                    "processingTime": result.get('processing_time_seconds', 0),
+                    "totalTokens": result.get('total_tokens', 0),
+                    "creationDate": task.get('created_at'),
+                    "outputFiles": []
+                }
+
+                # 處理 output_files 列表
+                for file_info in result.get('output_files', []):
+                    local_path = file_info.get('path')
+                    web_path = to_web_path(local_path)
+                    if not (local_path and Path(local_path).exists() and web_path):
+                        continue # 如果檔案不存在或路徑無法轉換，則跳過
+
+                    file_stat = Path(local_path).stat()
+                    report_card_data['outputFiles'].append({
+                        "type": file_info.get('type', '檔案'),
+                        "name": Path(local_path).name,
+                        "path": web_path, # 提供給前端的下載/預覽路徑
+                        "size": file_stat.st_size,
+                        "modifiedTime": datetime.fromtimestamp(file_stat.st_mtime).isoformat()
+                    })
+
+                # 只有當報告至少有一個有效的輸出檔案時，才將其加入列表
+                if report_card_data['outputFiles']:
+                    detailed_reports.append(report_card_data)
+
+            except (json.JSONDecodeError, KeyError) as e:
+                log.warning(f"處理任務 {task.get('task_id')} 時發生資料解析錯誤: {e}")
+                continue # 忽略此筆損壞的紀錄
+
+        # 3. 根據創建時間降序排序，最新的報告在最前面
+        detailed_reports.sort(key=lambda x: x['creationDate'], reverse=True)
+
+        return {"reports": detailed_reports}
+
     except Exception as e:
-        log.error(f"讀取報告目錄時發生錯誤: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="無法讀取已生成的報告列表。")
+        log.error(f"獲取詳細分析報告時發生嚴重錯誤: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="無法從資料庫讀取報告紀錄。")
