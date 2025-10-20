@@ -63,6 +63,7 @@ def initialize_database(conn: sqlite3.Connection = None):
                 CREATE TABLE IF NOT EXISTS tasks (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     task_id TEXT NOT NULL UNIQUE,
+                    task_name TEXT,
                     status TEXT NOT NULL DEFAULT '處理中',
                     progress INTEGER DEFAULT 0,
                     payload TEXT,
@@ -77,7 +78,8 @@ def initialize_database(conn: sqlite3.Connection = None):
             migrations = {
                 "progress": "INTEGER DEFAULT 0",
                 "type": "TEXT DEFAULT 'transcribe'",
-                "depends_on": "TEXT"
+                "depends_on": "TEXT",
+                "task_name": "TEXT"
             }
             for col, col_type in migrations.items():
                 try:
@@ -457,23 +459,24 @@ def get_app_state(key: str) -> str | None:
 
 # --- 任務佇列核心功能 ---
 
-def add_task(task_id: str, payload: str, task_type: str = 'transcribe', depends_on: str = None) -> bool:
+def add_task(task_id: str, payload: str, task_type: str = 'transcribe', task_name: str = None, depends_on: str = None) -> bool:
     """
     新增一個新任務到佇列中。
 
     :param task_id: 唯一的任務 ID。
     :param payload: 任務的內容，通常是 JSON 字串。
-    :param task_type: 任務類型 ('transcribe' 或 'download').
+    :param task_type: 任務類型。
+    :param task_name: 任務的顯示名稱。
     :param depends_on: 此任務所依賴的另一個任務的 task_id。
     :return: 如果成功新增則回傳 True，否則回傳 False。
     """
-    sql = "INSERT INTO tasks (task_id, payload, status, type, depends_on) VALUES (?, ?, '處理中', ?, ?)"
+    sql = "INSERT INTO tasks (task_id, payload, status, type, task_name, depends_on) VALUES (?, ?, '處理中', ?, ?, ?)"
     conn = get_db_connection()
     if not conn: return False
-    log.info(f"DB:{DB_FILE} 準備新增 '{task_type}' 任務: {task_id} (依賴: {depends_on or '無'})")
+    log.info(f"DB:{DB_FILE} 準備新增 '{task_type}' 任務: {task_id} (名稱: {task_name or '未提供'}, 依賴: {depends_on or '無'})")
     try:
         with conn:
-            conn.execute(sql, (task_id, payload, task_type, depends_on))
+            conn.execute(sql, (task_id, payload, task_type, task_name, depends_on))
         log.info(f"✅ 已成功新增任務到佇列: {task_id}")
         return True
     except sqlite3.IntegrityError:
@@ -646,18 +649,25 @@ def are_tasks_active() -> bool:
             conn.close()
 
 
-def get_all_tasks() -> list[dict]:
+def get_all_tasks(task_type: str = None) -> list[dict]:
     """
-    獲取資料庫中所有任務的列表，主要用於前端 UI 顯示。
+    獲取資料庫中所有任務的列表，可選擇性地按類型篩選。
 
+    :param task_type: (可選) 要篩選的任務類型。
     :return: 一個包含所有任務字典的列表。
     """
-    sql = "SELECT task_id, status, progress, type, payload, result, created_at, updated_at FROM tasks ORDER BY created_at DESC"
+    params = []
+    sql = "SELECT task_id, task_name, status, progress, type, payload, result, created_at, updated_at FROM tasks"
+    if task_type:
+        sql += " WHERE type = ?"
+        params.append(task_type)
+    sql += " ORDER BY created_at DESC"
+
     conn = get_db_connection()
     if not conn: return []
     try:
         cursor = conn.cursor()
-        cursor.execute(sql)
+        cursor.execute(sql, params)
         tasks = cursor.fetchall()
         # 將 Row 物件轉換為標準字典列表
         return [dict(task) for task in tasks]
@@ -1206,6 +1216,39 @@ def get_all_app_states() -> dict[str, str]:
     except sqlite3.Error as e:
         log.error(f"❌ 獲取所有 app_state 時發生錯誤: {e}", exc_info=True)
         return {}
+    finally:
+        if conn:
+            conn.close()
+
+
+def update_task(task_id: str, updates: dict) -> bool:
+    """
+    通用更新函式，用來更新 tasks 表中的特定欄位。
+    :param task_id: 要更新的任務 ID。
+    :param updates: 一個字典，key 是欄位名，value 是要更新的值。
+    :return: 成功則回傳 True，否則 False。
+    """
+    if not updates:
+        log.warning("呼叫 update_task 時沒有提供任何更新內容。")
+        return False
+
+    conn = get_db_connection()
+    if not conn: return False
+
+    set_clause = ", ".join([f"{key} = ?" for key in updates.keys()])
+    params = list(updates.values())
+    params.append(task_id)
+
+    sql = f"UPDATE tasks SET {set_clause} WHERE task_id = ?"
+
+    try:
+        with conn:
+            conn.execute(sql, params)
+        log.info(f"✅ 任務 {task_id} 已更新: {updates}")
+        return True
+    except sqlite3.Error as e:
+        log.error(f"❌ 更新任務 {task_id} 時出錯: {e}", exc_info=True)
+        return False
     finally:
         if conn:
             conn.close()
