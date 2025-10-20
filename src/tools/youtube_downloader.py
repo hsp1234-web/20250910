@@ -176,14 +176,17 @@ def download_media(
         if raise_exceptions: raise e
 
         error_code = "GENERAL_ERROR"
-        if any(keyword in error_output.lower() for keyword in ["authentication", "login required", "sign in"]):
+        error_message = error_output # 預設使用原始錯誤訊息
+
+        if any(keyword in error_output.lower() for keyword in ["authentication", "login required", "sign in", "confirm you’re not a bot"]):
             error_code = "AUTH_REQUIRED"
+            error_message = "下載失敗：此影片可能需要登入 YouTube 進行人機驗證才能繼續。"
 
         error_payload = {
             "type": "result", "status": "failed",
-            "error": error_output, "error_code": error_code
+            "error": error_message, "error_code": error_code
         }
-        print(json.dumps(error_payload), flush=True)
+        print(json.dumps(error_payload, ensure_ascii=False), flush=True)
         sys.exit(1)
 
     except Exception as e:

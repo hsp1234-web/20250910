@@ -10,6 +10,8 @@ from pathlib import Path
 import sys
 import subprocess
 
+from src.db import database as db
+
 # --- 日誌設定 ---
 log = logging.getLogger("audio_report_api")
 
@@ -71,6 +73,7 @@ async def broadcast_status(task_id: str, url: str, status: str, **kwargs):
 async def run_download_task(task_id: str, url: str, download_type: str, audio_format: str, video_resolution: str):
     log.info(f"任務 {task_id}: 開始處理 URL: {url} (類型: {download_type})")
     await broadcast_status(task_id, url, "starting", message=f"已建立任務，準備下載 {download_type}...")
+    db.update_task_status(task_id, "processing", json.dumps({"message": "Download starting"}))
 
     try:
         # 根據類型決定輸出目錄
@@ -108,6 +111,7 @@ async def run_download_task(task_id: str, url: str, download_type: str, audio_fo
                     # 在這種情況下，error_message 已經是 stderr_str，所以不用再賦值
 
             log.error(f"任務 {task_id} 失敗。返回碼: {process.returncode}。錯誤: {error_message}")
+            db.update_task_status(task_id, "failed", json.dumps({"error": error_message, "code": error_code}))
             await broadcast_status(task_id, url, "failed", message=error_message, error_code=error_code)
             return
 
@@ -115,20 +119,30 @@ async def run_download_task(task_id: str, url: str, download_type: str, audio_fo
         log.info(f"任務 {task_id} 成功完成。結果: {result}")
 
         output_path = Path(result["output_path"])
-        # 根據類型建立不同的預覽 URL
         preview_url = f"/downloads/{download_type}/{output_path.name}"
+        video_title = result.get("video_title", "未命名任務")
 
-        await broadcast_status(
-            task_id, url, "completed",
-            message=f"檔案 '{result.get('video_title', 'N/A')}' 下載成功。",
-            filename=output_path.name,
-            video_title=result.get("video_title"),
-            output_path=str(output_path),
-            preview_url=preview_url
-        )
+        # 建立完整的結果 payload
+        final_result = {
+            "message": f"檔案 '{video_title}' 下載成功。",
+            "filename": output_path.name,
+            "video_title": video_title,
+            "output_path": str(output_path),
+            "preview_url": preview_url
+        }
+
+        # 更新資料庫中的任務狀態和結果
+        db.update_task_status(task_id, "completed", json.dumps(final_result))
+        # 更新任務名稱為影片標題
+        db.update_task(task_id, {"task_name": video_title})
+
+        await broadcast_status(task_id, url, "completed", **final_result)
+
     except Exception as e:
         log.error(f"任務 {task_id} 執行期間發生未預期的嚴重錯誤: {e}", exc_info=True)
-        await broadcast_status(task_id, url, "failed", message=f"伺服器內部錯誤: {str(e)}")
+        error_message = f"伺服器內部錯誤: {str(e)}"
+        db.update_task_status(task_id, "failed", json.dumps({"error": error_message}))
+        await broadcast_status(task_id, url, "failed", message=error_message)
 
 # --- API 路由 (更新) ---
 @router.post("/download", response_model=List[TaskResponse], status_code=202)
@@ -138,14 +152,29 @@ async def start_multiple_downloads(req: DownloadRequest):
 
     tasks_created = []
     for url in req.urls:
-        if not url.strip() or not (url.startswith("http://") or url.startswith("https://")):
+        url = url.strip()
+        if not url or not (url.startswith("http://") or url.startswith("https://")):
             continue
 
         task_id = str(uuid.uuid4())
+        payload = {
+            "url": url,
+            "download_type": req.download_type,
+            "audio_format": req.audio_format,
+            "video_resolution": req.video_resolution
+        }
 
-        # 將所有新參數傳遞給背景任務
+        # 將任務寫入資料庫
+        db.add_task(
+            task_id=task_id,
+            payload=json.dumps(payload),
+            task_type="audio_download",
+            task_name=url # 初始名稱設為 URL
+        )
+
+        # 建立背景任務
         asyncio.create_task(run_download_task(
-            task_id, url.strip(), req.download_type, req.audio_format, req.video_resolution
+            task_id, url, req.download_type, req.audio_format, req.video_resolution
         ))
 
         tasks_created.append(TaskResponse(
@@ -155,6 +184,134 @@ async def start_multiple_downloads(req: DownloadRequest):
         ))
 
     if not tasks_created:
-         raise HTTPException(status_code=400, detail="未提供任何有效的 URL。")
+        raise HTTPException(status_code=400, detail="未提供任何有效的 URL。")
 
     return tasks_created
+
+@router.get("/tasks", status_code=200)
+async def get_all_download_tasks():
+    """
+    獲取所有 audio_download 類型的任務歷史紀錄。
+    """
+    try:
+        tasks = db.get_all_tasks(task_type="audio_download")
+        return tasks
+    except Exception as e:
+        log.error(f"獲取音訊下載任務時發生錯誤: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="無法從資料庫讀取任務紀錄。")
+
+@router.get("/completed_downloads", status_code=200)
+async def get_completed_downloads():
+    """
+    獲取所有已成功下載的音訊/影片檔案列表。
+    """
+    try:
+        all_tasks = db.get_all_tasks(task_type="audio_download")
+        completed_files = []
+        for task in all_tasks:
+            if task.get('status') == 'completed' and task.get('result'):
+                try:
+                    result_data = json.loads(task['result'])
+                    # 我們只關心音訊檔案
+                    if result_data.get('output_path') and result_data['output_path'].startswith(str(AUDIO_DIR)):
+                        completed_files.append({
+                            "filename": result_data.get("filename", "未知檔案"),
+                            "path": result_data.get("output_path"),
+                            "title": result_data.get("video_title", task.get("task_name"))
+                        })
+                except (json.JSONDecodeError, KeyError):
+                    continue # 忽略無法解析或格式不正確的 result
+        return completed_files
+    except Exception as e:
+        log.error(f"獲取已完成下載時發生錯誤: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="無法讀取已完成的下載紀錄。")
+
+# --- 新增：AI 分析功能 ---
+class AnalysisRequest(BaseModel):
+    file_path: str = Field(..., description="要分析的音訊檔案的完整路徑。")
+    model: str = Field(..., description="要使用的 Gemini 模型。")
+    tasks: List[str] = Field(..., description="要執行的任務列表，例如 ['transcript', 'summary']。")
+    api_key: Optional[str] = Field(None, description="使用者提供的臨時 API 金鑰。")
+
+async def run_analysis_task(task_id: str, file_path: str, model: str, tasks: list, api_key: str):
+    """
+    執行音訊分析的背景任務。
+    """
+    log.info(f"分析任務 {task_id}: 開始處理檔案 {file_path}")
+    # 廣播初始狀態
+    await manager.broadcast(json.dumps({
+        "type": "ANALYSIS_STATUS",
+        "payload": {"task_id": task_id, "status": "starting", "message": "分析任務已建立，正在準備環境..."}
+    }))
+    db.update_task_status(task_id, "processing", json.dumps({"message": "Analysis starting"}))
+
+    try:
+        command = [
+            sys.executable, "-u", "src/tools/audio_analyzer.py",
+            "--file-path", file_path,
+            "--model", model,
+            "--tasks", ",".join(tasks),
+            "--api-key", api_key
+        ]
+
+        log.info(f"分析任務 {task_id}: 執行指令: {' '.join(command)}")
+        # 這裡的 stdout/stderr 處理邏輯會和下載任務類似
+        # ... (稍後實現)
+
+        # 模擬成功
+        await asyncio.sleep(5) # 模擬處理時間
+        result = {
+            "transcript": "這是模擬的逐字稿...",
+            "summary": "這是模擬的摘要...",
+        }
+
+        db.update_task_status(task_id, "completed", json.dumps(result))
+        await manager.broadcast(json.dumps({
+            "type": "ANALYSIS_STATUS",
+            "payload": {"task_id": task_id, "status": "completed", "message": "分析完成", "result": result}
+        }))
+
+    except Exception as e:
+        log.error(f"分析任務 {task_id} 執行期間發生錯誤: {e}", exc_info=True)
+        error_message = f"伺服器內部錯誤: {str(e)}"
+        db.update_task_status(task_id, "failed", json.dumps({"error": error_message}))
+        await manager.broadcast(json.dumps({
+            "type": "ANALYSIS_STATUS",
+            "payload": {"task_id": task_id, "status": "failed", "message": error_message}
+        }))
+
+
+@router.post("/analyze", status_code=202)
+async def start_analysis(req: AnalysisRequest):
+    """
+    接收分析請求，建立任務並啟動背景處理。
+    """
+    if not Path(req.file_path).exists():
+        raise HTTPException(status_code=404, detail=f"檔案不存在: {req.file_path}")
+
+    # 優先使用請求中提供的 API 金鑰，如果沒有，則從金鑰管理器中獲取一個
+    api_key = req.api_key
+    if not api_key:
+        # 這裡需要一個從 key_manager 獲取金鑰的邏輯
+        # valid_key = key_manager.get_key_by_type("gemini")
+        # if not valid_key:
+        #     raise HTTPException(status_code=400, detail="系統中沒有可用的 Gemini API 金鑰。")
+        # api_key = valid_key.key_value
+        # 為了簡化，我們先假設金鑰總是會提供
+        raise HTTPException(status_code=400, detail="必須提供 API 金鑰。")
+
+    task_id = str(uuid.uuid4())
+    task_name = f"分析任務 for {Path(req.file_path).name}"
+
+    db.add_task(
+        task_id=task_id,
+        payload=json.dumps(req.model_dump()),
+        task_type="audio_analysis",
+        task_name=task_name
+    )
+
+    asyncio.create_task(run_analysis_task(
+        task_id, req.file_path, req.model, req.tasks, api_key
+    ))
+
+    return {"task_id": task_id, "message": f"已成功建立分析任務: {task_name}"}

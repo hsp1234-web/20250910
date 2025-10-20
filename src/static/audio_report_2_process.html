@@ -119,16 +119,14 @@
                 <div>
                     <label for="audio-file-select"><strong>1. 選擇要分析的音訊檔案</strong></label>
                     <select id="audio-file-select">
-                        <option value="">請從已暫存列表中選擇一個檔案...</option>
-                        <!-- 動態載入的音訊檔案會顯示在這裡 -->
+                        <option value="">正在從伺服器載入已完成的下載列表...</option>
                     </select>
                 </div>
 
                 <div>
                     <label for="model-select"><strong>2. 選擇 AI 模型</strong></label>
                     <select id="model-select">
-                        <option value="gemini-1.5-flash">Gemini 1.5 Flash (推薦)</option>
-                        <option value="gemini-1.5-pro">Gemini 1.5 Pro (更強大)</option>
+                        <option>等待從伺服器載入模型列表...</option>
                     </select>
                 </div>
 
@@ -149,7 +147,15 @@
                 <div class="card api-key-status">
                     <h2>API 金鑰狀態</h2>
                     <p id="api-key-status-text">正在檢查...</p>
-                    <a href="/page6" style="font-size: 0.9em;">前往金鑰管理頁面</a>
+                     <!-- 備用臨時金鑰輸入區 -->
+                    <div style="margin-top: 12px;">
+                        <a href="#" id="toggle-temp-key-link" style="text-decoration: none; color: var(--button-bg-color); font-weight: 500; font-size: 0.9em;">使用臨時金鑰...</a>
+                        <div id="temp-key-input-area" style="display: none; margin-top: 8px; padding: 12px; border: 1px dashed #ccc; border-radius: 8px;">
+                            <input type="password" id="api-key-input" placeholder="貼上臨時 Google API 金鑰" style="width: 100%; margin-bottom: 8px;">
+                            <button id="validate-api-key-btn" style="width: 100%; padding: 8px; font-size: 0.9em;">驗證並使用</button>
+                        </div>
+                    </div>
+                    <a href="/page6" style="font-size: 0.9em; margin-top: 12px; display: inline-block;">前往金鑰管理頁面</a>
                 </div>
                 <div class="card flex-col" style="flex-grow: 1;">
                     <h2>即時進度</h2>
@@ -163,21 +169,232 @@
 
     <script>
         document.addEventListener('DOMContentLoaded', () => {
-            console.log("分析與處理中心頁面已載入。");
+            // --- DOM 元素宣告 ---
             const audioSelect = document.getElementById('audio-file-select');
+            const modelSelect = document.getElementById('model-select');
             const startBtn = document.getElementById('start-analysis-btn');
+            const apiKeyStatusText = document.getElementById('api-key-status-text');
+            const progressLog = document.getElementById('progress-log');
+            const toggleTempKeyLink = document.getElementById('toggle-temp-key-link');
+            const tempKeyInputArea = document.getElementById('temp-key-input-area');
+            const apiKeyInput = document.getElementById('api-key-input');
+            const validateApiKeyBtn = document.getElementById('validate-api-key-btn');
 
-            // 監聽下拉選單的變化，以啟用/禁用開始按鈕
-            audioSelect.addEventListener('change', () => {
-                startBtn.disabled = !audioSelect.value;
+            let socket;
+            let validatedTempApiKey = null;
+
+            // --- WebSocket 處理 ---
+            function setupWebSocket() {
+                const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                // 注意：WebSocket 端點與下載頁面共用
+                const wsUrl = `${wsProtocol}//${window.location.host}/api/audio_report/ws`;
+                socket = new WebSocket(wsUrl);
+
+                socket.onopen = () => console.log("WebSocket 連線成功。");
+                socket.onmessage = (event) => handleWebSocketMessage(JSON.parse(event.data));
+                socket.onclose = () => setTimeout(setupWebSocket, 3000);
+                socket.onerror = (error) => console.error("WebSocket 發生錯誤:", error);
+            }
+
+            function handleWebSocketMessage(message) {
+                if (message.type === 'ANALYSIS_STATUS') {
+                    const { payload } = message;
+                    const logEntry = document.createElement('p');
+                    logEntry.innerHTML = `<strong>[${new Date().toLocaleTimeString()}]</strong> ${payload.message}`;
+                    if(payload.status === 'failed') logEntry.style.color = 'red';
+                    if(payload.status === 'completed') logEntry.style.color = 'green';
+                    progressLog.prepend(logEntry);
+
+                    if (payload.status === 'completed' || payload.status === 'failed') {
+                        startBtn.disabled = false;
+                        startBtn.textContent = '🚀 開始分析';
+                    }
+                }
+            }
+
+            // --- API 呼叫與資料載入 ---
+            async function fetchWithRetry(url, options = {}, retries = 3) {
+                for (let i = 0; i < retries; i++) {
+                    try {
+                        const response = await fetch(url, options);
+                        if (!response.ok) throw new Error(`伺服器錯誤: ${response.status}`);
+                        return response.json();
+                    } catch (error) {
+                        if (i === retries - 1) throw error;
+                        await new Promise(res => setTimeout(res, 1000));
+                    }
+                }
+            }
+
+            async function updateKeyAndModelStatus(apiKeyToValidate = null) {
+                apiKeyStatusText.textContent = '正在檢查金鑰與模型...';
+                apiKeyStatusText.style.color = '#666';
+
+                let apiKeyForModelLoading = apiKeyToValidate || validatedTempApiKey;
+
+                try {
+                    const modelPayload = {};
+                    // 只有在需要使用特定金鑰載入模型時才傳遞它
+                    if (apiKeyForModelLoading) {
+                        modelPayload.api_key = apiKeyForModelLoading;
+                    }
+
+                    // 使用後端的 /api/youtube/models 端點，它會自動使用金鑰池
+                    const response = await fetch('/api/youtube/models', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(modelPayload)
+                    });
+                    const result = await response.json();
+
+                    if (!response.ok) {
+                        // 如果驗證特定金鑰失敗
+                        if(apiKeyToValidate) validatedTempApiKey = null;
+                        throw new Error(result.detail || `伺服器錯誤 ${response.status}`);
+                    }
+
+                    // 成功載入模型，更新下拉選單
+                    modelSelect.innerHTML = '';
+                    if (result.models && result.models.length > 0) {
+                        result.models.forEach(model => {
+                            const option = document.createElement('option');
+                            option.value = model.id;
+                            option.textContent = model.name;
+                            modelSelect.appendChild(option);
+                        });
+                         // 如果是驗證臨時金鑰成功
+                        if (apiKeyToValidate) {
+                            validatedTempApiKey = apiKeyToValidate;
+                            apiKeyStatusText.textContent = '✅ 臨時金鑰驗證成功';
+                            apiKeyStatusText.style.color = 'green';
+                        } else {
+                             apiKeyStatusText.textContent = '✅ 系統金鑰池可用';
+                             apiKeyStatusText.style.color = 'green';
+                        }
+                    } else {
+                        throw new Error("未找到任何可用模型");
+                    }
+                } catch (error) {
+                    apiKeyStatusText.textContent = `❌ 金鑰或模型錯誤: ${error.message}`;
+                    apiKeyStatusText.style.color = '#dc3545';
+                    modelSelect.innerHTML = '<option>模型載入失敗</option>';
+                } finally {
+                    updateStartButtonState();
+                }
+            }
+
+            async function loadCompletedDownloads() {
+                try {
+                    const files = await fetchWithRetry('/api/audio_report/completed_downloads');
+                    audioSelect.innerHTML = '<option value="">請從已暫存列表中選擇一個檔案...</option>'; // 重設
+                    if (files.length > 0) {
+                        files.forEach(file => {
+                            const option = document.createElement('option');
+                            option.value = file.path;
+                            option.textContent = file.title || file.filename;
+                            option.dataset.path = file.path; // 將路徑存在 dataset 中
+                            audioSelect.appendChild(option);
+                        });
+                    } else {
+                        audioSelect.innerHTML = '<option value="">沒有已完成的下載項目</option>';
+                    }
+
+                    // 檢查 localStorage 中是否有從步驟一傳來的檔案
+                    const preselectedFile = localStorage.getItem('selected_media_for_process');
+                    if (preselectedFile) {
+                        const fileInfo = JSON.parse(preselectedFile);
+                        if (audioSelect.querySelector(`option[value="${fileInfo.path}"]`)) {
+                            audioSelect.value = fileInfo.path;
+                        }
+                        // 使用後清除，避免下次載入時混淆
+                        localStorage.removeItem('selected_media_for_process');
+                    }
+                    updateStartButtonState();
+
+                } catch (error) {
+                    audioSelect.innerHTML = '<option value="">載入列表失敗</option>';
+                    console.error("載入已完成下載列表失敗:", error);
+                }
+            }
+
+            // --- UI 狀態管理 ---
+            function updateStartButtonState() {
+                const isFileSelected = !!audioSelect.value;
+                const isKeyReady = apiKeyStatusText.textContent.startsWith('✅');
+                startBtn.disabled = !(isFileSelected && isKeyReady);
+                if (startBtn.disabled) {
+                    if (!isFileSelected) startBtn.textContent = '請先選擇一個檔案';
+                    else if (!isKeyReady) startBtn.textContent = '請先設定有效的 API 金鑰';
+                } else {
+                    startBtn.textContent = '🚀 開始分析';
+                }
+            }
+
+            // --- 事件監聽器 ---
+            audioSelect.addEventListener('change', updateStartButtonState);
+
+            toggleTempKeyLink.addEventListener('click', (e) => {
+                e.preventDefault();
+                const isHidden = tempKeyInputArea.style.display === 'none';
+                tempKeyInputArea.style.display = isHidden ? 'block' : 'none';
+                toggleTempKeyLink.textContent = isHidden ? '隱藏臨時金鑰區域' : '使用臨時金鑰...';
             });
 
-            // 未來將在此處添加與後端互動的 JavaScript 邏輯，
-            // 例如：
-            // 1. 從 API 獲取「已暫存音訊列表」並填充到 #audio-file-select。
-            // 2. 從 API 獲取金鑰狀態並更新 #api-key-status-text。
-            // 3. 點擊「開始分析」時，將所有設定發送到後端。
-            // 4. 使用 WebSocket 或輪詢來更新 #progress-log 的內容。
+            validateApiKeyBtn.addEventListener('click', () => {
+                const key = apiKeyInput.value.trim();
+                if(key) {
+                    // 呼叫重構後的函式來驗證金鑰
+                    updateKeyAndModelStatus(key);
+                } else {
+                    alert("請輸入臨時金鑰。");
+                }
+            });
+
+            startBtn.addEventListener('click', async () => {
+                const selectedOption = audioSelect.options[audioSelect.selectedIndex];
+                const filePath = selectedOption.value;
+                const model = modelSelect.value;
+                const tasks = Array.from(document.querySelectorAll('input[name="ai-task"]:checked')).map(cb => cb.value);
+
+                if (!filePath || !model || tasks.length === 0) {
+                    alert("請確保已選擇檔案、模型，並至少勾選一個任務。");
+                    return;
+                }
+
+                startBtn.disabled = true;
+                startBtn.textContent = '正在建立分析任務...';
+                progressLog.innerHTML = `<p><strong>[${new Date().toLocaleTimeString()}]</strong> 正在建立分析任務...</p>`;
+
+                const payload = {
+                    file_path: filePath,
+                    model: model,
+                    tasks: tasks,
+                    api_key: validatedTempApiKey // 如果有臨時金鑰就傳送
+                };
+
+                try {
+                    const response = await fetch('/api/audio_report/analyze', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+                    if (!response.ok) {
+                        const error = await response.json();
+                        throw new Error(error.detail || '建立任務失敗');
+                    }
+                    await response.json(); // 接收後端回傳的 task_id 等資訊
+
+                } catch (error) {
+                    progressLog.prepend(`<p style="color: red;"><strong>[${new Date().toLocaleTimeString()}]</strong> 錯誤: ${error.message}</p>`);
+                    startBtn.disabled = false;
+                    startBtn.textContent = '🚀 開始分析';
+                }
+            });
+
+            // --- 初始化 ---
+            loadCompletedDownloads();
+            updateKeyAndModelStatus();
+            setupWebSocket();
         });
     </script>
 </body>
