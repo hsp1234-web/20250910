@@ -11,6 +11,7 @@ import sys
 import subprocess
 
 from src.db import database as db
+from src.core import key_manager
 
 # --- 日誌設定 ---
 log = logging.getLogger("audio_report_api")
@@ -238,12 +239,11 @@ async def run_analysis_task(task_id: str, file_path: str, model: str, tasks: lis
     執行音訊分析的背景任務。
     """
     log.info(f"分析任務 {task_id}: 開始處理檔案 {file_path}")
-    # 廣播初始狀態
     await manager.broadcast(json.dumps({
         "type": "ANALYSIS_STATUS",
-        "payload": {"task_id": task_id, "status": "starting", "message": "分析任務已建立，正在準備環境..."}
+        "payload": {"task_id": task_id, "status": "starting", "message": "分析任務已建立，正在呼叫 AI 模型..."}
     }))
-    db.update_task_status(task_id, "processing", json.dumps({"message": "Analysis starting"}))
+    db.update_task_status(task_id, "processing", json.dumps({"message": "Calling AI model..."}))
 
     try:
         command = [
@@ -255,24 +255,38 @@ async def run_analysis_task(task_id: str, file_path: str, model: str, tasks: lis
         ]
 
         log.info(f"分析任務 {task_id}: 執行指令: {' '.join(command)}")
-        # 這裡的 stdout/stderr 處理邏輯會和下載任務類似
-        # ... (稍後實現)
 
-        # 模擬成功
-        await asyncio.sleep(5) # 模擬處理時間
-        result = {
-            "transcript": "這是模擬的逐字稿...",
-            "summary": "這是模擬的摘要...",
-        }
+        process = await asyncio.create_subprocess_exec(
+            *command, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+        )
+        stdout, stderr = await process.communicate()
+
+        if process.returncode != 0:
+            error_message = stderr.decode('utf-8', errors='ignore').strip()
+            log.error(f"分析任務 {task_id} 失敗。返回碼: {process.returncode}。錯誤: {error_message}")
+            db.update_task_status(task_id, "failed", json.dumps({"error": error_message}))
+            await manager.broadcast(json.dumps({
+                "type": "ANALYSIS_STATUS",
+                "payload": {"task_id": task_id, "status": "failed", "message": error_message}
+            }))
+            return
+
+        result = json.loads(stdout.decode('utf-8'))
+        log.info(f"分析任務 {task_id} 成功完成。")
 
         db.update_task_status(task_id, "completed", json.dumps(result))
         await manager.broadcast(json.dumps({
             "type": "ANALYSIS_STATUS",
-            "payload": {"task_id": task_id, "status": "completed", "message": "分析完成", "result": result}
+            "payload": {
+                "task_id": task_id,
+                "status": "completed",
+                "message": "分析完成",
+                "result": result
+            }
         }))
 
     except Exception as e:
-        log.error(f"分析任務 {task_id} 執行期間發生錯誤: {e}", exc_info=True)
+        log.error(f"分析任務 {task_id} 執行期間發生未預期的嚴重錯誤: {e}", exc_info=True)
         error_message = f"伺服器內部錯誤: {str(e)}"
         db.update_task_status(task_id, "failed", json.dumps({"error": error_message}))
         await manager.broadcast(json.dumps({
@@ -292,13 +306,12 @@ async def start_analysis(req: AnalysisRequest):
     # 優先使用請求中提供的 API 金鑰，如果沒有，則從金鑰管理器中獲取一個
     api_key = req.api_key
     if not api_key:
-        # 這裡需要一個從 key_manager 獲取金鑰的邏輯
-        # valid_key = key_manager.get_key_by_type("gemini")
-        # if not valid_key:
-        #     raise HTTPException(status_code=400, detail="系統中沒有可用的 Gemini API 金鑰。")
-        # api_key = valid_key.key_value
-        # 為了簡化，我們先假設金鑰總是會提供
-        raise HTTPException(status_code=400, detail="必須提供 API 金鑰。")
+        log.info("前端未提供 API 金鑰，正在嘗試從後端金鑰池獲取...")
+        api_key = key_manager.get_key_by_type("gemini")
+        if not api_key:
+            log.error("金鑰池中沒有可用的 Gemini API 金鑰。")
+            raise HTTPException(status_code=400, detail="系統金鑰池中沒有可用的 Gemini API 金鑰，請先新增或驗證您的金鑰。")
+        log.info("成功從金鑰池中獲取一個有效的 Gemini 金鑰。")
 
     task_id = str(uuid.uuid4())
     task_name = f"分析任務 for {Path(req.file_path).name}"
