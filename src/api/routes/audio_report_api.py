@@ -9,6 +9,8 @@ import json
 from pathlib import Path
 import sys
 import subprocess
+import os
+from datetime import datetime
 
 from src.db import database as db
 from src.core import key_manager
@@ -328,3 +330,41 @@ async def start_analysis(req: AnalysisRequest):
     ))
 
     return {"task_id": task_id, "message": f"已成功建立分析任務: {task_name}"}
+
+# --- 新增：報告瀏覽功能 ---
+REPORTS_DIR = Path("downloads/reports")
+
+@router.get("/reports", status_code=200)
+async def get_generated_reports():
+    """
+    獲取所有已生成的音訊分析報告列表，並提供可供 Web 存取的路徑。
+    """
+    if not REPORTS_DIR.exists():
+        # 如果目錄不存在，回傳一個帶有 'reports' 鍵的空列表，以符合前端期望的格式
+        return {"reports": []}
+
+    try:
+        report_files = []
+        for filename in os.listdir(REPORTS_DIR):
+            if filename.endswith(".md"):
+                file_path = REPORTS_DIR / filename
+                stat = file_path.stat()
+                # 建立一個相對於 'downloads' 目錄的 URL 路徑
+                # 這樣前端就可以透過 /downloads/reports/filename.md 來存取
+                web_accessible_path = f"/downloads/reports/{filename}"
+
+                report_files.append({
+                    "name": filename,
+                    "path": web_accessible_path, # 使用 Web 可存取路徑
+                    "size": stat.st_size,
+                    "modified_time": datetime.fromtimestamp(stat.st_mtime).isoformat()
+                })
+
+        # 根據修改時間降序排序，最新的在最前面
+        report_files.sort(key=lambda x: x['modified_time'], reverse=True)
+
+        # 將結果包裝在 'reports' 鍵中，以匹配前端的期望
+        return {"reports": report_files}
+    except Exception as e:
+        log.error(f"讀取報告目錄時發生錯誤: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="無法讀取已生成的報告列表。")

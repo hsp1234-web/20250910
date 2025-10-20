@@ -275,9 +275,41 @@ if not STATIC_DIR.exists():
     log.warning(f"靜態檔案目錄 {STATIC_DIR} 不存在，前端頁面可能無法載入。")
 else:
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
-    app.mount("/reports", StaticFiles(directory=REPORTS_DIR), name="reports")
-    app.mount("/downloads", StaticFiles(directory=DOWNLOADS_DIR), name="downloads")
-    # JULES'S FIX (2025-08-13): 移除有問題的 StaticFiles 掛載，改用自訂端點
+    # 修正：移除 reports 的掛載，因為它現在是 downloads 的子目錄
+    # app.mount("/reports", StaticFiles(directory=REPORTS_DIR), name="reports")
+    # 註解：downloads 的掛載似乎有問題，我們將使用下面的自訂路由作為更穩定的替代方案
+    # app.mount("/downloads", StaticFiles(directory=DOWNLOADS_DIR), name="downloads")
+
+
+# --- 穩定的靜態檔案服務路由 ---
+# JULES 除錯 (2025-10-20):
+# 為了徹底解決 Playwright 測試中遇到的 404 問題，我們新增一個手動的路由來服務
+# downloads 目錄下的所有檔案。這比 app.mount() 更明確，且能避免潛在的路由衝突。
+@app.get("/downloads/{file_path:path}")
+async def serve_downloaded_files(file_path: str):
+    """
+    一個穩定的 API 端點，專門用來安全地提供 downloads 目錄下的檔案，
+    包括其子目錄（如 reports）。
+    """
+    try:
+        # URL 解碼，處理中文和空格等
+        decoded_path = unquote(file_path)
+
+        # 建立一個安全的路徑，確保請求不會超出 DOWNLOADS_DIR 的範圍
+        safe_path = (DOWNLOADS_DIR / decoded_path).resolve()
+
+        if not safe_path.is_relative_to(DOWNLOADS_DIR.resolve()):
+             raise HTTPException(status_code=403, detail="禁止存取。")
+
+        if safe_path.is_file():
+            return FileResponse(str(safe_path))
+        else:
+            log.warning(f"請求的 downloads 檔案不存在: {safe_path}")
+            raise HTTPException(status_code=404, detail="File not found")
+    except Exception as e:
+        log.error(f"服務 downloads 檔案時發生錯誤: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 # JULES'S FIX (2025-08-13): 根據計畫，新增此端點來處理複雜檔名
 @app.get("/media/{file_path:path}")
