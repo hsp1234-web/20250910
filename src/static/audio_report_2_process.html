@@ -99,7 +99,23 @@
             padding: 16px;
             background-color: var(--info-bg-color);
             border-radius: 8px;
+        }
+        .button-like {
+            text-decoration: none;
+            padding: 8px 16px;
+            border-radius: 8px;
+            cursor: pointer;
+            background-color: var(--secondary-btn-bg);
+            color: white;
+            font-weight: 500;
+            transition: all 0.2s;
+            display: inline-block;
+            font-size: 0.9em;
             text-align: center;
+        }
+        .button-like:hover {
+            background-color: var(--secondary-btn-hover-bg);
+            transform: translateY(-1px);
         }
     </style>
 </head>
@@ -144,10 +160,20 @@
 
             <!-- 右側：狀態與日誌 -->
             <aside class="flex-col">
-                <div class="card api-key-status">
-                    <h2>API 金鑰狀態</h2>
-                    <p id="api-key-status-text">正在檢查...</p>
-                     <!-- 備用臨時金鑰輸入區 -->
+                <div class="card api-key-status flex-col">
+                    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+                        <h2 style="margin: 0;">AI 相關設定</h2>
+                        <div>
+                            <a href="/page7" class="button-like" style="background-color: #6c757d; margin-right: 8px;">管理提示詞</a>
+                            <a href="/page6" class="button-like" style="background-color: #17a2b8;">管理金鑰池</a>
+                        </div>
+                    </div>
+
+                    <div id="key-status-container" style="margin-top: 12px; padding: 12px; border: 1px solid #ddd; border-radius: 8px; background-color: #f9f9f9; text-align: center;">
+                        <p id="api-key-status-text" style="margin: 0; font-weight: 500;">正在檢查...</p>
+                    </div>
+
+                    <!-- 備用臨時金鑰輸入區 -->
                     <div style="margin-top: 12px;">
                         <a href="#" id="toggle-temp-key-link" style="text-decoration: none; color: var(--button-bg-color); font-weight: 500; font-size: 0.9em;">使用臨時金鑰...</a>
                         <div id="temp-key-input-area" style="display: none; margin-top: 8px; padding: 12px; border: 1px dashed #ccc; border-radius: 8px;">
@@ -155,7 +181,6 @@
                             <button id="validate-api-key-btn" style="width: 100%; padding: 8px; font-size: 0.9em;">驗證並使用</button>
                         </div>
                     </div>
-                    <a href="/page6" style="font-size: 0.9em; margin-top: 12px; display: inline-block;">前往金鑰管理頁面</a>
                 </div>
                 <div class="card flex-col" style="flex-grow: 1;">
                     <h2>即時進度</h2>
