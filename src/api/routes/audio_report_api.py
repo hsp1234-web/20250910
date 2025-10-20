@@ -11,6 +11,7 @@ import sys
 import subprocess
 
 from src.db import database as db
+from src.core import key_manager
 
 # --- 日誌設定 ---
 log = logging.getLogger("audio_report_api")
@@ -292,13 +293,12 @@ async def start_analysis(req: AnalysisRequest):
     # 優先使用請求中提供的 API 金鑰，如果沒有，則從金鑰管理器中獲取一個
     api_key = req.api_key
     if not api_key:
-        # 這裡需要一個從 key_manager 獲取金鑰的邏輯
-        # valid_key = key_manager.get_key_by_type("gemini")
-        # if not valid_key:
-        #     raise HTTPException(status_code=400, detail="系統中沒有可用的 Gemini API 金鑰。")
-        # api_key = valid_key.key_value
-        # 為了簡化，我們先假設金鑰總是會提供
-        raise HTTPException(status_code=400, detail="必須提供 API 金鑰。")
+        log.info("前端未提供 API 金鑰，正在嘗試從後端金鑰池獲取...")
+        api_key = key_manager.get_key_by_type("gemini")
+        if not api_key:
+            log.error("金鑰池中沒有可用的 Gemini API 金鑰。")
+            raise HTTPException(status_code=400, detail="系統金鑰池中沒有可用的 Gemini API 金鑰，請先新增或驗證您的金鑰。")
+        log.info("成功從金鑰池中獲取一個有效的 Gemini 金鑰。")
 
     task_id = str(uuid.uuid4())
     task_name = f"分析任務 for {Path(req.file_path).name}"
