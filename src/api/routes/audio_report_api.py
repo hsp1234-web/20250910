@@ -9,6 +9,7 @@ import json
 from pathlib import Path
 import sys
 import subprocess
+from src.db import database as db
 
 # --- 日誌設定 ---
 log = logging.getLogger("audio_report_api")
@@ -93,21 +94,19 @@ async def run_download_task(task_id: str, url: str, download_type: str, audio_fo
         if process.returncode != 0:
             stdout_str = stdout.decode('utf-8', errors='ignore').strip()
             stderr_str = stderr.decode('utf-8', errors='ignore').strip()
-            error_message = stderr_str  # 預設使用 stderr
+            error_message = stderr_str
             error_code = "GENERAL_ERROR"
 
-            # 嘗試從 stdout 解析 JSON 錯誤，這是更佳的錯誤來源
             if stdout_str:
                 try:
                     error_json = json.loads(stdout_str)
                     error_message = error_json.get("error", error_message)
                     error_code = error_json.get("error_code", error_code)
                 except json.JSONDecodeError:
-                    # 如果 stdout 不是 JSON，則退回到使用原始的 stderr
                     log.warning(f"任務 {task_id} 的 stdout 不是有效的 JSON，將使用 stderr 作為錯誤訊息。")
-                    # 在這種情況下，error_message 已經是 stderr_str，所以不用再賦值
 
             log.error(f"任務 {task_id} 失敗。返回碼: {process.returncode}。錯誤: {error_message}")
+            db.update_task_status(task_id, "failed", json.dumps({"error": error_message, "error_code": error_code}))
             await broadcast_status(task_id, url, "failed", message=error_message, error_code=error_code)
             return
 
@@ -115,8 +114,10 @@ async def run_download_task(task_id: str, url: str, download_type: str, audio_fo
         log.info(f"任務 {task_id} 成功完成。結果: {result}")
 
         output_path = Path(result["output_path"])
-        # 根據類型建立不同的預覽 URL
         preview_url = f"/downloads/{download_type}/{output_path.name}"
+
+        # 將成功的結果更新回資料庫
+        db.update_task_status(task_id, "completed", json.dumps(result))
 
         await broadcast_status(
             task_id, url, "completed",
@@ -128,9 +129,22 @@ async def run_download_task(task_id: str, url: str, download_type: str, audio_fo
         )
     except Exception as e:
         log.error(f"任務 {task_id} 執行期間發生未預期的嚴重錯誤: {e}", exc_info=True)
+        db.update_task_status(task_id, "failed", json.dumps({"error": f"伺服器內部錯誤: {str(e)}"}))
         await broadcast_status(task_id, url, "failed", message=f"伺服器內部錯誤: {str(e)}")
 
 # --- API 路由 (更新) ---
+@router.get("/history", status_code=200)
+async def get_download_history():
+    """
+    獲取 'audio_report' 類型的下載任務歷史紀錄。
+    """
+    try:
+        history_tasks = db.get_tasks_by_type("audio_report")
+        return history_tasks
+    except Exception as e:
+        log.error(f"獲取下載歷史紀錄時發生錯誤: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="無法獲取歷史紀錄。")
+
 @router.post("/download", response_model=List[TaskResponse], status_code=202)
 async def start_multiple_downloads(req: DownloadRequest):
     if not req.urls:
@@ -143,7 +157,10 @@ async def start_multiple_downloads(req: DownloadRequest):
 
         task_id = str(uuid.uuid4())
 
-        # 將所有新參數傳遞給背景任務
+        # 在啟動背景任務前，先將任務新增到資料庫
+        payload = {"url": url.strip(), "download_type": req.download_type}
+        db.add_task(task_id, json.dumps(payload), task_type="audio_report")
+
         asyncio.create_task(run_download_task(
             task_id, url.strip(), req.download_type, req.audio_format, req.video_resolution
         ))

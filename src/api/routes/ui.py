@@ -149,7 +149,7 @@ async def serve_audio_report_main(request: Request):
     """提供音訊報告生成器 - 主頁"""
     return templates.TemplateResponse("audio_report_0_main.html", {"request": request})
 
-@router.get("/audio_report/source", response_class=HTMLResponse)
+@router.get("/audio_report_1_source", response_class=HTMLResponse)
 async def serve_audio_report_source(request: Request):
     """提供音訊報告生成器 - 步驟1：來源管理"""
     return templates.TemplateResponse("audio_report_1_source.html", {"request": request})

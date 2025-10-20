@@ -180,65 +180,123 @@
                 }
             }
 
-            function createTaskCard(taskId, url) {
+            function createTaskCard(task) {
+                const taskId = task.task_id;
+
+                // --- JULES'S FIX (2025-10-19) ---
+                // 修正因後端自動解析 JSON 導致的 TypeError。
+                // 現在，我們先檢查 payload 的類型。如果它是字串（可能來自 WebSocket），
+                // 我們就解析它。如果它已經是一個物件（來自 HTTP API），我們就直接使用。
+                let payloadData;
+                if (typeof task.payload === 'string') {
+                    try {
+                        payloadData = JSON.parse(task.payload);
+                    } catch (e) {
+                        console.error(`無法解析任務 ${taskId} 的 payload 字串:`, task.payload);
+                        payloadData = { url: "無效的 Payload" }; // 提供一個備用值
+                    }
+                } else {
+                    payloadData = task.payload;
+                }
+                const url = payloadData.url;
+                // --- FIX END ---
+
                 if (noTasksMessage) noTasksMessage.style.display = 'none';
+
+                let existingCard = document.getElementById(`task-${taskId}`);
+                if (existingCard) {
+                    // 如果卡片已存在，先移除舊的，等等會根據最新狀態重新插入
+                    existingCard.remove();
+                }
+
                 const card = document.createElement('div');
-                card.className = 'task-card status-starting';
+                card.className = 'task-card';
                 card.id = `task-${taskId}`;
+
                 card.innerHTML = `
                     <div style="display: flex; justify-content: space-between; align-items: center;">
-                        <span class="status-badge starting">準備中</span>
+                        <span class="status-badge"></span>
                     </div>
                     <div class="url" title="${url}">${url}</div>
-                    <div class="status-text">已建立任務，等待伺服器回應...</div>
+                    <div class="status-text"></div>
                     <div class="progress-bar-container"><div class="progress-bar"></div></div>
                     <div class="card-actions"></div>
                     <div class="player-container"></div>
                 `;
-                taskListContainer.prepend(card);
+
+                // 根據建立時間決定插入位置，保持列表順序
+                const firstCard = taskListContainer.firstChild;
+                if (firstCard && firstCard.dataset.createdAt && new Date(task.created_at) > new Date(firstCard.dataset.createdAt)) {
+                     taskListContainer.prepend(card);
+                } else {
+                     taskListContainer.appendChild(card);
+                }
+                card.dataset.createdAt = task.created_at;
+
+                updateTaskCard(task); // 用完整的任務物件更新卡片內容
             }
 
-            function updateTaskCard(payload) {
-                const card = document.getElementById(`task-${payload.task_id}`);
+            function updateTaskCard(task) {
+                // 這個函式現在可以處理來自 WebSocket 的 payload 和來自 DB 的完整 task 物件
+                const taskId = task.task_id || task.payload.task_id;
+                const card = document.getElementById(`task-${taskId}`);
                 if (!card) return;
+
+                const status = task.status;
+                const message = task.message || ''; // WebSocket 訊息
+                let result = null;
+
+                if (task.result) {
+                    try {
+                        result = JSON.parse(task.result);
+                    } catch(e) {
+                        result = { error: task.result }; // 如果 result 不是 JSON，當作錯誤訊息處理
+                    }
+                } else if (task.payload && typeof task.payload === 'object') {
+                    // 處理來自 WebSocket 的 payload
+                    result = task;
+                }
 
                 const statusBadge = card.querySelector('.status-badge');
                 const statusText = card.querySelector('.status-text');
                 const actionsContainer = card.querySelector('.card-actions');
 
-                card.className = `task-card status-${payload.status}`;
-                statusBadge.className = `status-badge ${payload.status}`;
-                statusBadge.textContent = payload.status;
-                statusText.textContent = payload.message || payload.status;
+                card.className = `task-card status-${status}`;
+                statusBadge.className = `status-badge ${status}`;
+                statusBadge.textContent = status;
 
-                if (payload.status === 'completed') {
-                    statusText.innerHTML = `✅ 下載完成: <strong>${payload.filename || payload.video_title}</strong>`;
-                    actionsContainer.innerHTML = '';
+                actionsContainer.innerHTML = ''; // 清空舊按鈕
 
-                    if (payload.preview_url) {
+                if (status === 'completed' && result) {
+                    const filename = result.filename || result.video_title;
+                    statusText.innerHTML = `✅ 下載完成: <strong>${filename}</strong>`;
+
+                    if (result.preview_url) {
                         const previewBtn = document.createElement('button');
                         previewBtn.className = 'action-button';
                         previewBtn.textContent = '▶️ 預覽';
-                        previewBtn.onclick = () => togglePlayer(card, payload.preview_url);
+                        previewBtn.onclick = () => togglePlayer(card, result.preview_url);
                         actionsContainer.appendChild(previewBtn);
                     }
-
                     const processBtn = document.createElement('button');
                     processBtn.className = 'action-button to-process';
                     processBtn.textContent = '下一步：分析 ➡️';
                     processBtn.onclick = () => {
                         const fileInfo = {
-                            path: payload.output_path,
-                            filename: payload.filename,
-                            title: payload.video_title
+                            path: result.output_path,
+                            filename: result.filename,
+                            title: result.video_title
                         };
                         localStorage.setItem('selected_media_for_process', JSON.stringify(fileInfo));
                         window.location.href = '/audio_report/process';
                     };
                     actionsContainer.appendChild(processBtn);
-                }
-                if (payload.status === 'failed') {
-                    statusText.innerHTML = `❌ 失敗: <span style="color: var(--danger-color);">${payload.message}</span>`;
+
+                } else if (status === 'failed') {
+                    const errorMessage = (result && result.error) ? result.error : (message || '未知錯誤');
+                    statusText.innerHTML = `❌ 失敗: <span style="color: var(--danger-color);">${errorMessage}</span>`;
+                } else { // starting 或 processing
+                    statusText.textContent = message || `任務正在 ${status}...`;
                 }
             }
 
@@ -293,7 +351,7 @@
                         throw new Error(error.detail || '建立任務失敗。');
                     }
                     const createdTasks = await response.json();
-                    createdTasks.forEach(task => createTaskCard(task.task_id, task.url));
+                    // WebSocket 會處理新任務卡片的建立和更新，這裡無需手動建立
                     urlsInput.value = '';
                 } catch (error) {
                     alert(`發生錯誤: ${error.message}`);
@@ -303,7 +361,26 @@
                 }
             });
 
+            async function loadHistory() {
+                try {
+                    const response = await fetch('/api/audio_report/history');
+                    if (!response.ok) {
+                        throw new Error('無法載入歷史紀錄。');
+                    }
+                    const historyTasks = await response.json();
+                    if (historyTasks.length > 0) {
+                        noTasksMessage.style.display = 'none';
+                        // 將任務按創建時間排序 (ASC) 以便正確插入
+                        historyTasks.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+                        historyTasks.forEach(task => createTaskCard(task));
+                    }
+                } catch (error) {
+                    console.error("載入歷史紀錄失敗:", error);
+                }
+            }
+
             connectWebSocket();
+            loadHistory(); // 在頁面載入時執行
         });
     </script>
 </body>

@@ -435,6 +435,30 @@ def set_app_state(key: str, value: str) -> bool:
         if conn:
             conn.close()
 
+
+def get_tasks_by_type(task_type: str) -> list[dict]:
+    """
+    根據任務類型獲取資料庫中所有相關任務的列表。
+
+    :param task_type: 要篩選的任務類型。
+    :return: 一個包含所有符合條件的任務字典的列表。
+    """
+    sql = "SELECT task_id, status, progress, type, payload, result, created_at, updated_at FROM tasks WHERE type = ? ORDER BY created_at DESC"
+    conn = get_db_connection()
+    if not conn: return []
+    try:
+        cursor = conn.cursor()
+        cursor.execute(sql, (task_type,))
+        tasks = cursor.fetchall()
+        # 將 Row 物件轉換為標準字典列表
+        return [dict(task) for task in tasks]
+    except sqlite3.Error as e:
+        log.error(f"❌ 根據類型 '{task_type}' 獲取任務時發生錯誤: {e}", exc_info=True)
+        return []
+    finally:
+        if conn:
+            conn.close()
+
 def get_app_state(key: str) -> str | None:
     """
     根據鍵從 app_state 表中獲取值。
