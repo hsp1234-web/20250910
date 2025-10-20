@@ -27,7 +27,7 @@ kaleido
 
 # Other project-specific testing dependencies
 python-docx==1.1.2
-PyMuPDF==1.24.1
+PyMuPDF==1.24.9
 Pillow==11.3.0
 python-pptx==0.6.23
 fpdf2==2.7.8
