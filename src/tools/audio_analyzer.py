@@ -1,3 +1,4 @@
+
 # -*- coding: utf-8 -*-
 import argparse
 import json
@@ -11,15 +12,9 @@ import subprocess
 import os
 
 # --- 常數與路徑設定 ---
-# 為了確保路徑在任何執行環境下都一致，我們定義一個絕對的專案根目錄
-# __file__ -> audio_analyzer.py
-# .parent -> tools
-# .parent.parent -> src
-# .parent.parent.parent -> 專案根目錄
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 REPORTS_DIR = PROJECT_ROOT / "downloads" / "reports"
 REPORTS_DIR.mkdir(parents=True, exist_ok=True)
-
 
 # --- 日誌設定 ---
 logging.basicConfig(
@@ -29,17 +24,41 @@ logging.basicConfig(
 )
 log = logging.getLogger('audio_analyzer_tool')
 
-# --- 提示詞模板 (Markdown 優化版) ---
-PROMPTS = {
-    "transcript": "請將此音訊檔案轉換為逐字稿。請直接輸出純文字內容。",
-    "summary": "請根據此音訊檔案的逐字稿，產生一份150-200字的重點摘要。請使用 Markdown 的二級標題 `## 重點摘要` 作為開頭。",
-    "translate_zh": "請將以下的逐字稿翻譯成流暢的繁體中文。請使用 Markdown 的二級標題 `## 中文翻譯` 作為開頭。\n\n---\n{transcript}\n---"
-}
+def generate_combined_prompt(tasks: list) -> str:
+    """
+    根據任務列表動態生成一個綜合性的提示詞。
+    """
+    prompt_parts = []
+    use_traditional_chinese = 'translate_zh' in tasks
+
+    language_instruction = "確保所有文字都以繁體中文呈現" if use_traditional_chinese else "使用音訊的原始語言"
+
+    prompt_parts.append(f"請根據此音訊檔案完成以下任務，並{language_instruction}：")
+
+    task_descriptions = {
+        "transcript": "1. 生成完整的逐字稿。",
+        "summary": "2. 根據逐字稿，撰寫一份重點摘要。"
+    }
+
+    # 按照 transcript, summary 的順序添加任務描述
+    if 'transcript' in tasks:
+        prompt_parts.append(task_descriptions['transcript'])
+    if 'summary' in tasks:
+        prompt_parts.append(task_descriptions['summary'])
+
+    # 如果只有逐字稿任務，且沒有要求翻譯，則遵循特殊規則
+    if tasks == ['transcript']:
+        return "請將此音訊檔案轉換為逐字稿，並使用其原始語言呈現。"
+
+    formatting_instruction = "請在你的回覆中，為每個任務使用清晰的 Markdown 標題（例如：`## 逐字稿`、`## 重點摘要`）來分隔內容。"
+    prompt_parts.append(formatting_instruction)
+
+    return "\n".join(prompt_parts)
+
 
 def upload_file_via_rest(file_path: Path, api_key: str) -> dict:
     """
-    【修復版】使用 cURL 執行檔案上傳，以繞過 SSL 問題並確保與 Gemini API 的相容性。
-    此方法已被證明在沙箱環境中是 100% 可靠的。
+    使用 cURL 執行檔案上傳，以繞過 SSL 問題並確保與 Gemini API 的相容性。
     """
     display_filename = file_path.name
     log.info(f"☁️ (cURL) 開始上傳檔案 '{display_filename}' 至 Gemini Files API...")
@@ -53,10 +72,7 @@ def upload_file_via_rest(file_path: Path, api_key: str) -> dict:
         if not mime_type:
             mime_type = "application/octet-stream"
 
-        # --- 步驟 1: 使用 cURL 初始化上傳 ---
-        log.info("步驟 1/3: 使用 cURL 發送初始化請求以獲取上傳 URL...")
         init_url = "https://generativelanguage.googleapis.com/upload/v1beta/files"
-        # 根據官方文件，我們使用可續傳 (resumable) 協定
         init_headers = {
             "X-Goog-Upload-Protocol": "resumable",
             "X-Goog-Upload-Command": "start",
@@ -65,7 +81,6 @@ def upload_file_via_rest(file_path: Path, api_key: str) -> dict:
             "Content-Type": "application/json",
             "x-goog-api-key": api_key
         }
-        # 【安全修正】將 shell=True 改為參數列表，以避免檔名中的特殊字元導致 shell 解析錯誤。
         init_command_list = ["curl", "-sS", "-D", "-"]
         for k, v in init_headers.items():
             init_command_list.extend(["-H", f"{k}: {v}"])
@@ -74,20 +89,16 @@ def upload_file_via_rest(file_path: Path, api_key: str) -> dict:
 
         proc = subprocess.run(init_command_list, shell=False, capture_output=True, text=True, check=True, encoding='utf-8')
 
-        # 從回應標頭中解析上傳 URL
         upload_url = next((line.split(":", 1)[1].strip() for line in proc.stdout.splitlines() if "x-goog-upload-url:" in line.lower()), None)
 
         if not upload_url:
             raise IOError(f"❌ cURL 初始化失敗：未能在回應中找到上傳 URL。\nSTDOUT:\n{proc.stdout}\nSTDERR:\n{proc.stderr}")
         log.info("✅ 步驟 1/3 完成: 已成功獲取上傳 URL。")
 
-        # --- 步驟 2: 使用 cURL 上傳檔案內容 ---
-        log.info("步驟 2/3: 使用 cURL 開始上傳檔案的二進位內容...")
         upload_headers = {
             'X-Goog-Upload-Command': 'upload, finalize',
             'X-Goog-Upload-Offset': '0'
         }
-        # 【最终安全修正】改用 --data-binary @file 语法，这是 curl 最稳健的文件上传方式，能完全避免 shell 对特殊字符的解析问题。
         upload_command_list = ["curl", "-sS", "--data-binary", f"@{file_path}"]
         for k, v in upload_headers.items():
             upload_command_list.extend(["-H", f"{k}: {v}"])
@@ -104,13 +115,11 @@ def upload_file_via_rest(file_path: Path, api_key: str) -> dict:
             raise IOError(f"❌ cURL 上傳失敗：回應格式不正確或缺少 'file' 物件。\n{proc.stdout}\n{proc.stderr}")
         log.info(f"✅ 步驟 2/3 完成: 檔案內容上傳成功，檔案 ID: {file_info['name']}")
 
-        # --- 步驟 3: 使用 cURL 輪詢以確認檔案狀態 ---
         log.info(f"步驟 3/3: 等待伺服器處理檔案 '{file_info['name']}'...")
         get_url = f"https://generativelanguage.googleapis.com/v1beta/{file_info['name']}?key={api_key}"
 
         for i in range(12):  # 最多等待 60 秒
             time.sleep(5)
-            # 【安全修正】同樣將 poll 指令改為參數列表形式
             poll_command_list = ["curl", "-sS", get_url]
             proc = subprocess.run(poll_command_list, shell=False, capture_output=True, text=True, check=True, encoding='utf-8')
 
@@ -124,7 +133,7 @@ def upload_file_via_rest(file_path: Path, api_key: str) -> dict:
 
             if current_state == "ACTIVE":
                 log.info("✅ 步驟 3/3 完成: 檔案已啟用，上傳流程成功！")
-                return status_result  # 回傳完整的檔案資訊字典
+                return status_result
             elif current_state == "FAILED":
                 raise IOError(f"❌ Gemini API 報告檔案處理失敗: {status_result}")
 
@@ -144,9 +153,8 @@ def analyze_audio(file_path: Path, model_name: str, tasks: list, api_key: str):
     """
     對指定的音訊檔案執行 AI 分析任務、計算指標並將結果存檔。
     """
-    # --- 初始化計時器與計數器 ---
-    開始時間 = time.time()
-    總計_tokens = 0
+    start_time = time.time()
+    total_tokens = 0
 
     log.info(f"開始分析檔案: {file_path}")
     log.info(f"使用模型: {model_name}")
@@ -158,7 +166,6 @@ def analyze_audio(file_path: Path, model_name: str, tasks: list, api_key: str):
         log.error(f"API 金鑰設定失敗: {e}")
         raise ValueError("提供的 API 金鑰無效或格式不正確。")
 
-    # 1. 上傳檔案 (使用 cURL 確保穩定性)
     try:
         audio_file_info = upload_file_via_rest(file_path, api_key)
         if not audio_file_info or "name" not in audio_file_info:
@@ -167,114 +174,54 @@ def analyze_audio(file_path: Path, model_name: str, tasks: list, api_key: str):
         log.error(f"透過 REST API 上傳檔案時發生錯誤: {e}")
         raise
 
-    # --- 任務執行 ---
     model = genai.GenerativeModel(model_name=model_name)
-    分析結果 = {}
-    輸出檔案列表 = []
-    檔案基本名稱 = file_path.stem
 
-    # --- 任務一：生成逐字稿 (如果需要) ---
-    逐字稿內容 = None
-    if "transcript" in tasks or "summary" in tasks or "translate_zh" in tasks:
-        log.info("正在生成逐字稿...")
-        try:
-            # 準備給模型的檔案物件
-            file_for_prompt = {
-                "file_data": {
-                    "mime_type": audio_file_info['mimeType'],
-                    "file_uri": audio_file_info['uri']
-                }
+    prompt = generate_combined_prompt(tasks)
+    log.info(f"組合後的提示詞:\n---\n{prompt}\n---")
+
+    try:
+        file_for_prompt = {
+            "file_data": {
+                "mime_type": audio_file_info['mimeType'],
+                "file_uri": audio_file_info['uri']
             }
-            提示詞內容 = [PROMPTS["transcript"], file_for_prompt]
+        }
+        prompt_content = [prompt, file_for_prompt]
 
-            # 計算提示詞的 Token
-            token_count_response = model.count_tokens(提示詞內容)
-            總計_tokens += token_count_response.total_tokens
+        token_count_response = model.count_tokens(prompt_content)
+        total_tokens += token_count_response.total_tokens
 
-            # 呼叫模型
-            response = model.generate_content(提示詞內容)
-            逐字稿內容 = response.text
+        response = model.generate_content(prompt_content)
+        report_content = response.text
 
-            # 計算生成內容的 Token
-            token_count_response = model.count_tokens(逐字稿內容)
-            總計_tokens += token_count_response.total_tokens
+        token_count_response = model.count_tokens(report_content)
+        total_tokens += token_count_response.total_tokens
 
-            分析結果["transcript"] = 逐字稿內容
+        file_base_name = file_path.stem
+        report_path = REPORTS_DIR / f"{file_base_name}_report.md"
+        report_path.write_text(report_content, encoding='utf-8')
 
-            # 將逐字稿存檔
-            transcript_path = REPORTS_DIR / f"{檔案基本名稱}_transcript.md"
-            transcript_path.write_text(逐字稿內容, encoding='utf-8')
-            輸出檔案列表.append({"type": "逐字稿", "path": str(transcript_path)})
-            log.info(f"✅ 逐字稿已生成並儲存至 {transcript_path}")
+        output_files = [{"type": "綜合報告", "path": str(report_path)}]
+        log.info(f"✅ 綜合報告已生成並儲存至 {report_path}")
 
-        except Exception as e:
-            log.error(f"生成逐字稿時發生錯誤: {e}", exc_info=True)
-            分析結果["transcript_error"] = str(e)
+    except Exception as e:
+        log.error(f"生成報告時發生錯誤: {e}", exc_info=True)
+        raise
 
-    # --- 任務二：生成摘要 (如果需要且已有逐字稿) ---
-    if "summary" in tasks and 逐字稿內容:
-        log.info("正在生成摘要...")
-        try:
-            提示詞內容 = [PROMPTS["summary"], 逐字稿內容]
-            token_count_response = model.count_tokens(提示詞內容)
-            總計_tokens += token_count_response.total_tokens
+    end_time = time.time()
+    processing_time_seconds = round(end_time - start_time, 2)
+    log.info(f"✅ 所有任務完成，總耗時: {processing_time_seconds} 秒，總 Token 數: {total_tokens}")
 
-            response = model.generate_content(提示詞內容)
-            摘要內容 = response.text
-
-            token_count_response = model.count_tokens(摘要內容)
-            總計_tokens += token_count_response.total_tokens
-            分析結果["summary"] = 摘要內容
-
-            summary_path = REPORTS_DIR / f"{檔案基本名稱}_summary.md"
-            summary_path.write_text(摘要內容, encoding='utf-8')
-            輸出檔案列表.append({"type": "重點摘要", "path": str(summary_path)})
-            log.info(f"✅ 摘要已生成並儲存至 {summary_path}")
-
-        except Exception as e:
-            log.error(f"生成摘要時發生錯誤: {e}", exc_info=True)
-            分析結果["summary_error"] = str(e)
-
-    # --- 任務三：翻譯 (如果需要且已有逐字稿) ---
-    if "translate_zh" in tasks and 逐字稿內容:
-        log.info("正在將逐字稿翻譯成繁體中文...")
-        try:
-            提示詞內容 = PROMPTS["translate_zh"].format(transcript=逐字稿內容)
-            token_count_response = model.count_tokens(提示詞內容)
-            總計_tokens += token_count_response.total_tokens
-
-            response = model.generate_content(提示詞內容)
-            翻譯內容 = response.text
-
-            token_count_response = model.count_tokens(翻譯內容)
-            總計_tokens += token_count_response.total_tokens
-            分析結果["translation_zh"] = 翻譯內容
-
-            translation_path = REPORTS_DIR / f"{檔案基本名稱}_translation_zh.md"
-            translation_path.write_text(翻譯內容, encoding='utf-8')
-            輸出檔案列表.append({"type": "中文翻譯", "path": str(translation_path)})
-            log.info(f"✅ 翻譯已生成並儲存至 {translation_path}")
-
-        except Exception as e:
-            log.error(f"翻譯時發生錯誤: {e}", exc_info=True)
-            分析結果["translation_error"] = str(e)
-
-    # --- 總結與最終輸出 ---
-    結束時間 = time.time()
-    處理總耗時_秒 = round(結束時間 - 開始時間, 2)
-    log.info(f"✅ 所有任務完成，總耗時: {處理總耗時_秒} 秒，總 Token 數: {總計_tokens}")
-
-    最終輸出 = {
+    final_output = {
         "status": "completed",
         "original_filename": file_path.name,
-        "results": 分析結果,
-        "output_files": 輸出檔案列表,
-        "processing_time_seconds": 處理總耗時_秒,
-        "total_tokens": 總計_tokens
+        "results": {"report_content": report_content},
+        "output_files": output_files,
+        "processing_time_seconds": processing_time_seconds,
+        "total_tokens": total_tokens
     }
 
-    print(json.dumps(最終輸出, ensure_ascii=False), flush=True)
-
+    print(json.dumps(final_output, ensure_ascii=False), flush=True)
 
 def main():
     parser = argparse.ArgumentParser(description="音訊 AI 分析工具。")
@@ -291,7 +238,7 @@ def main():
         print(json.dumps({"status": "failed", "error": "指定的檔案不存在。"}), flush=True)
         sys.exit(1)
 
-    task_list = [task.strip() for task in args.tasks.split(',')]
+    task_list = [task.strip() for task in args.tasks.split(',') if task.strip()]
 
     try:
         analyze_audio(file_path, args.model, task_list, args.api_key)

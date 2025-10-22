@@ -72,6 +72,17 @@
             transform: translateY(-5px);
             box-shadow: 0 8px 15px rgba(0,0,0,0.08);
         }
+
+        /* 新增：高亮效果 */
+        @keyframes highlight-fade {
+            from { border-color: #ffc107; box-shadow: 0 0 15px rgba(255, 193, 7, 0.7); }
+            to { border-color: var(--card-border-color); box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
+        }
+        .report-card.highlight {
+            animation: highlight-fade 2.5s ease-out forwards;
+            border-width: 2px;
+        }
+
         .report-card-header {
             font-weight: 600;
             font-size: 1.1em;
@@ -271,6 +282,19 @@
                         reportGrid.appendChild(card);
                     });
 
+                    // 新增：處理高亮顯示
+                    const reportIdToHighlight = sessionStorage.getItem('highlightReportId');
+                    if (reportIdToHighlight) {
+                        const cardToHighlight = reportGrid.querySelector(`[data-task-id="${reportIdToHighlight}"]`);
+                        if (cardToHighlight) {
+                            setTimeout(() => { // 使用 setTimeout 確保 DOM 已完全更新
+                                cardToHighlight.classList.add('highlight');
+                                cardToHighlight.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                            }, 100);
+                        }
+                        sessionStorage.removeItem('highlightReportId'); // 清除，避免重複高亮
+                    }
+
                 } catch (error) {
                     console.error('載入報告列表失敗:', error);
                     noReportsMessage.textContent = `❌ 載入報告失敗: ${error.message}`;
@@ -287,17 +311,13 @@
             function createDetailedReportCard(report) {
                 const card = document.createElement('div');
                 card.className = 'report-card';
+                card.dataset.taskId = report.taskId; // 新增：將 taskId 加入 data 屬性
 
                 const creationDate = new Date(report.creationDate).toLocaleString('zh-TW', { hour12: false });
 
-                // 動態生成檔案選項 HTML
-                let fileOptionsHtml = '';
-                if (report.outputFiles && report.outputFiles.length > 0) {
-                    report.outputFiles.forEach(file => {
-                        const webPath = `/${file.path}`;
-                        fileOptionsHtml += `<option value="${webPath}" data-name="${file.name}">${file.type}</option>`;
-                    });
-                }
+                const hasOutputFile = report.outputFiles && report.outputFiles.length > 0;
+                const reportFile = hasOutputFile ? report.outputFiles[0] : null;
+                const webPath = reportFile ? `/${reportFile.path}` : null;
 
                 card.innerHTML = `
                     <div class="report-card-header" title="${report.reportTitle}">${report.reportTitle}</div>
@@ -311,20 +331,15 @@
                             <p><strong>建立時間:</strong> ${creationDate}</p>
                         </div>
                     </div>
-                    <div class="report-card-footer">
-                        <select class="file-selector" ${!fileOptionsHtml ? 'disabled' : ''}>
-                            ${fileOptionsHtml || '<option>無可用檔案</option>'}
-                        </select>
-                        <button class="action-btn btn-preview" ${!fileOptionsHtml ? 'disabled' : ''}>▶️ 預覽</button>
-                        <a href="#" class="action-btn btn-download" download ${!fileOptionsHtml ? 'disabled' : ''} style="background-color: var(--warning-color); color: var(--text-color);">📥 下載</a>
+                     <div class="report-card-footer">
+                        <button class="action-btn btn-preview" ${!hasOutputFile ? 'disabled' : ''}>▶️ 預覽</button>
+                        <a href="${webPath || '#'}" class="action-btn btn-download" download="${reportFile ? reportFile.name : ''}" ${!hasOutputFile ? 'disabled' : ''} style="background-color: var(--warning-color); color: var(--text-color);">📥 下載</a>
                     </div>
                 `;
 
                 const detailsContainer = card.querySelector('.report-card-details');
                 const toggleBtn = card.querySelector('.details-toggle-btn');
-                const fileSelector = card.querySelector('.file-selector');
                 const previewBtn = card.querySelector('.btn-preview');
-                const downloadLink = card.querySelector('.btn-download');
 
                 // 折疊/展開功能
                 toggleBtn.addEventListener('click', () => {
@@ -333,38 +348,11 @@
                     toggleBtn.textContent = isHidden ? '隱藏詳細資訊' : '顯示詳細資訊';
                 });
 
-                // 更新下載連結的函式
-                const updateDownloadLink = () => {
-                    if (fileSelector.value) {
-                        const selectedOption = fileSelector.options[fileSelector.selectedIndex];
-                        downloadLink.href = fileSelector.value;
-                        downloadLink.download = selectedOption.dataset.name;
-                        previewBtn.disabled = false;
-                        downloadLink.removeAttribute('disabled');
-                        downloadLink.style.pointerEvents = 'auto';
-                        downloadLink.style.opacity = '1';
-
-                    } else {
-                        previewBtn.disabled = true;
-                        downloadLink.setAttribute('disabled', 'true');
-                        downloadLink.style.pointerEvents = 'none';
-                        downloadLink.style.opacity = '0.6';
-                    }
-                };
-
-                // 預覽按鈕事件
-                previewBtn.addEventListener('click', () => {
-                    if (fileSelector.value) {
-                        const selectedOption = fileSelector.options[fileSelector.selectedIndex];
-                        openPreviewModal(fileSelector.value, selectedOption.dataset.name);
-                    }
-                });
-
-                // 下拉選單變更事件
-                fileSelector.addEventListener('change', updateDownloadLink);
-
-                // 初始化
-                updateDownloadLink();
+                if (hasOutputFile) {
+                    previewBtn.addEventListener('click', () => {
+                        openPreviewModal(webPath, reportFile.name);
+                    });
+                }
 
                 return card;
             }

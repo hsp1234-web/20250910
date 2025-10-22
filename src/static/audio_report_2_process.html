@@ -217,8 +217,8 @@
                     <label><strong>3. 勾選要執行的任務</strong></label>
                     <div class="checkbox-group">
                         <label><input type="checkbox" name="ai-task" value="summary" checked> 產生重點摘要</label>
-                        <label><input type="checkbox" name="ai-task" value="transcript" checked> 生成逐字稿</label>
-                        <label><input type="checkbox" name="ai-task" value="translate_zh"> 翻譯成繁體中文 (基於逐字稿)</label>
+                        <label><input type="checkbox" name="ai-task" value="transcript"> 生成逐字稿</label>
+                        <label><input type="checkbox" name="ai-task" value="translate_zh" checked> 翻譯成繁體中文 (基於逐字稿)</label>
                     </div>
                 </div>
 
@@ -321,9 +321,15 @@
 
                     if (payload.status === 'completed') {
                         startBtn.disabled = false;
-                        startBtn.textContent = '🚀 開始新分析';
-                        // 當分析完成時，重新載入報告卡片列表
-                        loadReports();
+                        startBtn.textContent = '✅ 分析完成！正在跳轉...';
+                        loadReports(); // 重新載入報告以防使用者停留
+
+                        // 新增：儲存任務 ID 並自動跳轉到結果頁面
+                        sessionStorage.setItem('highlightReportId', payload.task_id);
+                        setTimeout(() => {
+                            window.location.href = '/audio_report/results';
+                        }, 1500); // 延遲 1.5 秒以便使用者看到完成訊息
+
                     } else if (payload.status === 'failed') {
                         startBtn.disabled = false;
                         startBtn.textContent = '🚀 重試分析';
@@ -377,13 +383,9 @@
                 card.className = 'report-card';
                 const creationDate = new Date(report.creationDate).toLocaleString('zh-TW', { hour12: false });
 
-                let fileOptionsHtml = '';
-                if (report.outputFiles && report.outputFiles.length > 0) {
-                    report.outputFiles.forEach(file => {
-                        const webPath = `/${file.path}`;
-                        fileOptionsHtml += `<option value="${webPath}" data-name="${file.name}">${file.type}</option>`;
-                    });
-                }
+                const hasOutputFile = report.outputFiles && report.outputFiles.length > 0;
+                const reportFile = hasOutputFile ? report.outputFiles[0] : null;
+                const webPath = reportFile ? `/${reportFile.path}` : null;
 
                 card.innerHTML = `
                     <div class="report-card-header" title="${report.reportTitle}">${report.reportTitle}</div>
@@ -398,19 +400,14 @@
                         </div>
                     </div>
                     <div class="report-card-footer">
-                        <select class="file-selector" ${!fileOptionsHtml ? 'disabled' : ''}>
-                            ${fileOptionsHtml || '<option>無可用檔案</option>'}
-                        </select>
-                        <button class="action-btn btn-preview" ${!fileOptionsHtml ? 'disabled' : ''}>▶️ 預覽</button>
-                        <a href="#" class="action-btn btn-download" download ${!fileOptionsHtml ? 'disabled' : ''}>📥 下載</a>
+                        <button class="action-btn btn-preview" ${!hasOutputFile ? 'disabled' : ''}>▶️ 預覽</button>
+                        <a href="${webPath || '#'}" class="action-btn btn-download" download="${reportFile ? reportFile.name : ''}" ${!hasOutputFile ? 'disabled' : ''}>📥 下載</a>
                     </div>
                 `;
 
                 const detailsContainer = card.querySelector('.report-card-details');
                 const toggleBtn = card.querySelector('.details-toggle-btn');
-                const fileSelector = card.querySelector('.file-selector');
                 const previewBtn = card.querySelector('.btn-preview');
-                const downloadLink = card.querySelector('.btn-download');
 
                 toggleBtn.addEventListener('click', () => {
                     const isHidden = detailsContainer.style.display === 'none' || !detailsContainer.style.display;
@@ -418,30 +415,11 @@
                     toggleBtn.textContent = isHidden ? '隱藏詳細資訊' : '顯示詳細資訊';
                 });
 
-                const updateActions = () => {
-                    if (fileSelector.value) {
-                        const selectedOption = fileSelector.options[fileSelector.selectedIndex];
-                        downloadLink.href = fileSelector.value;
-                        downloadLink.download = selectedOption.dataset.name;
-                        previewBtn.disabled = false;
-                        downloadLink.style.pointerEvents = 'auto';
-                        downloadLink.style.opacity = '1';
-                    } else {
-                        previewBtn.disabled = true;
-                        downloadLink.style.pointerEvents = 'none';
-                        downloadLink.style.opacity = '0.6';
-                    }
-                };
-
-                previewBtn.addEventListener('click', () => {
-                    if (fileSelector.value) {
-                        const selectedOption = fileSelector.options[fileSelector.selectedIndex];
-                        openPreviewModal(fileSelector.value, selectedOption.dataset.name);
-                    }
-                });
-
-                fileSelector.addEventListener('change', updateActions);
-                updateActions(); // Initial setup
+                if (hasOutputFile) {
+                    previewBtn.addEventListener('click', () => {
+                        openPreviewModal(webPath, reportFile.name);
+                    });
+                }
 
                 return card;
             }
