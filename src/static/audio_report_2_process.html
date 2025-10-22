@@ -321,9 +321,15 @@
 
                     if (payload.status === 'completed') {
                         startBtn.disabled = false;
-                        startBtn.textContent = '🚀 開始新分析';
-                        // 當分析完成時，重新載入報告卡片列表
-                        loadReports();
+                        startBtn.textContent = '✅ 分析完成！正在跳轉...';
+                        loadReports(); // 重新載入報告以防使用者停留
+
+                        // 新增：儲存任務 ID 並自動跳轉到結果頁面
+                        sessionStorage.setItem('highlightReportId', payload.task_id);
+                        setTimeout(() => {
+                            window.location.href = '/audio_report/results';
+                        }, 1500); // 延遲 1.5 秒以便使用者看到完成訊息
+
                     } else if (payload.status === 'failed') {
                         startBtn.disabled = false;
                         startBtn.textContent = '🚀 重試分析';

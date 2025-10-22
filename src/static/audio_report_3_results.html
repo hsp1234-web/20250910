@@ -72,6 +72,17 @@
             transform: translateY(-5px);
             box-shadow: 0 8px 15px rgba(0,0,0,0.08);
         }
+
+        /* 新增：高亮效果 */
+        @keyframes highlight-fade {
+            from { border-color: #ffc107; box-shadow: 0 0 15px rgba(255, 193, 7, 0.7); }
+            to { border-color: var(--card-border-color); box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
+        }
+        .report-card.highlight {
+            animation: highlight-fade 2.5s ease-out forwards;
+            border-width: 2px;
+        }
+
         .report-card-header {
             font-weight: 600;
             font-size: 1.1em;
@@ -271,6 +282,19 @@
                         reportGrid.appendChild(card);
                     });
 
+                    // 新增：處理高亮顯示
+                    const reportIdToHighlight = sessionStorage.getItem('highlightReportId');
+                    if (reportIdToHighlight) {
+                        const cardToHighlight = reportGrid.querySelector(`[data-task-id="${reportIdToHighlight}"]`);
+                        if (cardToHighlight) {
+                            setTimeout(() => { // 使用 setTimeout 確保 DOM 已完全更新
+                                cardToHighlight.classList.add('highlight');
+                                cardToHighlight.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                            }, 100);
+                        }
+                        sessionStorage.removeItem('highlightReportId'); // 清除，避免重複高亮
+                    }
+
                 } catch (error) {
                     console.error('載入報告列表失敗:', error);
                     noReportsMessage.textContent = `❌ 載入報告失敗: ${error.message}`;
@@ -287,6 +311,7 @@
             function createDetailedReportCard(report) {
                 const card = document.createElement('div');
                 card.className = 'report-card';
+                card.dataset.taskId = report.taskId; // 新增：將 taskId 加入 data 屬性
 
                 const creationDate = new Date(report.creationDate).toLocaleString('zh-TW', { hour12: false });
 
