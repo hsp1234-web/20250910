@@ -11,7 +11,13 @@ import subprocess
 import os
 
 # --- 常數與路徑設定 ---
-REPORTS_DIR = Path("downloads/reports")
+# 為了確保路徑在任何執行環境下都一致，我們定義一個絕對的專案根目錄
+# __file__ -> audio_analyzer.py
+# .parent -> tools
+# .parent.parent -> src
+# .parent.parent.parent -> 專案根目錄
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+REPORTS_DIR = PROJECT_ROOT / "downloads" / "reports"
 REPORTS_DIR.mkdir(parents=True, exist_ok=True)
 
 
@@ -136,8 +142,12 @@ def upload_file_via_rest(file_path: Path, api_key: str) -> dict:
 
 def analyze_audio(file_path: Path, model_name: str, tasks: list, api_key: str):
     """
-    對指定的音訊檔案執行 AI 分析任務，並將結果存檔。
+    對指定的音訊檔案執行 AI 分析任務、計算指標並將結果存檔。
     """
+    # --- 初始化計時器與計數器 ---
+    開始時間 = time.time()
+    總計_tokens = 0
+
     log.info(f"開始分析檔案: {file_path}")
     log.info(f"使用模型: {model_name}")
     log.info(f"執行任務: {', '.join(tasks)}")
@@ -148,111 +158,122 @@ def analyze_audio(file_path: Path, model_name: str, tasks: list, api_key: str):
         log.error(f"API 金鑰設定失敗: {e}")
         raise ValueError("提供的 API 金鑰無效或格式不正確。")
 
-    # 1. 上傳檔案 (使用新的 REST API 方式)
+    # 1. 上傳檔案 (使用 cURL 確保穩定性)
     try:
-        # 【二次修正】根據測試日誌，upload_file_via_rest 成功後直接回傳檔案物件本身，
-        # 並非巢狀在 'file' 鍵中。
         audio_file_info = upload_file_via_rest(file_path, api_key)
-
         if not audio_file_info or "name" not in audio_file_info:
             raise ValueError(f"從上傳 API 收到的回應格式不正確：缺少 'name' 欄位。回應: {audio_file_info}")
-
-        # 【三次修正】直接使用 API 回應中的資訊建構請求，而不是建立 SDK 物件。
-        # 這是為了確保傳遞給 generate_content 的格式是模型所期望的。
-        # audio_file = genai.get_file(name=audio_file_info["name"]) # 移除此行
     except Exception as e:
         log.error(f"透過 REST API 上傳檔案時發生錯誤: {e}")
         raise
 
     # --- 任務執行 ---
     model = genai.GenerativeModel(model_name=model_name)
-    results = {}
-    output_files = []
-    base_filename = file_path.stem
+    分析結果 = {}
+    輸出檔案列表 = []
+    檔案基本名稱 = file_path.stem
 
     # --- 任務一：生成逐字稿 (如果需要) ---
-    transcript_text = None
+    逐字稿內容 = None
     if "transcript" in tasks or "summary" in tasks or "translate_zh" in tasks:
         log.info("正在生成逐字稿...")
         try:
-            # 根據 code review 的回饋，我們直接使用一個包含 uri 和 mime_type 的字典，
-            # 而不是一個 genai.File 物件，來確保模型能正確識別輸入。
+            # 準備給模型的檔案物件
             file_for_prompt = {
                 "file_data": {
                     "mime_type": audio_file_info['mimeType'],
                     "file_uri": audio_file_info['uri']
                 }
             }
-            response = model.generate_content([PROMPTS["transcript"], file_for_prompt])
-            transcript_text = response.text
-            results["transcript"] = transcript_text
+            提示詞內容 = [PROMPTS["transcript"], file_for_prompt]
+
+            # 計算提示詞的 Token
+            token_count_response = model.count_tokens(提示詞內容)
+            總計_tokens += token_count_response.total_tokens
+
+            # 呼叫模型
+            response = model.generate_content(提示詞內容)
+            逐字稿內容 = response.text
+
+            # 計算生成內容的 Token
+            token_count_response = model.count_tokens(逐字稿內容)
+            總計_tokens += token_count_response.total_tokens
+
+            分析結果["transcript"] = 逐字稿內容
 
             # 將逐字稿存檔
-            transcript_path = REPORTS_DIR / f"{base_filename}_transcript.md"
-            transcript_path.write_text(transcript_text, encoding='utf-8')
-            output_files.append({
-                "type": "逐字稿",
-                "path": str(transcript_path)
-            })
+            transcript_path = REPORTS_DIR / f"{檔案基本名稱}_transcript.md"
+            transcript_path.write_text(逐字稿內容, encoding='utf-8')
+            輸出檔案列表.append({"type": "逐字稿", "path": str(transcript_path)})
             log.info(f"✅ 逐字稿已生成並儲存至 {transcript_path}")
 
         except Exception as e:
-            log.error(f"生成逐字稿時發生錯誤: {e}")
-            results["transcript_error"] = str(e)
+            log.error(f"生成逐字稿時發生錯誤: {e}", exc_info=True)
+            分析結果["transcript_error"] = str(e)
 
     # --- 任務二：生成摘要 (如果需要且已有逐字稿) ---
-    if "summary" in tasks and transcript_text:
+    if "summary" in tasks and 逐字稿內容:
         log.info("正在生成摘要...")
         try:
-            response = model.generate_content([PROMPTS["summary"], transcript_text])
-            summary_text = response.text
-            results["summary"] = summary_text
+            提示詞內容 = [PROMPTS["summary"], 逐字稿內容]
+            token_count_response = model.count_tokens(提示詞內容)
+            總計_tokens += token_count_response.total_tokens
 
-            # 將摘要存檔
-            summary_path = REPORTS_DIR / f"{base_filename}_summary.md"
-            summary_path.write_text(summary_text, encoding='utf-8')
-            output_files.append({
-                "type": "重點摘要",
-                "path": str(summary_path)
-            })
+            response = model.generate_content(提示詞內容)
+            摘要內容 = response.text
+
+            token_count_response = model.count_tokens(摘要內容)
+            總計_tokens += token_count_response.total_tokens
+            分析結果["summary"] = 摘要內容
+
+            summary_path = REPORTS_DIR / f"{檔案基本名稱}_summary.md"
+            summary_path.write_text(摘要內容, encoding='utf-8')
+            輸出檔案列表.append({"type": "重點摘要", "path": str(summary_path)})
             log.info(f"✅ 摘要已生成並儲存至 {summary_path}")
 
         except Exception as e:
-            log.error(f"生成摘要時發生錯誤: {e}")
-            results["summary_error"] = str(e)
+            log.error(f"生成摘要時發生錯誤: {e}", exc_info=True)
+            分析結果["summary_error"] = str(e)
 
     # --- 任務三：翻譯 (如果需要且已有逐字稿) ---
-    if "translate_zh" in tasks and transcript_text:
+    if "translate_zh" in tasks and 逐字稿內容:
         log.info("正在將逐字稿翻譯成繁體中文...")
         try:
-            prompt = PROMPTS["translate_zh"].format(transcript=transcript_text)
-            response = model.generate_content([prompt])
-            translated_text = response.text
-            results["translation_zh"] = translated_text
+            提示詞內容 = PROMPTS["translate_zh"].format(transcript=逐字稿內容)
+            token_count_response = model.count_tokens(提示詞內容)
+            總計_tokens += token_count_response.total_tokens
 
-            # 將翻譯結果存檔
-            translation_path = REPORTS_DIR / f"{base_filename}_translation_zh.md"
-            translation_path.write_text(translated_text, encoding='utf-8')
-            output_files.append({
-                "type": "中文翻譯",
-                "path": str(translation_path)
-            })
+            response = model.generate_content(提示詞內容)
+            翻譯內容 = response.text
+
+            token_count_response = model.count_tokens(翻譯內容)
+            總計_tokens += token_count_response.total_tokens
+            分析結果["translation_zh"] = 翻譯內容
+
+            translation_path = REPORTS_DIR / f"{檔案基本名稱}_translation_zh.md"
+            translation_path.write_text(翻譯內容, encoding='utf-8')
+            輸出檔案列表.append({"type": "中文翻譯", "path": str(translation_path)})
             log.info(f"✅ 翻譯已生成並儲存至 {translation_path}")
 
         except Exception as e:
-            log.error(f"翻譯時發生錯誤: {e}")
-            results["translation_error"] = str(e)
+            log.error(f"翻譯時發生錯誤: {e}", exc_info=True)
+            分析結果["translation_error"] = str(e)
 
+    # --- 總結與最終輸出 ---
+    結束時間 = time.time()
+    處理總耗時_秒 = round(結束時間 - 開始時間, 2)
+    log.info(f"✅ 所有任務完成，總耗時: {處理總耗時_秒} 秒，總 Token 數: {總計_tokens}")
 
-    # --- 最終結果輸出 ---
-    final_output = {
+    最終輸出 = {
         "status": "completed",
         "original_filename": file_path.name,
-        "results": results,
-        "output_files": output_files
+        "results": 分析結果,
+        "output_files": 輸出檔案列表,
+        "processing_time_seconds": 處理總耗時_秒,
+        "total_tokens": 總計_tokens
     }
 
-    print(json.dumps(final_output, ensure_ascii=False), flush=True)
+    print(json.dumps(最終輸出, ensure_ascii=False), flush=True)
 
 
 def main():

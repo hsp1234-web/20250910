@@ -45,7 +45,7 @@
             color: #fff;
             background-color: var(--secondary-btn-bg);
             border-radius: 5px;
-            transition: background-color 0.3s;
+            transition: background-color: 0.3s;
         }
         .home-button:hover { background-color: var(--secondary-btn-hover-bg); }
 
@@ -83,10 +83,32 @@
             color: #666;
             margin-bottom: 16px;
         }
+
+        /* --- 折疊內容的樣式 --- */
+        .details-toggle-btn {
+            background: none;
+            border: none;
+            color: var(--button-bg-color);
+            cursor: pointer;
+            padding: 4px 0;
+            margin-bottom: 12px;
+            font-size: 0.9em;
+        }
+        .details-toggle-btn:hover { text-decoration: underline; }
+        .report-card-details {
+            display: none; /* 預設隱藏 */
+            padding-left: 10px;
+            border-left: 2px solid #eee;
+            margin-top: 8px;
+        }
+        .report-card-details p { margin: 6px 0; }
+
         .report-card-footer {
             display: flex;
+            flex-wrap: wrap; /* 允許換行 */
             gap: 10px;
-            justify-content: flex-end;
+            justify-content: flex-start; /* 從左邊開始排 */
+            align-items: center;
             margin-top: auto;
         }
         .report-card-footer .action-btn {
@@ -98,6 +120,12 @@
             transition: all 0.2s;
             border: none;
             cursor: pointer;
+        }
+        .report-card-footer select {
+            padding: 8px;
+            border-radius: 6px;
+            border: 1px solid var(--card-border-color);
+            flex-grow: 1; /* 佔滿剩餘空間 */
         }
         .btn-preview { background-color: var(--button-bg-color); }
         .btn-preview:hover { background-color: var(--button-hover-bg-color); }
@@ -161,7 +189,19 @@
         .modal-body hr { border: none; border-top: 1px solid #eee; margin: 1em 0; }
 
         @media (max-width: 600px) {
-            .report-grid { grid-template-columns: 1fr; }
+            body { font-size: 90%; padding: 10px; } /* 調整基礎字體大小 */
+            .container { gap: 16px; }
+            .card { padding: 16px; }
+            h1 { font-size: 1.6em; }
+            .button-like {
+                font-size: 1em;
+                padding: 10px 18px;
+            }
+            .report-grid { grid-template-columns: 1fr; gap: 16px; }
+            .report-card { padding: 16px; }
+            .report-card-header { font-size: 1.0em; }
+            .report-card-footer { flex-direction: column; align-items: stretch; } /* 手機上讓按鈕垂直排列 */
+            .report-card-footer .action-btn, .report-card-footer select { width: 100%; box-sizing: border-box; text-align: center;}
         }
     </style>
 </head>
@@ -206,7 +246,7 @@
             const modalCloseBtn = document.getElementById('modal-close-btn');
 
             /**
-             * 從後端 API 獲取報告列表並更新 UI。
+             * 從後端 API 獲取詳細的報告列表並更新 UI。
              */
             async function loadReports() {
                 try {
@@ -215,18 +255,19 @@
                         throw new Error(`伺服器錯誤: ${response.status}`);
                     }
                     const data = await response.json();
-                    const reports = data.reports; // 從 'reports' 鍵中提取陣列
+                    const reports = data.reports;
 
                     if (!reports || reports.length === 0) {
                         noReportsMessage.textContent = '目前尚無已完成的報告。';
+                        reportGrid.innerHTML = ''; // 確保清空
                         return;
                     }
 
                     noReportsMessage.style.display = 'none';
-                    reportGrid.innerHTML = ''; // 清空現有內容
+                    reportGrid.innerHTML = '';
 
                     reports.forEach(report => {
-                        const card = createReportCard(report);
+                        const card = createDetailedReportCard(report);
                         reportGrid.appendChild(card);
                     });
 
@@ -234,45 +275,104 @@
                     console.error('載入報告列表失敗:', error);
                     noReportsMessage.textContent = `❌ 載入報告失敗: ${error.message}`;
                     noReportsMessage.style.color = 'red';
+                    noReportsMessage.style.display = 'block';
                 }
             }
 
             /**
-             * 根據報告資料建立一個 HTML 卡片元素。
-             * @param {object} report - 報告物件 (包含 name, path, modified_time, size)。
+             * 根據詳細的報告資料建立一個 HTML 卡片元素。
+             * @param {object} report - 詳細報告物件。
              * @returns {HTMLElement} 建立的卡片 div 元素。
              */
-            function createReportCard(report) {
+            function createDetailedReportCard(report) {
                 const card = document.createElement('div');
                 card.className = 'report-card';
 
-                const modifiedDate = new Date(report.modified_time).toLocaleString('zh-TW', { hour12: false });
-                const fileSizeKB = (report.size / 1024).toFixed(2);
+                const creationDate = new Date(report.creationDate).toLocaleString('zh-TW', { hour12: false });
+
+                // 動態生成檔案選項 HTML
+                let fileOptionsHtml = '';
+                if (report.outputFiles && report.outputFiles.length > 0) {
+                    report.outputFiles.forEach(file => {
+                        const webPath = `/${file.path}`;
+                        fileOptionsHtml += `<option value="${webPath}" data-name="${file.name}">${file.type}</option>`;
+                    });
+                }
 
                 card.innerHTML = `
-                    <div class="report-card-header" title="${report.name}">${report.name}</div>
+                    <div class="report-card-header" title="${report.reportTitle}">${report.reportTitle}</div>
                     <div class="report-card-body">
-                        <p><strong>修改時間:</strong> ${modifiedDate}</p>
-                        <p><strong>檔案大小:</strong> ${fileSizeKB} KB</p>
+                        <button class="details-toggle-btn">顯示詳細資訊</button>
+                        <div class="report-card-details">
+                            <p title="${report.sourceFilename}"><strong>來源:</strong> ${report.sourceFilename}</p>
+                            <p><strong>模型:</strong> ${report.modelUsed}</p>
+                            <p><strong>處理時間:</strong> ${report.processingTime} 秒</p>
+                            <p><strong>消耗 Tokens:</strong> ${report.totalTokens}</p>
+                            <p><strong>建立時間:</strong> ${creationDate}</p>
+                        </div>
                     </div>
                     <div class="report-card-footer">
-                        <a href="${report.path}" class="action-btn btn-download" download>下載</a>
-                        <button class="action-btn btn-preview" data-path="${report.path}" data-name="${report.name}">預覽</button>
+                        <select class="file-selector" ${!fileOptionsHtml ? 'disabled' : ''}>
+                            ${fileOptionsHtml || '<option>無可用檔案</option>'}
+                        </select>
+                        <button class="action-btn btn-preview" ${!fileOptionsHtml ? 'disabled' : ''}>▶️ 預覽</button>
+                        <a href="#" class="action-btn btn-download" download ${!fileOptionsHtml ? 'disabled' : ''} style="background-color: var(--warning-color); color: var(--text-color);">📥 下載</a>
                     </div>
                 `;
 
-                // 為預覽按鈕添加事件監聽器
+                const detailsContainer = card.querySelector('.report-card-details');
+                const toggleBtn = card.querySelector('.details-toggle-btn');
+                const fileSelector = card.querySelector('.file-selector');
                 const previewBtn = card.querySelector('.btn-preview');
-                previewBtn.addEventListener('click', () => {
-                    openPreviewModal(report.path, report.name);
+                const downloadLink = card.querySelector('.btn-download');
+
+                // 折疊/展開功能
+                toggleBtn.addEventListener('click', () => {
+                    const isHidden = detailsContainer.style.display === 'none' || detailsContainer.style.display === '';
+                    detailsContainer.style.display = isHidden ? 'block' : 'none';
+                    toggleBtn.textContent = isHidden ? '隱藏詳細資訊' : '顯示詳細資訊';
                 });
+
+                // 更新下載連結的函式
+                const updateDownloadLink = () => {
+                    if (fileSelector.value) {
+                        const selectedOption = fileSelector.options[fileSelector.selectedIndex];
+                        downloadLink.href = fileSelector.value;
+                        downloadLink.download = selectedOption.dataset.name;
+                        previewBtn.disabled = false;
+                        downloadLink.removeAttribute('disabled');
+                        downloadLink.style.pointerEvents = 'auto';
+                        downloadLink.style.opacity = '1';
+
+                    } else {
+                        previewBtn.disabled = true;
+                        downloadLink.setAttribute('disabled', 'true');
+                        downloadLink.style.pointerEvents = 'none';
+                        downloadLink.style.opacity = '0.6';
+                    }
+                };
+
+                // 預覽按鈕事件
+                previewBtn.addEventListener('click', () => {
+                    if (fileSelector.value) {
+                        const selectedOption = fileSelector.options[fileSelector.selectedIndex];
+                        openPreviewModal(fileSelector.value, selectedOption.dataset.name);
+                    }
+                });
+
+                // 下拉選單變更事件
+                fileSelector.addEventListener('change', updateDownloadLink);
+
+                // 初始化
+                updateDownloadLink();
 
                 return card;
             }
 
+
             /**
              * 開啟預覽彈窗並顯示 Markdown 檔案內容。
-             * @param {string} path - 報告檔案的路徑。
+             * @param {string} path - 報告檔案的 Web 可存取路徑。
              * @param {string} name - 報告檔案的名稱。
              */
             async function openPreviewModal(path, name) {
@@ -281,6 +381,7 @@
                 previewModal.style.display = 'flex';
 
                 try {
+                    // 直接使用 web path 進行 fetch
                     const response = await fetch(path);
                     if (!response.ok) {
                         throw new Error(`無法擷取檔案: ${response.statusText}`);
@@ -306,7 +407,6 @@
 
             // --- 事件監聽器 ---
             modalCloseBtn.addEventListener('click', closePreviewModal);
-            // 點擊彈窗外部區域也可關閉
             previewModal.addEventListener('click', (e) => {
                 if (e.target === previewModal) {
                     closePreviewModal();
