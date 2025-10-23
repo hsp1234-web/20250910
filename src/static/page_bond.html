@@ -36,39 +36,21 @@
 
         <div class="panel">
             <h2>控制面板</h2>
-            <p>手動觸發特定指標的資料更新。</p>
-            <button id="btn-fetch-gdp">更新GDP數據</button>
-            <button id="btn-fetch-cpi">更新CPI數據</button>
-            <button id="btn-fetch-fedfunds">更新利率數據</button>
-            <button id="btn-fetch-ism" disabled title="資料來源待尋">更新ISM數據 (暫停)</button>
+            <p>請選擇您想分析的日期範圍，然後點擊按鈕以生成完整的壓力指標報告。</p>
+
+            <label for="start-date">開始日期:</label>
+            <input type="date" id="start-date" name="start-date">
+
+            <label for="end-date">結束日期:</label>
+            <input type="date" id="end-date" name="end-date">
+
+            <button id="btn-generate-report">產生報告</button>
+
             <div id="update-status" style="margin-top: 10px;"></div>
         </div>
 
-        <div class="dashboard-grid">
-            <div class="panel">
-                <h2>美國實質GDP (季)</h2>
-                <div class="chart-container">
-                    <img id="gdp-chart-img" src="" alt="點擊上方按鈕以生成圖表" />
-                </div>
-            </div>
-            <div class="panel">
-                <h2>美國CPI年增率</h2>
-                <div class="chart-container">
-                    <img id="cpi-chart-img" src="" alt="點擊上方按鈕以生成圖表" />
-                </div>
-            </div>
-            <div class="panel">
-                <h2>聯準會基準利率</h2>
-                <div class="chart-container">
-                    <img id="fedfunds-chart-img" src="" alt="點擊上方按鈕以生成圖表" />
-                </div>
-            </div>
-            <div class="panel">
-                <h2>美國ISM製造業PMI</h2>
-                <div class="chart-container">
-                    <img id="ism-chart-img" src="" alt="點擊上方按鈕以生成圖表" />
-                </div>
-            </div>
+        <div id="charts-container" class="dashboard-grid">
+            <!-- 圖表將由 JavaScript 動態載入此處 -->
         </div>
     </div>
 
