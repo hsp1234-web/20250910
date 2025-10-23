@@ -25,9 +25,11 @@ async def periodic_data_updater(service: StressIndexService):
 
     while True:
         try:
-            logger.info("背景任務 (v2.1)：呼叫服務層檢查更新...")
+            logger.info("背景任務 (v2.1)：自動更新功能已根據使用者指示暫停。")
+            # 根據使用者指示，暫時停用自動資料獲取以加速啟動
             # 服務層現在會返回需要廣播的數據，或 None
-            update_payload = service.check_for_updates()
+            # update_payload = service.check_for_updates()
+            update_payload = None # 強制設為 None
 
             if update_payload:
                 logger.info(f"背景任務：從服務層收到更新 payload，準備交由 API 層廣播。")
