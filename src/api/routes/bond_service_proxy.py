@@ -173,3 +173,39 @@ async def proxy_dashboard_data(request: Request):
     except Exception as e:
         # 處理代理伺服器自身的問題
         raise HTTPException(status_code=500, detail=f"代理儀表板數據請求時發生內部錯誤: {e}")
+
+@router.post("/trigger_update")
+async def proxy_trigger_update(request: Request):
+    """
+    代理對 bond_data_service 的資料更新觸發請求 (POST)。
+    這是修復流程的核心，它將前端的觸發請求轉發到後端資料服務。
+    """
+    try:
+        base_url = await get_bond_service_url()
+        target_url = f"{base_url}/api/trigger_update"
+
+        # 獲取前端發來的 JSON 內容
+        request_body = await request.json()
+
+        async with httpx.AsyncClient() as client:
+            # 將 POST 請求連同 JSON 內容一起轉發
+            # 設定一個較長的超時時間，因為這一步可能涉及大量的網路抓取
+            response = await client.post(target_url, json=request_body, timeout=120.0)
+
+            # 將下游服務的回應直接回傳給前端
+            return Response(
+                content=response.content,
+                status_code=response.status_code,
+                headers=dict(response.headers)
+            )
+
+    except httpx.HTTPStatusError as e:
+        try:
+            detail = e.response.json().get('detail', e.response.text)
+        except json.JSONDecodeError:
+            detail = e.response.text
+        raise HTTPException(status_code=e.response.status_code, detail=f"債券資料服務(觸發更新)錯誤: {detail}")
+    except httpx.RequestError as e:
+        raise HTTPException(status_code=502, detail=f"無法連線至債券資料服務(觸發更新): {e}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"代理觸發更新請求時發生內部錯誤: {e}")

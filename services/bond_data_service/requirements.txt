@@ -11,3 +11,5 @@ httpx
 plotly
 kaleido
 cachetools
+scipy
+lxml

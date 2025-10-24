@@ -3,7 +3,7 @@
 import logging
 import pandas as pd
 import numpy as np
-from datetime import datetime
+from datetime import datetime, date
 from typing import Optional, List
 import asyncio
 import json
@@ -11,6 +11,7 @@ from asyncio import Queue
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import Response, JSONResponse, StreamingResponse, FileResponse
+from pydantic import BaseModel, Field
 
 # 匯入新的服務層
 from .service import StressIndexService
@@ -51,6 +52,12 @@ async def sse_data_generator(request: Request):
         sse_connections.remove(queue)
         logger.info(f"一個連線關閉，剩餘 {len(sse_connections)} 個連線。")
 
+# --- Pydantic 模型 ---
+class DateRangeRequest(BaseModel):
+    """定義觸發更新請求的資料結構。"""
+    start_date: date = Field(..., description="資料期間的開始日期 (YYYY-MM-DD)")
+    end_date: date = Field(..., description="資料期間的結束日期 (YYYY-MM-DD)")
+
 # --- API 端點 (已重構為呼叫服務層) ---
 
 def _ensure_service() -> StressIndexService:
@@ -87,18 +94,47 @@ async def fetch_data_endpoint(indicator: str):
         logger.error(f"API 層在處理抓取請求 '{indicator}' 時出錯: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"處理 '{indicator}' 時發生內部錯誤。")
 
-@router.get("/api/bond_service/dashboard_data", summary="獲取儀表板整合數據")
+@router.post("/api/trigger_update", summary="觸發資料更新與計算")
+async def trigger_update(request: DateRangeRequest):
+    """
+    接收使用者指定的日期範圍，觸發後端進行資料抓取和計算。
+    這是一個阻塞式操作，旨在由使用者手動啟動。
+    """
+    svc = _ensure_service()
+    try:
+        start_str = request.start_date.strftime('%Y-%m-%d')
+        end_str = request.end_date.strftime('%Y-%m-%d')
+
+        logger.info(f"API 層：收到使用者觸發的更新請求，範圍: {start_str} 至 {end_str}。")
+        # 核心邏輯：呼叫服務層執行潛在的耗時操作
+        # 這會將獲取的數據自動存入 repository 的快取中
+        svc.calculate_full_metrics(start_str, end_str)
+        logger.info("API 層：資料更新與計算任務已成功完成。")
+
+        return {"status": "ok", "message": "資料更新與計算已成功觸發並完成。"}
+    except Exception as e:
+        logger.error(f"API 層在處理觸發更新請求時發生錯誤: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"處理更新請求時發生內部錯誤: {str(e)}")
+
+@router.get("/api/bond_service/dashboard_data", summary="獲取儀表板整合數據 (僅快取)")
 async def get_dashboard_data(start_date: Optional[str] = None, end_date: Optional[str] = None):
+    """
+    修改後的版本：此端點現在只會從快取中讀取數據。
+    它不再觸發任何網路抓取或耗時的計算。
+    """
     svc = _ensure_service()
     if not end_date:
         end_date = datetime.now().strftime('%Y-%m-%d')
     if not start_date:
         start_date = (datetime.now() - pd.DateOffset(years=5)).strftime('%Y-%m-%d')
 
+    # 核心修改：呼叫相同的函式，但現在我們依賴它從快取中快速返回數據
+    # 注意：service 層的快取鍵是基於 start_date 和 end_date 的
     full_metrics_df = svc.calculate_full_metrics(start_date, end_date)
 
     if full_metrics_df is None or full_metrics_df.empty:
-        return []
+        logger.warning(f"儀表板數據請求：在範圍 {start_date} 至 {end_date} 的快取中未找到數據。")
+        return [] # 快取未命中，直接返回空
 
     dashboard_cols = [
         'sofr', 'sofr_ma60', 'dealer_stress_index', 'macd_line', 'macd_signal_line',
@@ -106,10 +142,14 @@ async def get_dashboard_data(start_date: Optional[str] = None, end_date: Optiona
         'dealer_net_positions', 'dealer_long_term_positions', 'dealer_short_term_positions'
     ]
     cols_to_use = [col for col in dashboard_cols if col in full_metrics_df.columns]
+    if not cols_to_use:
+        return []
 
     chart_df = full_metrics_df[cols_to_use]
     df_serializable = chart_df.reset_index().replace({pd.NaT: None, np.nan: None})
     df_serializable['date'] = pd.to_datetime(df_serializable['date']).dt.strftime('%Y-%m-%d')
+
+    logger.info(f"儀表板數據請求：成功從快取中讀取並返回 {len(df_serializable)} 筆數據。")
     return json.loads(df_serializable.to_json(orient='records'))
 
 @router.get("/charts/stream-updates", summary="建立 SSE 連線以接收即時更新")
@@ -144,12 +184,13 @@ async def get_chart_data_for_dynamic_render(
         if not start_date:
             start_date = (datetime.now() - pd.DateOffset(years=5)).strftime('%Y-%m-%d')
 
-        logger.info(f"API 層：為動態圖表 '{chart_id}' 請求數據，範圍: {start_date} 至 {end_date}...")
+        logger.info(f"API 層：為動態圖表 '{chart_id}' 從快取請求數據，範圍: {start_date} 至 {end_date}...")
+        # 核心修改：同樣依賴此函式從快取中快速返回數據
         full_metrics_df = svc.calculate_full_metrics(start_date, end_date)
 
         if full_metrics_df is None or full_metrics_df.empty:
-            logger.warning(f"為 '{chart_id}' 計算指標時未返回數據。")
-            return JSONResponse(content={"error": "No data available for the selected range."}, status_code=404)
+            logger.warning(f"為 '{chart_id}' 請求的數據在快取中未找到。")
+            return JSONResponse(content={"error": "快取中無可用數據。請先觸發資料更新。"}, status_code=404)
 
         # 根據 chart_id 決定需要哪些數據列
         required_cols = {

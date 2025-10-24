@@ -1,84 +1,138 @@
 // src/static/js/page_bond.js
 
 document.addEventListener('DOMContentLoaded', () => {
-    console.log("簡化版債券分析頁面腳本已載入 (v2 - 金鑰檢查)。");
+    console.log("債券分析儀表板腳本已載入 (v3 - 宣告式觸發)。");
 
-    const indicators = ['gdp', 'cpi', 'fedfunds', 'ism'];
+    // --- DOM 元素 ---
+    const startDateInput = document.getElementById('start-date');
+    const endDateInput = document.getElementById('end-date');
+    const generateBtn = document.getElementById('btn-generate-report');
     const statusDiv = document.getElementById('update-status');
+    const chartsContainer = document.getElementById('charts-container');
 
-    async function checkFredKeyAndInitialize() {
-        try {
-            const response = await fetch('/api/key_status/fred');
-            if (!response.ok) {
-                throw new Error(`伺服器回應錯誤: ${response.status}`);
-            }
-            const keyStatus = await response.json();
+    // --- 初始化 ---
+    function initialize() {
+        // 設定預設日期 (例如，過去一年)
+        const today = new Date();
+        const oneYearAgo = new Date();
+        oneYearAgo.setFullYear(today.getFullYear() - 1);
 
-            if (keyStatus.available) {
-                console.log("✅ FRED API 金鑰可用，正在啟用圖表功能。");
-                statusDiv.textContent = "FRED API 金鑰已就緒，請選擇一個指標以生成圖表。";
-                initializeButtons(true); // 啟用按鈕
-            } else {
-                console.warn("FRED API 金鑰不可用，圖表功能將被禁用。");
-                statusDiv.textContent = "❌ 後端 FRED API 金鑰尚未設定，圖表功能已禁用。";
-                initializeButtons(false); // 禁用按鈕
-            }
-        } catch (error) {
-            console.error("檢查 FRED 金鑰狀態時發生錯誤:", error);
-            statusDiv.textContent = "❌ 無法檢查金鑰狀態，圖表功能已禁用。請檢查網路連線或後端服務。";
-            initializeButtons(false); // 發生錯誤時也禁用按鈕
-        }
+        endDateInput.value = today.toISOString().split('T')[0];
+        startDateInput.value = oneYearAgo.toISOString().split('T')[0];
+
+        // 綁定事件
+        generateBtn.addEventListener('click', handleGenerateReport);
     }
 
-    function initializeButtons(enabled) {
-        indicators.forEach(id => {
-            const button = document.getElementById(`btn-fetch-${id}`);
-            if (button) {
-                // 無論如何，'ism' 按鈕目前都是禁用的
-                if (id === 'ism') {
-                    button.disabled = true;
-                    return;
-                }
+    // --- 主要邏輯 ---
+    async function handleGenerateReport() {
+        const startDate = startDateInput.value;
+        const endDate = endDateInput.value;
 
-                button.disabled = !enabled;
-                if (enabled) {
-                    button.addEventListener('click', () => updateChart(id));
-                }
-            }
-        });
-    }
-
-    function updateChart(indicatorId) {
-        const imgElement = document.getElementById(`${indicatorId}-chart-img`);
-        if (!imgElement) {
-            console.error(`找不到 ID 為 ${indicatorId}-chart-img 的圖片元素。`);
+        if (!startDate || !endDate) {
+            updateStatus("請選擇開始和結束日期。", true);
             return;
         }
 
-        console.log(`正在為 ${indicatorId} 更新圖表...`);
-        statusDiv.textContent = `正在為 ${indicatorId.toUpperCase()} 生成圖表，請稍候...`;
+        // --- 步驟 1: 禁用按鈕並顯示載入狀態 ---
+        setLoadingState(true, "步驟 1/3: 正在請求後端更新資料，此過程可能需要一些時間...");
+        chartsContainer.innerHTML = ''; // 清空舊圖表
 
-        const apiUrl = `/api/bond_service/chart/${indicatorId}`;
-        const finalUrl = `${apiUrl}?t=${new Date().getTime()}`;
+        try {
+            // --- 步驟 2: 觸發後端資料更新 (POST 請求) ---
+            const triggerResponse = await fetch('/api/bond_service/trigger_update', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ start_date: startDate, end_date: endDate })
+            });
 
-        imgElement.src = "";
-        imgElement.alt = "圖表載入中...";
+            if (!triggerResponse.ok) {
+                const errorData = await triggerResponse.json();
+                throw new Error(`後端資料更新失敗: ${errorData.detail || triggerResponse.statusText}`);
+            }
 
-        imgElement.onload = () => {
-            console.log(`${indicatorId} 圖表載入成功。`);
-            statusDiv.textContent = `✅ ${indicatorId.toUpperCase()} 圖表已更新。`;
-            imgElement.alt = `指標 ${indicatorId} 的圖表`;
-        };
+            updateStatus("步驟 2/3: 後端資料已更新，正在抓取圖表數據...");
 
-        imgElement.onerror = () => {
-            console.error(`${indicatorId} 圖表載入失敗。`);
-            statusDiv.textContent = `❌ ${indicatorId.toUpperCase()} 圖表載入失敗。請檢查後端服務日誌。`;
-            imgElement.alt = "圖表載入失敗。";
-        };
+            // --- 步驟 3: 獲取儀表板數據 (GET 請求) ---
+            const dataResponse = await fetch(`/api/bond_service/dashboard_data?start_date=${startDate}&end_date=${endDate}`);
 
-        imgElement.src = finalUrl;
+            if (!dataResponse.ok) {
+                throw new Error("無法獲取儀表板數據。");
+            }
+
+            const data = await dataResponse.json();
+
+            if (data.length === 0) {
+                updateStatus("成功，但在選定範圍內無可用數據可供顯示。", false);
+            } else {
+                updateStatus("步驟 3/3: 數據獲取成功，正在渲染圖表...", false);
+                renderCharts(data); // 假設我們將實現一個渲染函式
+                updateStatus("✅ 報告已成功生成！", false);
+            }
+
+        } catch (error) {
+            console.error("生成報告時發生錯誤:", error);
+            updateStatus(`❌ 發生錯誤: ${error.message}`, true);
+        } finally {
+            // --- 步驟 4: 重設 UI 狀態 ---
+            setLoadingState(false);
+        }
     }
 
-    // 啟動頁面初始化流程
-    checkFredKeyAndInitialize();
+    // --- UI輔助函式 ---
+    function setLoadingState(isLoading, message = "") {
+        generateBtn.disabled = isLoading;
+        if (isLoading) {
+            statusDiv.className = 'status-loading';
+            statusDiv.textContent = message;
+        }
+    }
+
+    function updateStatus(message, isError = false) {
+        statusDiv.textContent = message;
+        statusDiv.className = isError ? 'status-error' : 'status-success';
+    }
+
+    // --- 渲染邏輯 (簡易版) ---
+    // 在真實應用中，這裡會使用像 Chart.js 或 D3.js 這樣的函式庫
+    // 為了簡單起見，我們只顯示數據摘要
+    function renderCharts(data) {
+        chartsContainer.innerHTML = ''; // 再次清空以防萬一
+
+        // 我們可以定義想要顯示的關鍵指標
+        const keyMetrics = {
+            'dealer_stress_index': '交易商壓力指數',
+            'vix': 'VIX 波動率指數',
+            'spread_10y2y': '10年期與2年期公債利差',
+            'us_high_yield_spread': '美國高收益債券利差',
+            'dealer_net_positions': '交易商淨部位'
+        };
+
+        for (const [metric, title] of Object.entries(keyMetrics)) {
+            const latestDataPoint = data[data.length - 1];
+            if (latestDataPoint && latestDataPoint[metric] !== null) {
+                const panel = document.createElement('div');
+                panel.className = 'panel';
+
+                const chartTitle = document.createElement('h2');
+                chartTitle.textContent = title;
+
+                const valueDisplay = document.createElement('p');
+                valueDisplay.style.fontSize = '2em';
+                valueDisplay.textContent = parseFloat(latestDataPoint[metric]).toFixed(2);
+
+                const dateDisplay = document.createElement('p');
+                dateDisplay.textContent = `最新日期: ${latestDataPoint.date}`;
+
+                panel.appendChild(chartTitle);
+                panel.appendChild(valueDisplay);
+                panel.appendChild(dateDisplay);
+
+                chartsContainer.appendChild(panel);
+            }
+        }
+    }
+
+    // --- 啟動應用 ---
+    initialize();
 });
