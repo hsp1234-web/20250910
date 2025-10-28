@@ -4,6 +4,7 @@ import logging
 from typing import List, Dict, Optional
 import sys
 from pathlib import Path
+import asyncio
 
 # --- 路徑修正 ---
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -11,6 +12,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 # --- 專案模組匯入 ---
 from src.db.client import DBClient
+from .line_workflow_logic import _run_line_item_processing_task, run_task_wrapper
 
 # --- 日誌設定 ---
 log = logging.getLogger(__name__)
@@ -115,9 +117,10 @@ def parse_chat_log(text: str) -> List[Dict[str, Optional[str]]]:
     return results
 
 
-def save_parsed_data_to_db(parsed_data: List[Dict], source_text: str) -> List[Dict]:
+def save_parsed_data_to_db(parsed_data: List[Dict], source_text: str, request, background_tasks) -> List[Dict]:
     """
-    [V4] 將解析後的資料存入資料庫，並查詢存入的詳細資訊後回傳。
+    [V2 改造]
+    將解析後的資料存入資料庫，然後為每一個新項目啟動一個背景處理工作流。
     """
     if not parsed_data:
         log.info("沒有要儲存的資料。")
@@ -148,11 +151,38 @@ def save_parsed_data_to_db(parsed_data: List[Dict], source_text: str) -> List[Di
             log.info(f"正在查詢剛存入的 {len(url_list)} 筆資料的詳細資訊...")
             inserted_items_details = db_client.get_urls_by_url_list(url_list)
             log.info(f"成功查詢到 {len(inserted_items_details)} 筆詳細資訊。")
+
+            # --- [V2 改造] 觸發背景工作流 ---
+            semaphore = request.app.state.processing_semaphore
+            queue = request.app.state.notification_queue
+            loop = asyncio.get_running_loop()
+
+            if not semaphore or not queue:
+                log.error("無法從 app.state 中獲取信號量或佇列，無法啟動背景任務。")
+                return inserted_items_details # 仍然回傳已存入的項目
+
+            log.info(f"準備為 {len(inserted_items_details)} 個新項目啟動背景處理工作流...")
+            for item in inserted_items_details:
+                item_id = item.get('id')
+                if not item_id:
+                    continue
+
+                background_tasks.add_task(
+                    run_task_wrapper,
+                    task_id=item_id,
+                    semaphore=semaphore,
+                    blocking_func=_run_line_item_processing_task,
+                    queue=queue,
+                    loop=loop,
+                    db_client=db_client
+                )
+
+            log.info("✅ 所有背景任務已成功加入佇列。")
             return inserted_items_details
         else:
             log.info("沒有新增任何資料（可能均為重複項）。")
             return []
 
     except Exception as e:
-        log.error(f"呼叫 DBClient 時發生嚴重錯誤: {e}", exc_info=True)
+        log.error(f"呼叫 DBClient 或啟動背景任務時發生嚴重錯誤: {e}", exc_info=True)
         return []
