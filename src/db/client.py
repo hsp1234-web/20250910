@@ -164,9 +164,9 @@ class DBClient:
         """(V4 優化新增) 新增 URL 紀錄，並進行去重。"""
         return self._send_request("add_new_urls", {"parsed_data": parsed_data, "source_text": source_text})
 
-    def get_filtered_urls(self, start_date: str = None, end_date: str = None) -> list[dict]:
-        """(V4 優化新增) 根據日期範圍獲取 URL 紀錄。"""
-        return self._send_request("get_filtered_urls", {"start_date": start_date, "end_date": end_date})
+    def get_filtered_urls(self, start_date: str = None, end_date: str = None, source: str = None) -> list[dict]:
+        """(V4 優化新增) 根據日期範圍和來源獲取 URL 紀錄。"""
+        return self._send_request("get_filtered_urls", {"start_date": start_date, "end_date": end_date, "source": source})
 
     def get_urls_by_url_list(self, url_list: list[str]) -> list[dict]:
         """

@@ -139,6 +139,7 @@ def initialize_database(conn: sqlite3.Connection = None):
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 url TEXT NOT NULL,
                 source_text TEXT,
+                source TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 status TEXT DEFAULT 'pending',
                 status_message TEXT,
@@ -225,6 +226,7 @@ def initialize_database(conn: sqlite3.Connection = None):
                 "message_date": "TEXT",
                 "message_time": "TEXT",
                 "source_text": "TEXT",
+                "source": "TEXT",
                 "status": "TEXT DEFAULT 'pending'",
                 "local_path": "TEXT",
                 "extracted_text": "TEXT",
@@ -992,7 +994,7 @@ def add_new_urls(parsed_data: list[dict], source_text: str) -> int:
         created_at_iso = get_current_taipei_time_iso()
 
         data_to_insert = [
-            (item['url'], item['author'], item['date'], item['time'], item.get('title', '無標題'), source_text, created_at_iso)
+            (item['url'], item['author'], item['date'], item['time'], item.get('title', '無標題'), source_text, created_at_iso, item.get('source'))
             for item in parsed_data
         ]
 
@@ -1004,7 +1006,7 @@ def add_new_urls(parsed_data: list[dict], source_text: str) -> int:
 
             # 使用 INSERT OR IGNORE，如果 URL 已存在，資料庫會自動忽略該筆，不會報錯
             cursor.executemany(
-                "INSERT OR IGNORE INTO extracted_urls (url, author, message_date, message_time, title, source_text, created_at, status) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')",
+                "INSERT OR IGNORE INTO extracted_urls (url, author, message_date, message_time, title, source_text, created_at, source, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending')",
                 data_to_insert
             )
 

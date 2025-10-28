@@ -338,7 +338,7 @@
 
                 // 階段四: 完全就緒
                 logAction('readiness-stage2-fully-ready');
-                showStatusMessage('✅ 系統已完全就緒，所有功能可用！', true, 5000);
+                showStatusMessage('✅ 系統已完全就緒，所有功能可用！', false, 5000);
                 document.querySelectorAll('button, a.button').forEach(btn => {
                     if (!btn.closest('.top-nav')) btn.disabled = false;
                 });
