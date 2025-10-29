@@ -1,7 +1,7 @@
 // src/static/js/primary_dealer_analysis.js
 
 document.addEventListener('DOMContentLoaded', () => {
-    console.log("儀表板動態載入腳本 V5.0 已啟動 (整合互動圖表)。");
+    console.log("儀表板動態載入腳本 V6.0 已啟動 (採用非同步輪詢架構)。");
 
     // --- 元素選擇器 ---
     const startDateInput = document.getElementById('start-date');
@@ -14,9 +14,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const modalCloseBtn = document.getElementById('modal-close-btn');
 
     // --- 全域變數 ---
-    let fullData = {}; // 用於儲存從後端獲取的完整數據，供互動圖表使用
+    let fullData = {}; // 用於儲存從後端獲取的完整數據
 
-    // 中文標題的對應表
     const titleMapping = {
         "sofr": "SOFR (擔保隔夜融資利率)", "stress_index": "綜合壓力指數", "vix": "VIX (恐慌指數)",
         "us_bond_2y_10y_spread": "美債2年與10年利差", "us_high_yield_spread": "高收益債利差",
@@ -25,81 +24,78 @@ document.addEventListener('DOMContentLoaded', () => {
         "dealer_net_position_ranking": "各類部位最新淨值排名", "dealer_position_change_ranking": "各類部位最新變動排名",
         "ofr_fci": "OFR 金融壓力指數"
     };
-
     const indicators = Array.from(document.querySelectorAll('.panel[data-indicator-id]')).map(panel => panel.dataset.indicatorId);
 
-    async function checkServiceHealth() {
-        try {
-            const response = await fetch('/api/bond_service/health');
-            return response.ok;
-        } catch (error) {
-            console.warn("健康檢查請求失敗，服務可能尚未就緒。");
-            return false;
-        }
-    }
+    // --- 新的非同步資料載入流程 ---
 
-    async function checkKeyAndLoadCharts() {
-        console.log("✅ 後端服務已就緒！正在檢查 FRED API 金鑰...");
-
-        // 檢查 FRED API 金鑰狀態
-        try {
-            const keyResponse = await fetch('/api/key_status/fred');
-            if (!keyResponse.ok) {
-                throw new Error(`伺服器錯誤: ${keyResponse.status}`);
-            }
-
-            const keyStatus = await keyResponse.json();
-
-            if (keyStatus.available) {
-                console.log("✅ FRED API 金鑰已就緒，開始載入圖表。");
-                loadAllCharts();
-            } else {
-                const message = "後端尚未設定 FRED API 金鑰，圖表功能無法使用。";
-                console.warn(message);
-                indicators.forEach(id => {
-                    document.getElementById(`chart-container-${id}`).innerHTML = `<div class="placeholder" style="color: #d63031;">${message}</div>`;
-                });
-            }
-        } catch (error) {
-            console.error("檢查 FRED API 金鑰狀態時發生網路錯誤:", error);
-            const message = "網路錯誤，無法檢查 FRED 金鑰狀態。";
-            indicators.forEach(id => {
-                document.getElementById(`chart-container-${id}`).innerHTML = `<div class="placeholder" style="color: #d63031;">${message}</div>`;
-            });
-        }
-    }
-
-    function waitForServiceReady() {
-        // 顯示載入提示
+    function setPlaceholderMessage(message, color = '#888') {
         indicators.forEach(id => {
             const container = document.getElementById(`chart-container-${id}`);
-            if (container) container.innerHTML = '<div class="placeholder">正在等待後端服務啟動...</div>';
-        });
-
-        // 使用輪詢來探測後端服務
-        const intervalId = setInterval(async () => {
-            console.log("正在探測後端服務狀態...");
-            if (await checkServiceHealth()) {
-                clearInterval(intervalId);
-                checkKeyAndLoadCharts(); // 服務就緒後，交由下一步處理
-            } else {
-                console.log("...後端服務尚未就緒，將在 2 秒後重試。");
+            if (container) {
+                container.innerHTML = `<div class="placeholder" style="color: ${color};">${message}</div>`;
             }
-        }, 2000);
+        });
     }
 
-    async function loadAllCharts() {
-        const startDate = startDateInput.value, endDate = endDateInput.value;
-        if (!startDate || !endDate) { alert("請確保已選擇開始和結束日期。"); return; }
-        console.log(`啟動獨立圖表載入程序...`);
-        fullData = {}; // 重設數據
+    async function loadChartsOrPoll() {
+        const startDate = startDateInput.value;
+        const endDate = endDateInput.value;
+        if (!startDate || !endDate) {
+            alert("請確保已選擇開始和結束日期。");
+            return;
+        }
 
-        const allPanels = Array.from(document.querySelectorAll('.panel[data-indicator-id]'));
-        allPanels.forEach(panel => {
-            panel.style.height = 'auto';
-            const container = panel.querySelector('.chart-container');
-            if (container) container.innerHTML = '<div class="placeholder">圖表載入中...</div>';
-        });
+        // 禁用按鈕防止重複點擊
+        updateBtn.disabled = true;
+        setPlaceholderMessage("正在初始化分析...");
+
+        // 1. 先檢查服務健康狀態
+        try {
+            const healthResponse = await fetch('/api/bond_service/health');
+            if (!healthResponse.ok) {
+                setPlaceholderMessage("後端分析服務目前無法連線，請稍後再試。", "#d63031");
+                updateBtn.disabled = false;
+                return;
+            }
+        } catch (e) {
+            setPlaceholderMessage("網路錯誤，無法連線至後端分析服務。", "#d63031");
+            updateBtn.disabled = false;
+            return;
+        }
+
+        // 2. 嘗試獲取一個代表性指標的數據來探測資料是否就緒
+        const probeIndicator = 'stress_index';
+        const probeApiUrl = `/api/bond_service/data/${probeIndicator}?start_date=${startDate}&end_date=${endDate}`;
+
+        try {
+            const response = await fetch(probeApiUrl);
+
+            if (response.status === 200) {
+                // 資料已就緒，開始全面載入所有圖表
+                console.log("資料已在快取中就緒，開始載入所有圖表。");
+                setPlaceholderMessage("圖表載入中...");
+                await fetchAllChartsData(startDate, endDate);
+            } else if (response.status === 202) {
+                // 資料正在準備中，顯示提示並在 5 秒後重試
+                console.log("後端正在準備數據，5 秒後將自動重試...");
+                const data = await response.json();
+                setPlaceholderMessage(data.message || "正在從外部來源獲取最新數據，請稍候...");
+                setTimeout(loadChartsOrPoll, 5000); // 5秒後重試
+            } else {
+                // 處理其他錯誤
+                const errorData = await response.json().catch(() => ({}));
+                throw new Error(errorData.detail || `伺服器返回未預期的狀態: ${response.status}`);
+            }
+        } catch (error) {
+            console.error("探測資料狀態時發生錯誤:", error);
+            setPlaceholderMessage(`載入失敗：${error.message}`, "#d63031");
+            updateBtn.disabled = false;
+        }
+    }
+
+    async function fetchAllChartsData(startDate, endDate) {
+        console.log(`啟動所有圖表的併發載入程序...`);
+        fullData = {}; // 重設數據
 
         const chartLoadPromises = indicators.map(indicatorId => (async () => {
             const apiUrl = `/api/bond_service/data/${indicatorId}?start_date=${startDate}&end_date=${endDate}`;
@@ -107,9 +103,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 const response = await fetch(apiUrl);
                 if (!response.ok) throw new Error((await response.json().catch(() => ({}))).detail || `請求失敗: ${response.statusText}`);
                 const chartData = await response.json();
-                if (!chartData || chartData.length === 0) throw new Error('後端未返回任何數據');
-
-                fullData[indicatorId] = chartData; // 儲存數據
+                if (!chartData || chartData.length === 0) {
+                     // 允許某些圖表沒有數據（例如排名），不視為錯誤
+                    console.warn(`指標 '${indicatorId}' 沒有返回數據。`);
+                    return; //
+                }
+                fullData[indicatorId] = chartData;
                 await plotChartFromData(indicatorId, chartData);
             } catch (error) {
                 console.error(`載入圖表 ${indicatorId} 發生錯誤:`, error);
@@ -122,13 +121,15 @@ document.addEventListener('DOMContentLoaded', () => {
         await Promise.allSettled(chartLoadPromises);
         console.log("所有圖表載入流程已完成。");
         alignAllCharts();
+        updateBtn.disabled = false; // 重新啟用按鈕
     }
 
+    // --- 以下為圖表繪製和頁面互動邏輯 (與之前版本基本相同) ---
     async function plotChartFromData(indicatorId, data) {
         const container = document.getElementById(`chart-container-${indicatorId}`);
         try {
             const plotFunction = getPlotFunction(indicatorId);
-            await plotFunction(container, data, indicatorId, false); // false for isInteractive
+            await plotFunction(container, data, indicatorId, false);
             const dataUrl = await Plotly.toImage(container, { format: 'png', width: container.offsetWidth, height: container.offsetHeight, scale: 2 });
             const img = document.createElement('img');
             img.src = dataUrl;
@@ -149,7 +150,7 @@ document.addEventListener('DOMContentLoaded', () => {
         modal.style.display = 'flex';
         setTimeout(() => {
             const plotFunction = getPlotFunction(indicatorId);
-            plotFunction(modalChartContainer, fullData[indicatorId], indicatorId, true) // true for isInteractive
+            plotFunction(modalChartContainer, fullData[indicatorId], indicatorId, true)
                 .catch(err => {
                     console.error("繪製互動圖表時出錯:", err);
                     modalChartContainer.innerHTML = `<div class="placeholder" style="color:red;">互動圖表繪製失敗</div>`;
@@ -175,8 +176,6 @@ document.addEventListener('DOMContentLoaded', () => {
         return plotMapping[indicatorId] || plotSimpleLineChart;
     }
 
-    // --- 通用繪圖函式 (全中文化) ---
-    // 主要修改：增加 isInteractive 參數以控制 staticPlot
     function plotSimpleLineChart(container, data, indicatorId, isInteractive) {
         const chartTitle = titleMapping[indicatorId] || "圖表";
         const yAxisTitleMapping = {
@@ -266,12 +265,11 @@ document.addEventListener('DOMContentLoaded', () => {
     function setDefaultDates() {
         endDateInput.value = new Date().toISOString().split('T')[0];
         startDateInput.value = "2020-01-01";
-        console.log(`已設定預設日期範圍: ${startDateInput.value} 至 ${endDateInput.value}`);
     }
 
     // --- 初始化與事件綁定 ---
     if (updateBtn) {
-        updateBtn.addEventListener('click', waitForServiceReady);
+        updateBtn.addEventListener('click', loadChartsOrPoll);
     } else {
         console.error("找不到分析按鈕元素。");
     }
