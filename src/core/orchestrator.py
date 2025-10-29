@@ -39,6 +39,8 @@ db_client = None
 
 # --- V6.0 微服務架構變數 ---
 SERVICE_REGISTRY_FILE = Path("/tmp/service_registry.json")
+# 新增一個執行緒鎖，以確保對註冊檔案的寫入是同步的
+service_registry_lock = threading.Lock()
 
 # --- V5.5 啟動優化: 新增全域就緒信號 ---
 full_readiness_event = threading.Event()
@@ -194,6 +196,7 @@ def start_all_microservices():
     core_services = []
     delayed_services = []
     for path in service_paths:
+        # 新架構：bond_fetcher_service 是核心服務，bond_data_service 依賴它，可以延遲啟動
         if path.name == "bond_data_service":
             delayed_services.append(path)
         else:
@@ -215,9 +218,27 @@ def start_all_microservices():
         time.sleep(15)
         for service_path in delayed_services:
             try:
-                # 注意：這裡的 launch_microservice 會將 process 加入全域列表
-                launch_microservice(service_path)
-                # 我們不需要更新註冊表，因為它在啟動時已經被處理了
+                service_name, port, process = launch_microservice(service_path)
+                processes.append(process)
+
+                # --- 核心修復：更新服務註冊表 ---
+                with service_registry_lock:
+                    log.info(f"[{service_name}] 正在更新服務註冊表...")
+                    # 讀取現有的註冊表
+                    if SERVICE_REGISTRY_FILE.exists():
+                        with open(SERVICE_REGISTRY_FILE, 'r') as f:
+                            registry = json.load(f)
+                    else:
+                        registry = {}
+
+                    # 新增或更新延遲啟動的服務資訊
+                    registry[service_name] = {"port": port, "status": "running"}
+
+                    # 寫回更新後的註冊表
+                    with open(SERVICE_REGISTRY_FILE, 'w') as f:
+                        json.dump(registry, f, indent=2)
+                    log.info(f"[{service_name}] ✅ 服務註冊表已更新。")
+
             except Exception as e:
                 log.error(f"[延遲啟動] 啟動服務 {service_path.name} 失敗: {e}", exc_info=True)
 
