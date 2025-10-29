@@ -238,6 +238,7 @@ def initialize_database(conn: sqlite3.Connection = None):
                 "status_extraction": "TEXT DEFAULT 'pending'",
                 "status_ocr": "TEXT DEFAULT 'not_applicable'", # 預設為不適用
                 "status_ai_summary": "TEXT DEFAULT 'pending'",
+                "ai_summary": "TEXT", # (Jules @ 2025-10-28) 新增 AI 摘要欄位
                 # --- 舊有狀態欄位，保留作為備用或總體狀態 ---
                 "ocr_status": "TEXT DEFAULT 'pending'",
                 "ai_status": "TEXT DEFAULT 'pending'"

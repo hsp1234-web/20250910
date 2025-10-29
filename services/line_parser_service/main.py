@@ -1,10 +1,11 @@
 # services/line_parser_service/main.py
 import uvicorn
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request, BackgroundTasks
 from pydantic import BaseModel
 import logging
 from contextlib import asynccontextmanager
 from typing import List, Dict, Any, Optional
+import asyncio
 
 # --- 核心邏輯模組匯入 ---
 from .logic import parse_chat_log, save_parsed_data_to_db
@@ -17,8 +18,16 @@ log = logging.getLogger('line_parser_service_main')
 # --- 應用程式生命週期事件 ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """在應用程式啟動時執行的生命週期事件。"""
+    """
+    在應用程式啟動時執行的生命週期事件。
+    [V2 改造]: 新增信號量與通知佇列，以支援背景工作流。
+    """
     log.info("「LINE 解析服務」啟動中...")
+    # 建立一個信號量，限制併發的背景處理任務數量為 5
+    app.state.processing_semaphore = asyncio.Semaphore(5)
+    # 建立一個非同步佇列，用於從背景任務向主應用程式發送通知
+    app.state.notification_queue = asyncio.Queue()
+    log.info("✅ 背景任務基礎設施 (信號量, 佇列) 初始化完成。")
     log.info("✅ 服務已就緒，可以開始接收請求。")
     yield
     log.info("「LINE 解析服務」正在關閉。")
@@ -57,28 +66,36 @@ class ProcessLocalDocumentRequest(BaseModel):
 
 # 端點 1: /ingest (現有功能)
 @app.post("/ingest", response_model=IngestResponse, tags=["聊天紀錄解析"])
-async def ingest_text(request: IngestRequest):
+async def ingest_text(request: Request, payload: IngestRequest, background_tasks: BackgroundTasks):
     """
-    接收文字，解析後存入資料庫，並回傳新增的項目列表。
+    [V2 改造]: 增加 BackgroundTasks 支援。
+    接收文字，解析後存入資料庫，為每個新項目啟動一個背景處理工作流，並立即回傳。
     """
     log.info("接收到 /ingest 請求。")
-    if not request.text or not request.text.strip():
+    if not payload.text or not payload.text.strip():
         log.warning("請求的文字內容為空。")
         raise HTTPException(status_code=400, detail="文字內容不可為空。")
 
     try:
         log.info("開始解析文字...")
-        parsed_data = parse_chat_log(request.text)
+        parsed_data = parse_chat_log(payload.text)
         if not parsed_data:
             log.info("從文字中未解析出任何有效資料。")
             return IngestResponse(message="未解析出有效資料。", inserted_count=0, inserted_items=[])
 
-        log.info(f"解析出 {len(parsed_data)} 筆資料，準備存入資料庫...")
-        inserted_items = save_parsed_data_to_db(parsed_data, source_text=request.text)
+        log.info(f"解析出 {len(parsed_data)} 筆資料，準備存入資料庫並啟動背景工作流...")
+
+        # [V2 改造]: 將 request 和 background_tasks 傳遞下去
+        inserted_items = save_parsed_data_to_db(
+            parsed_data=parsed_data,
+            source_text=payload.text,
+            request=request,
+            background_tasks=background_tasks
+        )
         inserted_count = len(inserted_items)
 
         return IngestResponse(
-            message=f"處理完成，成功新增 {inserted_count} 筆資料。",
+            message=f"處理完成，已為 {inserted_count} 筆新資料啟動背景處理任務。",
             inserted_count=inserted_count,
             inserted_items=inserted_items
         )

@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LINE 資料處理器</title>
+    <link rel="stylesheet" href="/static/css/nav.css">
+    <link rel="stylesheet" href="/static/css/common.css">
+    <link rel="stylesheet" href="/static/css/page3_refactored.css">
+</head>
+<body>
+    <nav class="top-nav">
+        <ul>
+            <li><a href="/">鳳凰主頁</a></li>
+            <li><a href="/line_importer">LINE 內容整理</a></li>
+        </ul>
+    </nav>
+
+    <div class="content page3-container">
+        <div class="panel">
+            <nav class="tab-nav">
+                <a href="/line_importer">資料擷取與處理</a>
+                <a href="/line_workflow_editor">工作流編輯器</a>
+                <a href="/line_data_processor" class="active">手動處理器</a>
+                <a href="/line_data_viewer">資料檢視器</a>
+            </nav>
+            <h1>LINE 資料手動處理器</h1>
+            <p>此頁面會列出所有從 LINE 匯入，但尚未提取文字內容的項目。您可以手動選取並啟動處理程序。</p>
+        </div>
+
+        <!-- Panel 1: 待處理檔案 -->
+        <div class="panel">
+            <h2>待提取文字的項目</h2>
+            <div class="action-bar">
+                <div class="action-group">
+                    <button id="select-all-pending-button">全選</button>
+                    <button id="deselect-all-pending-button">取消全選</button>
+                </div>
+                <div class="action-group">
+                    <button id="process-button" class="primary-action">⚙️ 開始提取選中項目</button>
+                </div>
+            </div>
+
+            <div id="pending-cards-container" class="card-grid">
+                <p>正在載入待處理的項目...</p>
+            </div>
+        </div>
+
+        <!-- Panel 2: 狀態日誌 -->
+        <div class="panel">
+            <div class="panel-header">
+                <h2>狀態日誌</h2>
+                <button id="copy-log-button" class="copy-button" title="複製日誌">📄</button>
+            </div>
+            <div id="status-area"></div>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const pendingCardsContainer = document.getElementById('pending-cards-container');
+            const selectAllPendingBtn = document.getElementById('select-all-pending-button');
+            const deselectAllPendingBtn = document.getElementById('deselect-all-pending-button');
+            const processButton = document.getElementById('process-button');
+            const statusArea = document.getElementById('status-area');
+            const copyLogButton = document.getElementById('copy-log-button');
+
+            const logStatus = (message, color = 'black') => {
+                const timestamp = new Date().toLocaleTimeString('zh-TW', { hour12: false });
+                statusArea.insertAdjacentHTML('afterbegin', `<p style="color: ${color};">[${timestamp}] ${message}</p>`);
+            };
+
+            const escapeHtml = (unsafe) => {
+                if (unsafe === null || typeof unsafe === 'undefined') return '';
+                return unsafe.toString().replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+            }
+
+            const getStatusHTML = (status) => {
+                const statusMap = {
+                    'pending': '⏳ 等待提取',
+                    'processing': '⚙️ 提取中...',
+                };
+                const statusText = statusMap[status] || status || '未知';
+                const statusClass = status || 'pending';
+                return `<span class="status-badge status-${statusClass}">${statusText}</span>`;
+            };
+
+            const fetchAndRenderPendingItems = async () => {
+                try {
+                    const response = await fetch('/api/line_data/pending_extraction');
+                    if (!response.ok) throw new Error(`伺服器錯誤 (狀態 ${response.status})`);
+                    const items = await response.json();
+
+                    pendingCardsContainer.innerHTML = '';
+                    if (items.length === 0) {
+                        pendingCardsContainer.innerHTML = '<p>目前沒有待處理的項目。</p>';
+                        processButton.disabled = true;
+                        return;
+                    }
+
+                    items.forEach(item => {
+                        const card = document.createElement('div');
+                        card.className = 'file-card status-pending';
+                        card.dataset.id = item.id;
+
+                        const author = item.author || 'N/A';
+                        const messageDate = item.message_date ? new Date(item.message_date).toLocaleString('zh-TW', { hour12: false, year: 'numeric', month: '2-digit', day: '2-digit' }) : 'N/A';
+                        const urlLink = item.url ? `<a href="${escapeHtml(item.url)}" target="_blank" title="${escapeHtml(item.url)}">${escapeHtml(item.url)}</a>` : '無';
+
+                        card.innerHTML = `
+                            <div class="card-header">
+                                <input type="checkbox" class="pending-checkbox" value="${item.id}">
+                                <h3 class="filename">ID: ${item.id}</h3>
+                            </div>
+                            <div class="card-body">
+                                <div class="info-grid">
+                                    <div class="info-item"><strong>狀態:</strong> ${getStatusHTML(item.status_extraction)}</div>
+                                    <div class="info-item"><strong>標題:</strong> <span class="filename-text" title="${escapeHtml(item.title || '無標題')}">${escapeHtml(item.title || '無標題')}</span></div>
+                                    <div class="info-item"><strong>作者:</strong> ${escapeHtml(author)}</div>
+                                    <div class="info-item"><strong>時間:</strong> ${escapeHtml(messageDate)}</div>
+                                    <div class="info-item"><strong>連結:</strong> ${urlLink}</div>
+                                </div>
+                            </div>
+                        `;
+                        pendingCardsContainer.appendChild(card);
+                    });
+                    processButton.disabled = false;
+                } catch (error) {
+                    pendingCardsContainer.innerHTML = `<p style="color: red;">載入待處理項目失敗：${error.message}</p>`;
+                }
+            };
+
+            processButton.addEventListener('click', async () => {
+                const selectedIds = Array.from(document.querySelectorAll('.pending-checkbox:checked')).map(cb => parseInt(cb.value));
+                if (selectedIds.length === 0) {
+                    alert('請至少選擇一個要處理的項目。');
+                    return;
+                }
+                logStatus(`正在發送 ${selectedIds.length} 個項目的提取請求...`);
+                try {
+                    const response = await fetch('/api/line_data/start_extraction', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({ ids: selectedIds })
+                    });
+                    const result = await response.json();
+                    if (!response.ok) throw new Error(result.detail || '啟動提取時發生未知錯誤。');
+                    logStatus(result.message, 'green');
+
+                    selectedIds.forEach(id => {
+                        const card = pendingCardsContainer.querySelector(`.file-card[data-id='${id}']`);
+                        if (card) {
+                            const statusDiv = card.querySelector('.info-item > strong:first-child').parentElement;
+                            if (statusDiv) statusDiv.innerHTML = `<strong>狀態:</strong> ${getStatusHTML('processing')}`;
+                            const checkbox = card.querySelector('.pending-checkbox');
+                            if(checkbox) checkbox.disabled = true;
+                        }
+                    });
+
+                } catch (error) {
+                    logStatus(`請求失敗：${error.message}`, 'red');
+                }
+            });
+
+            // WebSocket 可以在未來加入，以實現處理完成後自動刷新
+            // const setupWebSocket = () => { ... };
+
+            selectAllPendingBtn.addEventListener('click', () => document.querySelectorAll('.pending-checkbox').forEach(cb => cb.checked = true));
+            deselectAllPendingBtn.addEventListener('click', () => document.querySelectorAll('.pending-checkbox').forEach(cb => cb.checked = false));
+            copyLogButton.addEventListener('click', () => navigator.clipboard.writeText(statusArea.innerText));
+
+            fetchAndRenderPendingItems();
+            // setupWebSocket();
+        });
+    </script>
+</body>
+</html>

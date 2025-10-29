@@ -98,13 +98,20 @@ class WorkflowEngine:
                     has_failures = True
                     # (Jules @ 2025-10-14) 關鍵修改：不再拋出例外，而是繼續執行迴圈
 
-            # 4. 根據執行結果，設定最終的工作流狀態
-            if has_failures:
-                final_status = 'completed_with_errors'
-                log.warning(f"工作流 {workflow_id} 執行完畢，但包含失敗的步驟。")
-            else:
+            # 4. 重新讀取所有步驟的最終狀態，以決定工作流的最終狀態
+            # (Jules @ 2025-10-28) 修正：此處的邏輯必須檢查所有步驟的狀態，而不僅僅是 `has_failures` 標記。
+            # 舊的邏輯會將含有 `pending` 步驟的工作流錯誤地標記為 `completed`。
+            final_steps = self.db.get_workflow_steps(workflow_id)
+            all_steps_completed = all(step['status'] == 'completed' for step in final_steps)
+
+            if all_steps_completed:
                 final_status = 'completed'
                 log.info(f"工作流 {workflow_id} 中的所有步驟均已成功執行。")
+            else:
+                final_status = 'completed_with_errors'
+                step_statuses = [step['status'] for step in final_steps]
+                log.warning(f"工作流 {workflow_id} 執行完畢，但包含未完成或失敗的步驟。最終狀態列表: {step_statuses}")
+
             self.db.update_workflow_status(workflow_id, final_status)
 
         except Exception as e:

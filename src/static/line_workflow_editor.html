@@ -118,6 +118,7 @@
             <nav class="tab-nav">
                 <a href="/line_importer">資料擷取與處理</a>
                 <a href="/line_workflow_editor" class="active">工作流編輯器</a>
+                <a href="/line_data_processor">手動處理器</a>
                 <a href="/line_data_viewer">資料檢視器</a>
             </nav>
             <div class="workflow-header">
@@ -321,6 +322,7 @@
 
             const loadLatestWorkflow = async () => {
                 try {
+                    // 原有邏輯：獲取最新的工作流基本資訊
                     const response = await fetch(`/api/workflows/latest`);
                     if (!response.ok) {
                         if (response.status === 404) {
@@ -330,12 +332,39 @@
                     }
 
                     const data = await response.json();
-                    const { workflow, steps } = data;
+                    const { workflow, steps: originalSteps } = data; // 將 'steps' 重新命名以避免混淆
 
                     workflowId = workflow.id;
                     workflowNameTitleEl.textContent = workflow.name;
                     workflowInfoEl.textContent = `工作流 #${workflow.id} | 總體狀態: ${workflow.status}`;
-                    stepsContainerEl.innerHTML = steps.map(step => renderStep(step, null)).join('');
+
+                    // --- JULES @ 2025-10-28: 錯誤修復 ---
+                    // 新增的關鍵邏輯：在頁面載入時，主動獲取並顯示每個項目的精細化生命週期狀態。
+                    // 這解決了重新整理頁面後，只顯示上次「執行」的籠統狀態（如 "completed"），
+                    // 而無法看到項目實際的子任務狀態（如 "AI摘要: 待處理"）的問題。
+                    try {
+                        const detailedStatusResponse = await fetch(`/api/workflows/${workflowId}/line_status`);
+                        if (detailedStatusResponse.ok) {
+                            const detailedData = await detailedStatusResponse.json();
+                            const detailedStatusMap = new Map(detailedData.steps.map(s => [s.step_id, s]));
+
+                            // 使用詳細狀態來渲染，如果找不到對應的詳細狀態，則退回使用原始步驟資訊
+                            stepsContainerEl.innerHTML = originalSteps.map(step => {
+                                const detailedStatus = detailedStatusMap.get(step.id);
+                                return renderStep(step, detailedStatus);
+                            }).join('');
+
+                        } else {
+                            // 如果無法獲取詳細狀態，則 gracefully fallback 到原有的渲染方式
+                            console.warn(`無法獲取工作流 ${workflowId} 的詳細狀態，將僅顯示基本資訊。`);
+                            stepsContainerEl.innerHTML = originalSteps.map(step => renderStep(step, null)).join('');
+                        }
+                    } catch (detailError) {
+                        console.error("獲取詳細工作流狀態時發生錯誤:", detailError);
+                        // 發生網路錯誤等問題時，同樣退回到僅顯示基本資訊的模式
+                        stepsContainerEl.innerHTML = originalSteps.map(step => renderStep(step, null)).join('');
+                    }
+                    // --- 錯誤修復結束 ---
 
                     const isTerminal = terminalStates.includes(workflow.status);
                     updateUIForTerminalState(isTerminal);
