@@ -1,204 +1,68 @@
-# poc/bond_data_service_v2/api_routes.py
-
+# services/bond_data_service/api_routes.py
 import logging
 import pandas as pd
 import numpy as np
-from datetime import datetime, date
-from typing import Optional, List
-import asyncio
-import json
-from asyncio import Queue
+from datetime import datetime
+from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Query, Request
-from fastapi.responses import Response, JSONResponse, StreamingResponse, FileResponse
-from pydantic import BaseModel, Field
+from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import JSONResponse
 
-# 匯入新的服務層
 from .service import StressIndexService
 
 # --- 依賴注入 ---
-# 這個 service 實例將在 main.py 的 lifespan 中被賦值。
-# 這使得 API 層與服務層的具體實現解耦。
 service: Optional[StressIndexService] = None
-
-# --- API 層狀態 ---
-# SSE 連線列表是純粹的 API 層狀態，應保留在此。
-sse_connections: List[Queue] = []
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-# --- Server-Sent Events (SSE) ---
-
-async def broadcast_update(data: dict):
-    """將更新廣播給所有已連接的 SSE 客戶端。"""
-    message = f"data: {json.dumps(data)}\n\n"
-    logger.info(f"API 層：準備廣播更新，目前有 {len(sse_connections)} 個連線。")
-    for queue in sse_connections:
-        await queue.put(message)
-
-async def sse_data_generator(request: Request):
-    """為每個客戶端管理一個 SSE 連線和數據佇列。"""
-    queue = Queue()
-    sse_connections.append(queue)
-    logger.info(f"新客戶端連接，目前共 {len(sse_connections)} 個連線。")
-    try:
-        while True:
-            if await request.is_disconnected():
-                break
-            message = await queue.get()
-            yield message
-    finally:
-        sse_connections.remove(queue)
-        logger.info(f"一個連線關閉，剩餘 {len(sse_connections)} 個連線。")
-
-# --- Pydantic 模型 ---
-class DateRangeRequest(BaseModel):
-    """定義觸發更新請求的資料結構。"""
-    start_date: date = Field(..., description="資料期間的開始日期 (YYYY-MM-DD)")
-    end_date: date = Field(..., description="資料期間的結束日期 (YYYY-MM-DD)")
-
-# --- API 端點 (已重構為呼叫服務層) ---
-
+# --- 輔助函式 ---
 def _ensure_service() -> StressIndexService:
-    """確保服務已被初始化，並返回它。"""
+    """確保服務已被初始化。"""
     if service is None:
-        # 這通常不應該發生，因為 lifespan 會先於請求處理
         raise HTTPException(status_code=503, detail="服務尚未完全初始化。")
     return service
 
+# --- API 端點 ---
 @router.get("/health", summary="服務健康狀態檢查")
 async def health_check():
-    return {"status": "ok", "message": "債券資料服務 (v2) 已就緒。"}
+    """提供一個簡單、快速的健康檢查端點。"""
+    return {"status": "ok", "message": "債券資料分析服務已就緒。"}
 
-@router.get("/api/key_status", summary="檢查 FRED API 金鑰狀態")
-async def get_key_status():
-    """檢查 FRED API 金鑰是否已透過環境變數設定。"""
-    svc = _ensure_service()
-    if svc.repository.check_api_key_status():
-        return {"status": "ok", "message": "FRED API 金鑰已就緒。"}
-    else:
-        return JSONResponse(
-            status_code=404,
-            content={"status": "error", "message": "尚未設定 FRED API 金鑰。"}
-        )
-
-@router.post("/fetch/{indicator}", summary="手動觸發資料抓取")
-async def fetch_data_endpoint(indicator: str):
-    """手動觸發特定指標的資料抓取與儲存。"""
-    svc = _ensure_service()
-    try:
-        count = svc.repository.get_series(indicator, "1900-01-01", datetime.now().strftime('%Y-%m-%d'), force_refresh=True)
-        return {"indicator": indicator, "message": f"成功為 '{indicator}' 抓取並儲存了 {len(count) if count is not None else 0} 筆數據。"}
-    except Exception as e:
-        logger.error(f"API 層在處理抓取請求 '{indicator}' 時出錯: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"處理 '{indicator}' 時發生內部錯誤。")
-
-@router.post("/api/trigger_update", summary="觸發資料更新與計算")
-async def trigger_update(request: DateRangeRequest):
-    """
-    接收使用者指定的日期範圍，觸發後端進行資料抓取和計算。
-    這是一個阻塞式操作，旨在由使用者手動啟動。
-    """
-    svc = _ensure_service()
-    try:
-        start_str = request.start_date.strftime('%Y-%m-%d')
-        end_str = request.end_date.strftime('%Y-%m-%d')
-
-        logger.info(f"API 層：收到使用者觸發的更新請求，範圍: {start_str} 至 {end_str}。")
-        # 核心邏輯：呼叫服務層執行潛在的耗時操作
-        # 這會將獲取的數據自動存入 repository 的快取中
-        svc.calculate_full_metrics(start_str, end_str)
-        logger.info("API 層：資料更新與計算任務已成功完成。")
-
-        return {"status": "ok", "message": "資料更新與計算已成功觸發並完成。"}
-    except Exception as e:
-        logger.error(f"API 層在處理觸發更新請求時發生錯誤: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"處理更新請求時發生內部錯誤: {str(e)}")
-
-@router.get("/api/bond_service/dashboard_data", summary="獲取儀表板整合數據 (僅快取)")
-async def get_dashboard_data(start_date: Optional[str] = None, end_date: Optional[str] = None):
-    """
-    修改後的版本：此端點現在只會從快取中讀取數據。
-    它不再觸發任何網路抓取或耗時的計算。
-    """
-    svc = _ensure_service()
-    if not end_date:
-        end_date = datetime.now().strftime('%Y-%m-%d')
-    if not start_date:
-        start_date = (datetime.now() - pd.DateOffset(years=5)).strftime('%Y-%m-%d')
-
-    # 核心修改：呼叫相同的函式，但現在我們依賴它從快取中快速返回數據
-    # 注意：service 層的快取鍵是基於 start_date 和 end_date 的
-    full_metrics_df = svc.calculate_full_metrics(start_date, end_date)
-
-    if full_metrics_df is None or full_metrics_df.empty:
-        logger.warning(f"儀表板數據請求：在範圍 {start_date} 至 {end_date} 的快取中未找到數據。")
-        return [] # 快取未命中，直接返回空
-
-    dashboard_cols = [
-        'sofr', 'sofr_ma60', 'dealer_stress_index', 'macd_line', 'macd_signal_line',
-        'macd_hist', 'vix', 'spread_10y2y', 'us_high_yield_spread',
-        'dealer_net_positions', 'dealer_long_term_positions', 'dealer_short_term_positions'
-    ]
-    cols_to_use = [col for col in dashboard_cols if col in full_metrics_df.columns]
-    if not cols_to_use:
-        return []
-
-    chart_df = full_metrics_df[cols_to_use]
-    df_serializable = chart_df.reset_index().replace({pd.NaT: None, np.nan: None})
-    df_serializable['date'] = pd.to_datetime(df_serializable['date']).dt.strftime('%Y-%m-%d')
-
-    logger.info(f"儀表板數據請求：成功從快取中讀取並返回 {len(df_serializable)} 筆數據。")
-    return json.loads(df_serializable.to_json(orient='records'))
-
-@router.get("/charts/stream-updates", summary="建立 SSE 連線以接收即時更新")
-async def stream_updates(request: Request):
-    return StreamingResponse(sse_data_generator(request), media_type="text/event-stream")
-
-# 靜態頁面路由
-@router.get("/primary_dealer_analysis", response_class=FileResponse, include_in_schema=False)
-async def get_primary_dealer_analysis_page():
-    # 依賴於一個相對於專案根目錄的固定路徑
-    return "src/static/primary_dealer_analysis.html"
-
-@router.get("/interactive_chart", response_class=FileResponse, include_in_schema=False)
-async def get_interactive_chart_page():
-    return "src/static/interactive_chart.html"
-
-
-@router.get("/data/{chart_id}", summary="獲取用於動態渲染的圖表數據")
-async def get_chart_data_for_dynamic_render(
+@router.get("/data/{chart_id}", summary="獲取圖表所需的 JSON 數據")
+async def get_chart_data(
     chart_id: str,
-    start_date: Optional[str] = Query(None, description="數據開始日期 (YYYY-MM-DD)"),
-    end_date: Optional[str] = Query(None, description="數據結束日期 (YYYY-MM-DD)")
+    start_date: str = Query(..., description="數據開始日期 (YYYY-MM-DD)"),
+    end_date: str = Query(..., description="數據結束日期 (YYYY-MM-DD)")
 ):
     """
-    為所有圖表提供統一的 JSON 數據源，以便在客戶端進行動態渲染。
-    這是 V2 服務中恢復儀表板功能的關鍵端點。
+    為前端圖表提供統一的 JSON 數據源。
+    此端點現在是非阻塞的。如果數據尚未快取，它會觸發背景抓取並返回 202 狀態。
     """
     svc = _ensure_service()
     try:
-        if not end_date:
-            end_date = datetime.now().strftime('%Y-%m-%d')
-        if not start_date:
-            start_date = (datetime.now() - pd.DateOffset(years=5)).strftime('%Y-%m-%d')
+        logger.info(f"API 層：收到圖表 '{chart_id}' 的數據請求...")
 
-        logger.info(f"API 層：為動態圖表 '{chart_id}' 從快取請求數據，範圍: {start_date} 至 {end_date}...")
-        # 核心修改：同樣依賴此函式從快取中快速返回數據
-        full_metrics_df = svc.calculate_full_metrics(start_date, end_date)
+        # 1. 呼叫異步服務層獲取數據和就緒狀態
+        full_metrics_df, data_ready = await svc.calculate_full_metrics(start_date, end_date)
 
+        # 2. 處理資料尚未就緒的情況
+        if not data_ready:
+            logger.info(f"為 '{chart_id}' 請求的數據正在背景抓取中。")
+            return JSONResponse(
+                status_code=202, # Accepted
+                content={"status": "processing", "message": "數據正在準備中，請稍後重試。"}
+            )
+
+        # 3. 處理服務層返回空數據的情況（在資料就緒後）
         if full_metrics_df is None or full_metrics_df.empty:
-            logger.warning(f"為 '{chart_id}' 請求的數據在快取中未找到。")
-            return JSONResponse(content={"error": "快取中無可用數據。請先觸發資料更新。"}, status_code=404)
+            logger.warning(f"為 '{chart_id}' 請求的數據就緒，但結果為空。")
+            return JSONResponse(content=[], status_code=200)
 
-        # 根據 chart_id 決定需要哪些數據列
+        # 4. 根據 chart_id 篩選並格式化數據 (與舊邏輯相同)
         required_cols = {
-            "sofr": ['sofr', 'sofr_ma60'],
-            "ofr_fci": ['dealer_stress_index'],
-            "vix": ['vix'],
-            "us_bond_2y_10y_spread": ['spread_10y2y'],
-            "us_high_yield_spread": ['us_high_yield_spread'],
+            "sofr": ['sofr', 'sofr_ma60'], "ofr_fci": ['dealer_stress_index'], "vix": ['vix'],
+            "us_bond_2y_10y_spread": ['spread_10y2y'], "us_high_yield_spread": ['us_high_yield_spread'],
             "stress_index": ['dealer_stress_index'],
             "stress_index_macd": ['dealer_stress_index', 'macd_line', 'macd_signal_line', 'macd_hist'],
             "dealer_net_positions": ['dealer_net_positions'],
@@ -208,30 +72,21 @@ async def get_chart_data_for_dynamic_render(
             "dealer_position_change_ranking": ['dealer_net_positions', 'dealer_long_term_positions', 'dealer_short_term_positions'],
         }.get(chart_id, [chart_id])
 
-        # 篩選出實際存在的欄位
         cols_to_use = [col for col in required_cols if col in full_metrics_df.columns]
         if not cols_to_use:
-            logger.warning(f"請求的圖表 '{chart_id}' 所需的欄位在數據中不存在。")
-            return JSONResponse(content={"error": f"Data columns for chart '{chart_id}' not found."}, status_code=404)
+            return JSONResponse(content=[], status_code=200)
 
-        # 將日期索引也加入，以便後續轉換
-        cols_to_use_with_date = list(set(cols_to_use + ['date']))
-
-        # 重置索引，讓 'date' 成為一欄
-        df_serializable = full_metrics_df.reset_index()
-        df_serializable = df_serializable.rename(columns={'index': 'date'})
+        df_serializable = full_metrics_df.reset_index().rename(columns={'index': 'date'})
         df_serializable['date'] = pd.to_datetime(df_serializable['date']).dt.strftime('%Y-%m-%d')
 
-        # 篩選最終需要的欄位
-        final_cols = [col for col in cols_to_use_with_date if col in df_serializable.columns]
+        final_cols = ['date'] + [col for col in cols_to_use if col in df_serializable.columns]
         chart_df = df_serializable[final_cols]
 
-        # 轉換為 JSON
         json_payload = chart_df.replace({pd.NaT: None, np.nan: None}).to_dict(orient='records')
 
         logger.info(f"成功為 '{chart_id}' 生成 {len(json_payload)} 筆數據。")
         return JSONResponse(content=json_payload)
 
     except Exception as e:
-        logger.error(f"為動態圖表 '{chart_id}' 生成數據時發生錯誤: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"為圖表 '{chart_id}' 處理請求時發生內部錯誤: {str(e)}")
+        logger.error(f"為圖表 '{chart_id}' 生成數據時發生嚴重錯誤: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"處理圖表 '{chart_id}' 的請求時發生內部錯誤。")

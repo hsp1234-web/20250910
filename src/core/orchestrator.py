@@ -194,6 +194,7 @@ def start_all_microservices():
     core_services = []
     delayed_services = []
     for path in service_paths:
+        # 新架構：bond_fetcher_service 是核心服務，bond_data_service 依賴它，可以延遲啟動
         if path.name == "bond_data_service":
             delayed_services.append(path)
         else:
