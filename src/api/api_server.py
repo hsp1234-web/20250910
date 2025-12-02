@@ -345,11 +345,11 @@ def convert_to_media_url(absolute_path_str: str) -> str:
 
 @app.get("/", response_class=HTMLResponse)
 async def serve_main_page(request: Request):
-    """根端點，提供專案的中心主頁 (main.html)。"""
-    html_file_path = STATIC_DIR / "main.html"
+    """根端點，現在提供 YouTube 下載頁面 (mp3.html) 作為主頁。"""
+    html_file_path = STATIC_DIR / "mp3.html"
     if not html_file_path.is_file():
         log.error(f"找不到主頁檔案: {html_file_path}")
-        raise HTTPException(status_code=404, detail="找不到主頁檔案 (main.html)")
+        raise HTTPException(status_code=404, detail="找不到主頁檔案 (mp3.html)")
     return HTMLResponse(content=html_file_path.read_text(encoding="utf-8"), status_code=200)
 
 
