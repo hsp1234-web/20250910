@@ -178,32 +178,28 @@ def launch_microservice(service_path: Path):
 def start_all_microservices():
     """
     掃描 `services` 目錄並啟動所有找到的微服務。
+    V7.0 精簡版: 只啟動白名單中的核心服務。
     """
     services_dir = ROOT_DIR / "services"
     if not services_dir.is_dir():
         log.info("`services` 目錄不存在，跳過微服務啟動。")
         return
 
-    service_paths = [d for d in services_dir.iterdir() if d.is_dir() and (d / "main.py").exists()]
+    # V7.0 精簡: 只啟動金鑰管理相關服務
+    core_service_names = ["key_service", "key_master_service"]
+    service_paths = [
+        services_dir / name for name in core_service_names
+        if (services_dir / name).is_dir() and (services_dir / name / "main.py").exists()
+    ]
+
     if not service_paths:
-        log.info("在 `services` 目錄中未找到任何有效的微服務。")
+        log.warning("在 `services` 目錄中未找到任何核心服務 (key_service, key_master_service)。")
         return
 
-    log.info(f"偵測到 {len(service_paths)} 個微服務，準備啟動...")
+    log.info(f"偵測到 {len(service_paths)} 個核心微服務，準備啟動...")
 
     service_registry = {}
-    # 將服務分為核心服務和延遲啟動的服務
-    core_services = []
-    delayed_services = []
-    for path in service_paths:
-        # 新架構：bond_fetcher_service 是核心服務，bond_data_service 依賴它，可以延遲啟動
-        if path.name == "bond_data_service":
-            delayed_services.append(path)
-        else:
-            core_services.append(path)
-
-    # 立即啟動核心服務
-    for service_path in core_services:
+    for service_path in service_paths:
         try:
             service_name, port, process = launch_microservice(service_path)
             service_registry[service_name] = {"port": port, "status": "running"}
@@ -212,45 +208,11 @@ def start_all_microservices():
             log.error(f"啟動核心服務 {service_path.name} 失敗: {e}", exc_info=True)
             service_registry[service_path.name] = {"port": None, "status": "failed"}
 
-    # 在背景執行緒中延遲啟動非核心服務
-    def delayed_launch():
-        log.info("--- [延遲啟動] 等待 15 秒後啟動非核心服務 ---")
-        time.sleep(15)
-        for service_path in delayed_services:
-            try:
-                service_name, port, process = launch_microservice(service_path)
-                processes.append(process)
-
-                # --- 核心修復：更新服務註冊表 ---
-                with service_registry_lock:
-                    log.info(f"[{service_name}] 正在更新服務註冊表...")
-                    # 讀取現有的註冊表
-                    if SERVICE_REGISTRY_FILE.exists():
-                        with open(SERVICE_REGISTRY_FILE, 'r') as f:
-                            registry = json.load(f)
-                    else:
-                        registry = {}
-
-                    # 新增或更新延遲啟動的服務資訊
-                    registry[service_name] = {"port": port, "status": "running"}
-
-                    # 寫回更新後的註冊表
-                    with open(SERVICE_REGISTRY_FILE, 'w') as f:
-                        json.dump(registry, f, indent=2)
-                    log.info(f"[{service_name}] ✅ 服務註冊表已更新。")
-
-            except Exception as e:
-                log.error(f"[延遲啟動] 啟動服務 {service_path.name} 失敗: {e}", exc_info=True)
-
-    if delayed_services:
-        delayed_thread = threading.Thread(target=delayed_launch, daemon=True)
-        threads.append(delayed_thread)
-        delayed_thread.start()
-
     # 將服務註冊資訊寫入檔案
-    with open(SERVICE_REGISTRY_FILE, 'w', encoding='utf-8') as f:
-        json.dump(service_registry, f, indent=2)
-    log.info(f"✅ 服務註冊資訊已寫入: {SERVICE_REGISTRY_FILE}")
+    if service_registry:
+        with open(SERVICE_REGISTRY_FILE, 'w', encoding='utf-8') as f:
+            json.dump(service_registry, f, indent=2)
+        log.info(f"✅ 服務註冊資訊已寫入: {SERVICE_REGISTRY_FILE}")
 
 
 # --- V5.5 舊有邏輯 (待移除) ---
@@ -280,12 +242,6 @@ def _background_setup_and_validate(api_port: int, api_ready_event: threading.Eve
         log.info("✅ [背景任務] 核心服務已啟動！提前發送『完全就緒』信號。")
         full_readiness_event.set()
         READINESS_SIGNAL_FILE.touch()
-
-        # --- 步驟 3: 安裝非必要的重量級依賴 (在發送就緒信號後) ---
-        # 這是觸發金鑰驗證前的必要步驟，確保驗證工具（如 google-generativeai）已安裝。
-        log.info("[背景任務] 開始在背景中安裝重量級依賴...")
-        install_non_essential_dependencies_background()
-        log.info("[背景任務] ✅ 重量級依賴安裝流程結束。")
 
         # --- 步驟 4: 在背景中非阻塞地觸發所有金鑰的自動驗證 ---
         log.info("[背景任務] 準備在背景中觸發所有金鑰的自動驗證...")
@@ -348,71 +304,28 @@ def stream_reader(stream, prefix, ready_event=None, ready_signal=None, second_re
 
 def install_core_dependencies():
     """
-    安裝核心應用程式所需的所有 Python 依賴。
-    會讀取 requirements/ 目錄下的多個 txt 檔案。
+    V7.0 精簡版: 安裝位於專案根目錄的單一 requirements.txt。
     """
     log.info("--- 正在安裝核心依賴 ---")
-    requirements_dir = ROOT_DIR / "requirements"
+    req_file_path = ROOT_DIR / "requirements.txt"
 
-    # JULES (2025-09-25): 優化。此處只安裝啟動時必需的同步依賴。
-    # 重量級依賴 (如 analysis.txt) 將在後台線程中安裝。
-    core_req_files = [
-        "core.txt",
-        "transcriber.txt",
-        "downloader.txt",
-        "gemini.txt",
-    ]
+    if not req_file_path.exists():
+        log.warning(f"找不到根依賴文件 {req_file_path}，跳過安裝。")
+        # 在精簡模式下，這可能是一個致命錯誤，因為沒有其他地方會安裝依賴了。
+        # 為了穩定性，我們在這裡先只顯示警告。
+        return
 
-    # 根據使用者需求 (2025-10-14)，我們希望每次啟動都安裝最新套件，
-    # 因此移除 lock 檔案檢查，並強制執行安裝。
-    for req_file_name in core_req_files:
-        req_file_path = requirements_dir / req_file_name
-        if req_file_path.exists():
-            log.info(f"正在從 {req_file_name} 安裝依賴...")
-            try:
-                # 使用 uv 來快速安裝，uv 預設會尋找最新版本
-                run_command([
-                    "uv", "pip", "install", "--system", "-r", str(req_file_path)
-                ], log_prefix="CoreDeps")
-            except Exception as e:
-                log.error(f"從 {req_file_name} 安裝依賴時失敗: {e}")
-                raise RuntimeError(f"核心依賴安裝失敗: {req_file_name}")
-        else:
-            log.warning(f"找不到依賴文件 {req_file_path}，跳過。")
-    log.info("✅ 核心依賴安裝完成。")
-
-
-def install_non_essential_dependencies_background():
-    """
-    [背景執行] 安裝非必要的重量級依賴，例如分析和報告工具。
-    此函式應在一個獨立的執行緒中運行，以免阻塞主啟動流程。
-    """
-    log.info("--- [背景安裝] 開始安裝重量級依賴 ---")
-    requirements_dir = ROOT_DIR / "requirements"
-    non_essential_reqs = [
-        "analysis.txt",
-        "document_processing.txt"
-    ]
-
-    # 為避免與同步安裝或網路I/O衝突，稍作延遲
-    time.sleep(5)
-
-    for req_file_name in non_essential_reqs:
-        req_file_path = requirements_dir / req_file_name
-        if req_file_path.exists():
-            log.info(f"[背景安裝] 正在從 {req_file_name} 安裝依賴...")
-            try:
-                # 使用 uv 來快速安裝
-                run_command([
-                    "uv", "pip", "install", "--system", "-r", str(req_file_path)
-                ], log_prefix="NonEssentialDeps")
-            except Exception as e:
-                # 在背景執行緒中，我們只記錄錯誤，不讓它崩潰主程式
-                log.error(f"[背景安裝] 從 {req_file_name} 安裝依賴時失敗: {e}")
-        else:
-            log.warning(f"[背景安裝] 找不到依賴文件 {req_file_path}，跳過。")
-
-    log.info("--- [背景安裝] 重量級依賴安裝流程結束 ---")
+    log.info(f"正在從 {req_file_path} 安裝依賴...")
+    try:
+        # 使用 uv 來快速安裝
+        run_command([
+            "uv", "pip", "install", "--system", "-r", str(req_file_path)
+        ], log_prefix="CoreDeps")
+        log.info("✅ 核心依賴安裝完成。")
+    except Exception as e:
+        log.error(f"從 {req_file_path} 安裝依賴時失敗: {e}")
+        # 在單體應用中，核心依賴失敗是致命的。
+        raise RuntimeError(f"核心依賴安裝失敗: {req_file_path}")
 
 
 def main():
@@ -435,36 +348,20 @@ def main():
         install_core_dependencies()
 
         # JULES (2025-10-16) 在依賴安裝後才導入
-        from db.client import DBClient
+        # from db.client import DBClient # V7.0 移除，改為由 API Server 直接管理
         from core import key_manager
 
-        # 步驟 1: 啟動核心後端服務 (DB Manager, API Server)
+        # 步驟 1: 啟動核心後端服務 (API Server)
         api_port = args.port if args.port else find_free_port()
         proxy_url = f"http://127.0.0.1:{api_port}"
         print(f"PROXY_URL: {proxy_url}", flush=True)
 
-        log.info("🔧 正在啟動資料庫管理器...")
-        db_manager_port = find_free_port()
-        os.environ['DB_MANAGER_PORT'] = str(db_manager_port)
-        db_manager_cmd = [sys.executable, "-m", "uvicorn", "src.db.manager:app", "--host", "127.0.0.1", "--port", str(db_manager_port), "--log-level", "info"]
-        proc_env = os.environ.copy()
-        proc_env["PYTHONPATH"] = str(SRC_DIR) + os.pathsep + proc_env.get("PYTHONPATH", "")
-
-        db_ready_event = threading.Event()
-        db_manager_proc = subprocess.Popen(db_manager_cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8', env=proc_env)
-        processes.append(db_manager_proc)
-        db_stdout_thread = threading.Thread(target=stream_reader, args=(db_manager_proc.stdout, 'db_manager', db_ready_event, "Application startup complete"))
-        db_stdout_thread.daemon = True
-        threads.append(db_stdout_thread)
-        db_stdout_thread.start()
-
-        if not db_ready_event.wait(timeout=30): raise RuntimeError("等待資料庫管理器就緒超時。")
-        log.info(f"✅ 資料庫管理器 API 已在埠號 {db_manager_port} 上就緒。")
-
-        db_client = DBClient()
-        log.info("✅ DB 客戶端初始化完成。")
+        # V7.0 DB Manager 已被移除
+        # log.info("✅ DB 客戶端初始化完成。") # V7.0 移除
 
         log.info("🔧 正在啟動主 API 伺服器...")
+        proc_env = os.environ.copy()
+        proc_env["PYTHONPATH"] = str(SRC_DIR) + os.pathsep + proc_env.get("PYTHONPATH", "")
         api_ready_event = threading.Event()
         api_fully_ready_event = threading.Event()
         api_server_cmd = [sys.executable, "-m", "api.api_server", "--port", str(api_port)]
