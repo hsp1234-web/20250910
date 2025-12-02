@@ -218,15 +218,16 @@ async def add_server_port_to_state(request: Request, call_next):
     return response
 
 
-# --- 整合模組化路由 ---
+# --- 整合模組化路由 (V7.0 精簡版) ---
 from core import config_manager
 from api.routes import (
-    ui, page1, page2_downloader, page3_processor, page4_analyzer,
-    page5_backup, page6_keys, page7_prompts, page8_details, page9_dashboard,
-    page10_test, system, bond_service_proxy, line_workflow_api, workflow,
-    line_data_api
+    ui,
+    page2_downloader,
+    page4_analyzer,
+    page6_keys,
+    system,
+    audio_report_api
 )
-from api.routes import audio_report_api # (Jules @ 2025-10-17) 獨立匯入以避免循環依賴
 
 # --- JULES (2025-09-15): 在應用程式啟動時載入設定 ---
 # 將設定載入到 app.state 中，使其在整個應用程式中可用。
@@ -238,25 +239,11 @@ log.info(f"全域設定已載入。API 超時設定為: {app.state.config.get('a
 app.include_router(ui.router, tags=["UI"])
 
 # API 路由 (提供資料介面)
-app.include_router(system.router) # 服務發現端點
-app.include_router(page1.router) # No prefix, as it's defined in the router itself
+app.include_router(system.router)
 app.include_router(page2_downloader.router, prefix="/api/downloader", tags=["API: 批次下載"])
-app.include_router(page3_processor.router, prefix="/api/processor", tags=["API: 檔案處理"])
 app.include_router(page4_analyzer.router, prefix="/api/analyzer", tags=["API: AI 分析"])
-app.include_router(page5_backup.router, prefix="/api/backup", tags=["API: 備份管理"])
 app.include_router(page6_keys.router, prefix="/api/keys", tags=["API: 金鑰管理"])
-app.include_router(page7_prompts.router, tags=["API: 提示詞管理"])
-app.include_router(page8_details.router, prefix="/api", tags=["API: 檔案總覽"])
-app.include_router(page9_dashboard.router, prefix="/api/dashboard", tags=["API: 績效儀表板"])
-app.include_router(page10_test.router, prefix="/api/service_test", tags=["API: 微服務測試"])
-app.include_router(workflow.router) # (Jules @ 2025-10-12) 新增工作流 API 路由
-app.include_router(line_workflow_api.router) # (Jules @ 2025-10-12) Renamed from essay_performance
-app.include_router(line_data_api.router) # (Jules @ 2025-10-14) 註冊新的 LINE 資料 API 路由
-app.include_router(audio_report_api.router) # (Jules @ 2025-10-17) 註冊新的音訊報告 API 路由
-
-# 債券服務代理
-app.include_router(bond_service_proxy.router, prefix="/api/bond_service", tags=["API: Bond Service Proxy"]) # API 代理
-app.include_router(bond_service_proxy.page_router, tags=["UI: Bond Service Pages"]) # 頁面代理，無前綴
+app.include_router(audio_report_api.router)
 
 
 
