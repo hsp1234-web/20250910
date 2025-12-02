@@ -399,11 +399,20 @@ class ServerManager:
                         self._log_manager.log("INFO", f"[DB_Init] {line}", "Database")
                 self._log_manager.log("SUCCESS", "✅ 金鑰資料庫結構已是最新版本。")
 
-                # 保留舊的任務資料庫初始化流程 (如果仍然需要)
-                from db.database import initialize_database as task_db_init, add_system_log
-                task_db_init()
-                add_system_log("colab_setup", "INFO", "Git repository cloned and DB schema updated.")
-                self._log_manager.log("INFO", "✅ 舊版任務資料庫初始化成功。")
+                # V7.0 重構: 改為直接操作資料庫
+                from db import database
+                conn = None
+                try:
+                    conn = database.get_db_connection()
+                    if conn:
+                        database.initialize_database(conn)
+                        database.add_system_log(conn, "colab_setup", "INFO", "Git repository cloned and DB schema updated.")
+                        self._log_manager.log("INFO", "✅ 任務資料庫初始化成功。")
+                    else:
+                        raise ConnectionError("無法建立到任務資料庫的連線。")
+                finally:
+                    if conn:
+                        conn.close()
 
             except Exception as e:
                 self._log_manager.log("CRITICAL", f"資料庫初始化失敗，這是一個致命錯誤，啟動中止。 {e}", "Database")
