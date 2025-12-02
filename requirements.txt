@@ -1,34 +1,20 @@
-# FastAPI and Web Server
+# 核心 Web 框架
 fastapi==0.116.1
-uvicorn==0.35.0
-Jinja2
-python-multipart
+uvicorn[standard]==0.35.0
+Jinja2==3.1.6
+python-multipart==0.0.20
 
-# Services Dependencies
-ollama
-pandas==2.2.2
-openpyxl
-fredapi==0.5.2
-yfinance
+# 核心功能：YouTube 下載
+yt-dlp
 
-# System & E2E Test Dependencies
-psutil
-playwright
-pytest-playwright
-requests
-pytest
-pytest-mock
-pytest-asyncio
-matplotlib
-python-dateutil
-gdown
-twstock
-filetype
+# 核心功能：Gemini AI 分析
+google-generativeai==0.8.5
+httpx==0.28.1
+requests==2.32.4
 
-# Report & File Handling Dependencies
-WeasyPrint
-python-docx
-lxml
-plotly
-PyMuPDF
-python-pptx
+# 系統工具
+psutil==5.9.5
+pytz==2025.2
+
+# 金鑰管理所需
+pyyaml==6.0.3

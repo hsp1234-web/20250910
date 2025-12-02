@@ -4,14 +4,12 @@
 #
 # 建立此檔案以解決循環導入問題。
 #
-# 問題：
-# `api_server.py` 導入了 `routes` 中的模組 (例如 `page2_downloader`)，
-# 而這些路由模組又需要從 `api_server.py` 導入共享的 `get_db` 依賴項，
-# 這導致了 Python 的循環導入錯誤 (Circular Import Error)。
-#
-# 解決方案：
-# 將共享的依賴項 (db_client 實例和 get_db 函數) 移到這個獨立的 `dependencies.py` 檔案中。
-# 現在，`api_server.py` 和所有的路由模組都從這個檔案導入依賴，從而打破了依賴迴圈。
+# --- V78 重構 (2025-12-01) ---
+# 在精簡計畫中，移除了獨立的 DB Manager 服務。
+# 現在，這個檔案不再提供 DBClient 的實例，
+# 而是直接將 db_client 這個變數作為 db.database 模組的別名。
+# 這樣，其他模組可以繼續使用 db_client.some_function() 的語法，
+# 無縫地從呼叫遠端 API 切換到直接呼叫本地資料庫函式。
 
 import sys
 from pathlib import Path
@@ -20,12 +18,10 @@ from pathlib import Path
 SRC_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SRC_DIR))
 
-from db.client import DBClient
+# 直接將 db.database 模組賦值給 db_client 變數
+from db import database as db_client
 
-# 建立一個全域共享的 DBClient 實例。
-# 這個實例及其底層的 httpx.Client 連線池將在整個應用程式的生命週期中被重複使用。
-db_client = DBClient()
-
-def get_db() -> DBClient:
-    """FastAPI 依賴注入函數，用於提供共享的 db_client 實例。"""
+# FastAPI 的依賴注入函數現在直接回傳這個模組
+def get_db():
+    """FastAPI 依賴注入函數，用於提供共享的 database 模組。"""
     return db_client
