@@ -1,34 +1,22 @@
-# FastAPI and Web Server
-fastapi==0.116.1
-uvicorn==0.35.0
+# Web Framework & Server
+fastapi
+uvicorn[standard]
 Jinja2
 python-multipart
+websockets
 
-# Services Dependencies
-ollama
-pandas==2.2.2
-openpyxl
-fredapi==0.5.2
-yfinance
+# YouTube Downloader
+yt-dlp
 
-# System & E2E Test Dependencies
-psutil
-playwright
-pytest-playwright
+# Gemini AI Analysis
+google-generativeai
+packaging
+
+# Audio Transcription
+faster-whisper
+opencc-python-reimplemented
+
+# Utilities
 requests
-pytest
-pytest-mock
-pytest-asyncio
-matplotlib
-python-dateutil
-gdown
-twstock
-filetype
-
-# Report & File Handling Dependencies
-WeasyPrint
-python-docx
-lxml
-plotly
-PyMuPDF
-python-pptx
+httpx
+psutil

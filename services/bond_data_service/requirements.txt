@@ -1,8 +1,0 @@
-# Web Framework
-fastapi
-uvicorn
-
-# Data Handling & APIs
-pandas
-# 用於向 bond_fetcher_service 發送 HTTP 請求
-httpx

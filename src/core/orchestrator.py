@@ -281,39 +281,17 @@ def _background_setup_and_validate(api_port: int, api_ready_event: threading.Eve
         full_readiness_event.set()
         READINESS_SIGNAL_FILE.touch()
 
-        # --- 步驟 3: 安裝非必要的重量級依賴 (在發送就緒信號後) ---
-        # 這是觸發金鑰驗證前的必要步驟，確保驗證工具（如 google-generativeai）已安裝。
-        log.info("[背景任務] 開始在背景中安裝重量級依賴...")
-        install_non_essential_dependencies_background()
-        log.info("[背景任務] ✅ 重量級依賴安裝流程結束。")
+        # --- 步驟 3: 安裝非必要的重量級依賴 (已精簡，停用) ---
+        # log.info("[背景任務] 開始在背景中安裝重量級依賴...")
+        # install_non_essential_dependencies_background()
+        # log.info("[背景任務] ✅ 重量級依賴安裝流程結束。")
 
-        # --- 步驟 4: 在背景中非阻塞地觸發所有金鑰的自動驗證 ---
-        log.info("[背景任務] 準備在背景中觸發所有金鑰的自動驗證...")
-        validation_url = f"http://127.0.0.1:{api_port}/api/keys/validate"
-        max_attempts = 3
-        base_delay = 5  # 秒
+        # --- 步驟 4: 在背景中非阻塞地觸發所有金鑰的自動驗證 (已精簡，停用) ---
+        # log.info("[背景任務] 準備在背景中觸發所有金鑰的自動驗證...")
+        # validation_url = f"http://127.0.0.1:{api_port}/api/keys/validate"
+        # ... (相關邏輯已停用)
 
-        for attempt in range(max_attempts):
-            try:
-                log.info(f"[背景任務] 正在向 {validation_url} 發送驗證請求 (第 {attempt + 1}/{max_attempts} 次)...")
-                response = requests.post(validation_url, timeout=300) # 使用較長的超時
-                if response.status_code == 200:
-                    log.info("[背景任務] ✅ 金鑰驗證請求已成功發送。")
-                    break  # 成功，跳出迴圈
-                else:
-                    log.warning(f"[背景任務] 第 {attempt + 1} 次驗證失敗，伺服器回應: {response.status_code} {response.text}")
-            except Exception as req_e:
-                log.warning(f"[背景任務] 第 {attempt + 1} 次驗證請求時發生錯誤: {req_e}")
-
-            # 如果這不是最後一次嘗試，則等待後重試
-            if attempt < max_attempts - 1:
-                delay = base_delay * (2 ** attempt)
-                log.info(f"[背景任務] 將在 {delay} 秒後重試...")
-                time.sleep(delay)
-        else: # for-else 迴圈，只有在迴圈正常結束（未被 break）時執行
-            log.error("[背景任務] ❌ 所有金鑰驗證嘗試均告失敗。請檢查 API 伺服器狀態或手動觸發驗證。")
-
-        log.info("✅ [背景任務] 所有啟動後任務 (包括金鑰驗證) 已執行完畢。")
+        log.info("✅ [背景任務] 所有啟動後任務已執行完畢。")
 
     except Exception as e:
         log.critical(f"❌ [背景任務] 執行緒發生致命錯誤: {e}", exc_info=True)
@@ -349,36 +327,22 @@ def stream_reader(stream, prefix, ready_event=None, ready_signal=None, second_re
 def install_core_dependencies():
     """
     安裝核心應用程式所需的所有 Python 依賴。
-    會讀取 requirements/ 目錄下的多個 txt 檔案。
+    現在只讀取根目錄的 requirements.txt。
     """
     log.info("--- 正在安裝核心依賴 ---")
-    requirements_dir = ROOT_DIR / "requirements"
+    requirements_file = ROOT_DIR / "requirements.txt"
 
-    # JULES (2025-09-25): 優化。此處只安裝啟動時必需的同步依賴。
-    # 重量級依賴 (如 analysis.txt) 將在後台線程中安裝。
-    core_req_files = [
-        "core.txt",
-        "transcriber.txt",
-        "downloader.txt",
-        "gemini.txt",
-    ]
-
-    # 根據使用者需求 (2025-10-14)，我們希望每次啟動都安裝最新套件，
-    # 因此移除 lock 檔案檢查，並強制執行安裝。
-    for req_file_name in core_req_files:
-        req_file_path = requirements_dir / req_file_name
-        if req_file_path.exists():
-            log.info(f"正在從 {req_file_name} 安裝依賴...")
-            try:
-                # 使用 uv 來快速安裝，uv 預設會尋找最新版本
-                run_command([
-                    "uv", "pip", "install", "--system", "-r", str(req_file_path)
-                ], log_prefix="CoreDeps")
-            except Exception as e:
-                log.error(f"從 {req_file_name} 安裝依賴時失敗: {e}")
-                raise RuntimeError(f"核心依賴安裝失敗: {req_file_name}")
-        else:
-            log.warning(f"找不到依賴文件 {req_file_path}，跳過。")
+    if requirements_file.exists():
+        log.info(f"正在從 {requirements_file.name} 安裝依賴...")
+        try:
+            run_command([
+                "uv", "pip", "install", "--system", "-r", str(requirements_file)
+            ], log_prefix="CoreDeps")
+        except Exception as e:
+            log.error(f"從 {requirements_file.name} 安裝依賴時失敗: {e}")
+            raise RuntimeError(f"核心依賴安裝失敗: {requirements_file.name}")
+    else:
+        log.warning(f"找不到依賴文件 {requirements_file}，跳過。")
     log.info("✅ 核心依賴安裝完成。")
 
 
@@ -481,8 +445,8 @@ def main():
         api_stdout_thread.start()
         api_stderr_thread.start()
 
-        # 步驟 2: 啟動所有微服務
-        start_all_microservices()
+        # 步驟 2: 啟動所有微服務 (已精簡，停用)
+        # start_all_microservices()
 
         # 步驟 3: 啟動整合式的背景設定與驗證任務
         log.info("🚀 正在啟動背景任務 (依賴安裝與金鑰驗證)...")
