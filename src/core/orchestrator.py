@@ -79,34 +79,18 @@ def run_command(command, cwd=None, check=True, log_prefix=""):
 def launch_microservice(service_path: Path):
     """
     為單個微服務建立環境、安裝依賴並啟動它。
+    V7.0 精簡版: 不再建立獨立虛擬環境，直接使用主程序的 Python 環境。
     """
     service_name = service_path.name
     log_prefix = f"Service:{service_name}"
     log.info(f"--- 正在啟動微服務: {service_name} ---")
 
-    venv_dir = service_path / ".venv"
-    req_file = service_path / "requirements.txt"
-    main_script = service_path / "main.py"
-    python_exec = venv_dir / "bin" / "python"
+    # V7.0 精簡: 直接使用主程序的 Python 執行檔
+    python_exec = sys.executable
 
-    # 步驟 1: 建立虛擬環境
-    if not venv_dir.exists():
-        run_command(["uv", "venv", venv_dir, "--seed"], log_prefix=log_prefix)
-    else:
-        log.info(f"[{log_prefix}] 虛擬環境已存在，跳過建立。")
-
-    # 步驟 2: 安裝依賴
-    # 根據使用者需求 (2025-10-14)，我們希望每次啟動都安裝最新套件，
-    # 特別是 yt-dlp，因此移除了 lock 檔案檢查，並強制執行安裝。
-    if req_file.exists():
-        log.info(f"[{log_prefix}] 正在強制安裝或更新依賴...")
-        run_command([
-            "uv", "pip", "install",
-            "-p", str(python_exec),
-            "-r", str(req_file)
-        ], log_prefix=log_prefix)
-    else:
-        log.warning(f"[{log_prefix}] 找不到 requirements.txt，跳過依賴安裝。")
+    # V7.0 精簡: 移除獨立的 venv 建立和依賴安裝步驟，
+    # 因為所有依賴已在主程序啟動時通過根 requirements.txt 安裝。
+    log.info(f"[{log_prefix}] 將使用主 Python 環境: {python_exec}")
 
     # 步驟 3: 啟動服務
     port = find_free_port()

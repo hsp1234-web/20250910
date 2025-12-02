@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>頁面六：金鑰與設定</title>
+    <link rel="stylesheet" href="/static/css/nav.css">
+    <link rel="stylesheet" href="/static/css/common.css">
+    <link rel="stylesheet" href="/static/css/page6.css">
+</head>
+<body>
+    <nav class="top-nav">
+        <ul>
+            <li><a href="/">鳳凰主頁</a></li>
+            <li><a href="/page1">網址提取</a></li>
+            <li><a href="/page2">批次下載</a></li>
+            <li><a href="/page3">檔案處理</a></li>
+            <li><a href="/page4_stage1_ai">AI 分析</a></li>
+            <li><a href="/page5">備份管理</a></li>
+            <li><a href="/page6" class="active">金鑰管理</a></li>
+            <li><a href="/page7">提示詞管理</a></li>
+            <li><a href="/page9">績效儀表板</a></li>
+        </ul>
+    </nav>
+
+    <div class="content page6-container">
+        <div class="main-header">
+            <h1>金鑰與設定管理</h1>
+            <p>管理您的 API 金鑰池 (Gemini, FRED)，並調整全域 API 的請求行為。</p>
+        </div>
+
+        <!-- Panel 1: Key Management (Combined) -->
+        <div class="panel">
+            <h2>金鑰管理</h2>
+            <hr>
+            <!-- Manual Key Input -->
+            <div id="manual-input-panel">
+                <h3>手動新增金鑰</h3>
+                <div class="form-group">
+                    <label for="key-type-select">金鑰類型</label>
+                    <select id="key-type-select">
+                        <option value="gemini" selected>Gemini 金鑰 (用於 AI 分析)</option>
+                        <option value="fred">FRED 金鑰 (用於債券圖表)</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                     <label for="new-keys-textarea">API 金鑰 (一行一個)</label>
+                    <textarea id="new-keys-textarea" placeholder="在此貼上一個或多個 API 金鑰" rows="4"></textarea>
+                </div>
+                 <div class="form-group">
+                    <label for="new-key-name-input">金鑰別名 (可選)</label>
+                    <input type="text" id="new-key-name-input" placeholder="為第一個金鑰設定別名">
+                </div>
+                <button id="add-key-btn" class="button-primary">新增金鑰</button>
+                <div id="add-key-status" class="status-message"></div>
+            </div>
+
+            <hr>
+
+            <!-- Key Pool -->
+            <div class="panel-header">
+                <h2>金鑰池</h2>
+                <button id="validate-all-btn" class="button-secondary">重新驗證全部</button>
+            </div>
+            <div id="key-list-container">
+                <p>正在載入金鑰列表...</p>
+            </div>
+
+            <hr>
+
+            <!-- Available Models -->
+            <div class="panel-header">
+                <h2>可用模型</h2>
+                <button id="fetch-models-btn" class="button-secondary">重新查詢</button>
+            </div>
+            <div id="model-list-container">
+                <p>點擊按鈕以查詢目前所有可用的模型。</p>
+            </div>
+        </div>
+
+        <!-- Panel 2: Global API Settings (at the bottom) -->
+        <div class="panel">
+            <h2>全域 API 設定</h2>
+             <div class="form-group">
+                <label for="api-timeout-input">API 請求超時 (秒, 5-300)</label>
+                <input type="number" id="api-timeout-input" placeholder="建議 35" min="5" max="300">
+                <button id="save-timeout-btn">儲存</button>
+                <p class="help-text">所有外部 API 請求的等待上限。</p>
+            </div>
+            <div id="timeout-status" class="status-message"></div>
+            <hr>
+            <div class="form-group">
+                <label for="api-retries-input">API 最大重試 (次, 0-5)</label>
+                <input type="number" id="api-retries-input" placeholder="建議 3" min="0" max="5">
+                <button id="save-retries-btn">儲存</button>
+                <p class="help-text">請求遭遇暫時性錯誤時的最大重試次數。</p>
+            </div>
+            <div id="retries-status" class="status-message"></div>
+            <hr>
+            <div class="form-group">
+                <label for="initial-submission-delay-input">任務提交間隔 (秒, 0-10)</label>
+                <input type="number" id="initial-submission-delay-input" placeholder="建議 1" min="0" max="10" step="0.1">
+                <button id="save-submission-delay-btn">儲存</button>
+                <p class="help-text">批次啟動 AI 分析時，任務間的提交延遲。</p>
+            </div>
+            <div id="submission-delay-status" class="status-message"></div>
+            <hr>
+            <div class="form-group">
+                <label for="key-rotation-delay-input">金鑰輪換延遲 (秒, 0-10)</label>
+                <input type="number" id="key-rotation-delay-input" placeholder="建議 2" min="0" max="10" step="0.1">
+                <button id="save-rotation-delay-btn">儲存</button>
+                 <p class="help-text">一個金鑰失敗後，嘗試下一個金鑰前的等待時間。</p>
+            </div>
+            <div id="rotation-delay-status" class="status-message"></div>
+        </div>
+    </div>
+
+    <script>
+    // The script remains the same as it correctly targets elements by ID.
+    // The structural changes in HTML won't break the JavaScript logic.
+    document.addEventListener('DOMContentLoaded', () => {
+        // --- 元素選擇器 ---
+        const keyListContainer = document.getElementById('key-list-container');
+        const validateAllBtn = document.getElementById('validate-all-btn');
+        const fetchModelsBtn = document.getElementById('fetch-models-btn');
+        const modelListContainer = document.getElementById('model-list-container');
+
+        // 手動模式元素
+        const addKeyBtn = document.getElementById('add-key-btn');
+        const newKeysTextarea = document.getElementById('new-keys-textarea');
+        const newKeyNameInput = document.getElementById('new-key-name-input');
+        const addKeyStatus = document.getElementById('add-key-status');
+        const keyTypeSelect = document.getElementById('key-type-select');
+
+        // JULES (2025-09-22): 全域 API 行為設定元素
+        const timeoutInput = document.getElementById('api-timeout-input');
+        const saveTimeoutBtn = document.getElementById('save-timeout-btn');
+        const timeoutStatus = document.getElementById('timeout-status');
+        const retriesInput = document.getElementById('api-retries-input');
+        const saveRetriesBtn = document.getElementById('save-retries-btn');
+        const retriesStatus = document.getElementById('retries-status');
+
+
+        // --- 通用函式 ---
+        const renderStatus = (element, message, isError = false, append = false) => {
+            if (append) {
+                const p = document.createElement('p');
+                p.textContent = message;
+                p.style.color = isError ? '#d9534f' : '#5cb85c';
+                element.appendChild(p);
+            } else {
+                element.innerHTML = ''; // 清空
+                const p = document.createElement('p');
+                p.textContent = message;
+                p.style.color = isError ? '#d9534f' : '#5cb85c';
+                element.appendChild(p);
+            }
+        };
+
+        const renderKeyList = (keys) => {
+            if (keys.length === 0) {
+                keyListContainer.innerHTML = '<p>目前沒有已儲存的金鑰。</p>';
+                return;
+            }
+            let html = '<ul class="key-list">';
+            keys.forEach(key => {
+                const statusClass = key.is_valid === true ? 'status-valid' : (key.is_valid === false ? 'status-invalid' : 'status-untested');
+                const statusText = key.is_valid === true ? '有效' : (key.is_valid === false ? '無效' : '未驗證');
+                const lastValidated = key.last_validated ? new Date(key.last_validated).toLocaleString('zh-TW') : '從未';
+                const keyTypeDisplay = (key.key_type === 'fred') ? 'FRED' : 'Gemini'; // 預設為 Gemini
+
+                html += `
+                    <li class="key-item">
+                        <div class="key-info">
+                            <span class="key-name">${key.name}</span>
+                            <span class="key-hash">雜湊值: ...${key.key_hash.slice(-8)}</span>
+                        </div>
+                        <div class="key-status-container">
+                            <span class="key-type-tag">${keyTypeDisplay}</span>
+                            <span class="key-status ${statusClass}">${statusText}</span>
+                        </div>
+                        <div class="key-actions">
+                            <span class="key-validated">上次驗證: ${lastValidated}</span>
+                            <button class="delete-btn" data-hash="${key.key_hash}">刪除</button>
+                        </div>
+                    </li>
+                `;
+            });
+            html += '</ul>';
+            keyListContainer.innerHTML = html;
+        };
+
+        const fetchKeys = async () => {
+            try {
+                const response = await fetch('/api/keys');
+                if (!response.ok) throw new Error('無法獲取金鑰列表');
+                const keys = await response.json();
+                renderKeyList(keys);
+
+                const hasValidKeys = keys.some(key => key.is_valid);
+                if (hasValidKeys) {
+                    fetchModels();
+                } else {
+                    modelListContainer.innerHTML = '<p>沒有可用的有效金鑰。請先手動驗證或新增有效金鑰。</p>';
+                }
+            } catch (error) {
+                keyListContainer.innerHTML = `<p style="color: #d9534f;">${error.message}</p>`;
+            }
+        };
+
+        // --- 事件監聽器 ---
+        addKeyBtn.addEventListener('click', async () => {
+            const keys = newKeysTextarea.value.trim().split('\n').filter(k => k.trim() !== '');
+            const name = newKeyNameInput.value.trim();
+            const keyType = keyTypeSelect.value;
+
+            if (keys.length === 0) {
+                renderStatus(addKeyStatus, 'API 金鑰不可為空。', true);
+                return;
+            }
+
+            addKeyBtn.disabled = true;
+            addKeyBtn.textContent = '新增中...';
+            addKeyStatus.innerHTML = '';
+
+            for (let i = 0; i < keys.length; i++) {
+                const key = keys[i].trim();
+                const keyName = (i === 0 && name) ? name : null;
+                renderStatus(addKeyStatus, `正在處理類型為 '${keyType}' 的金鑰 #${i + 1}...`, false, true);
+
+                try {
+                    const response = await fetch('/api/keys', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({ api_key: key, name: keyName, key_type: keyType })
+                    });
+                    const result = await response.json();
+                    if (!response.ok) throw new Error(result.detail || '新增失敗');
+                    renderStatus(addKeyStatus, `✅ 金鑰 #${i + 1} (${result.name}) 新增成功。`, false, true);
+                } catch (error) {
+                    renderStatus(addKeyStatus, `❌ 金鑰 #${i + 1} 新增失敗: ${error.message}`, true, true);
+                }
+            }
+
+            newKeysTextarea.value = '';
+            newKeyNameInput.value = '';
+            addKeyBtn.disabled = false;
+            addKeyBtn.textContent = '新增金鑰';
+            fetchKeys();
+        });
+
+        keyListContainer.addEventListener('click', async (e) => {
+            if (e.target.classList.contains('delete-btn')) {
+                const keyHash = e.target.dataset.hash;
+                if (!confirm(`您確定要刪除雜湊值結尾為 ...${keyHash.slice(-8)} 的金鑰嗎？`)) {
+                    return;
+                }
+                try {
+                    const response = await fetch(`/api/keys/${keyHash}`, { method: 'DELETE' });
+                    const result = await response.json();
+                    if (!response.ok) throw new Error(result.detail || '刪除失敗');
+                    fetchKeys();
+                } catch (error) {
+                    alert(`刪除失敗: ${error.message}`);
+                }
+            }
+        });
+
+        validateAllBtn.addEventListener('click', async () => {
+            validateAllBtn.disabled = true;
+            validateAllBtn.textContent = '驗證中...';
+            keyListContainer.innerHTML = '<p>請稍候，正在逐一驗證所有金鑰...</p>';
+            try {
+                const response = await fetch('/api/keys/validate', { method: 'POST' });
+                const result = await response.json();
+                if (!response.ok) throw new Error(result.detail || '驗證失敗');
+                renderKeyList(result.keys);
+            } catch (error) {
+                 keyListContainer.innerHTML = `<p style="color: #d9534f;">驗證時發生錯誤: ${error.message}</p>`;
+            } finally {
+                validateAllBtn.disabled = false;
+                validateAllBtn.textContent = '重新驗證全部';
+            }
+        });
+
+        const fetchModels = async () => {
+            fetchModelsBtn.disabled = true;
+            fetchModelsBtn.textContent = '查詢中...';
+            modelListContainer.innerHTML = '<p>正在向 Google API 查詢可用的模型，請稍候...</p>';
+
+            try {
+                const response = await fetch('/api/keys/models');
+                const result = await response.json();
+                if (!response.ok) {
+                    if (response.status === 400) {
+                         throw new Error('查詢失敗：請確保至少有一個有效金鑰。');
+                    }
+                    throw new Error(result.detail || '查詢失敗');
+                }
+
+                if (result.length > 0) {
+                    let modelHtml = '<ul>';
+                    result.sort().forEach(model => {
+                        modelHtml += `<li>${model.replace('models/', '')}</li>`;
+                    });
+                    modelHtml += '</ul>';
+                    modelListContainer.innerHTML = modelHtml;
+                } else {
+                    modelListContainer.innerHTML = '<p>未找到任何可用的模型。</p>';
+                }
+
+            } catch (error) {
+                modelListContainer.innerHTML = `<p style="color: #d9534f;">查詢模型時發生錯誤: ${error.message}</p>`;
+            } finally {
+                fetchModelsBtn.disabled = false;
+                fetchModelsBtn.textContent = '重新查詢';
+            }
+        };
+
+        fetchModelsBtn.addEventListener('click', fetchModels);
+
+        const submissionDelayInput = document.getElementById('initial-submission-delay-input');
+        const saveSubmissionDelayBtn = document.getElementById('save-submission-delay-btn');
+        const submissionDelayStatus = document.getElementById('submission-delay-status');
+
+        const rotationDelayInput = document.getElementById('key-rotation-delay-input');
+        const saveRotationDelayBtn = document.getElementById('save-rotation-delay-btn');
+        const rotationDelayStatus = document.getElementById('rotation-delay-status');
+
+        const fetchSetting = async (key, inputElement, statusElement) => {
+            try {
+                const response = await fetch(`/api/keys/config/${key}`);
+                 if (!response.ok) {
+                    if (response.status === 404) {
+                        renderStatus(statusElement, '使用系統預設值', false);
+                        statusElement.querySelector('p').style.color = '#777';
+                        return;
+                    }
+                    throw new Error(`無法獲取設定 (HTTP ${response.status})`);
+                }
+                const data = await response.json();
+                inputElement.value = data.value;
+                 renderStatus(statusElement, `目前設定值: ${data.value}`, false);
+            } catch (error) {
+                renderStatus(statusElement, `獲取設定失敗: ${error.message}`, true);
+            }
+        };
+
+        const saveSetting = async (key, inputElement, statusElement, buttonElement) => {
+            const value = parseFloat(inputElement.value);
+            if (isNaN(value) || value < 0 || value > 300) {
+                renderStatus(statusElement, '請輸入 0 到 300 之間的有效數字。', true);
+                return;
+            }
+
+            buttonElement.disabled = true;
+            buttonElement.textContent = '儲存中...';
+            renderStatus(statusElement, '正在儲存...', false);
+
+            try {
+                const response = await fetch(`/api/keys/config/${key}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ value: value })
+                });
+                const result = await response.json();
+                if (!response.ok) throw new Error(result.detail || '儲存失敗');
+                renderStatus(statusElement, `設定已儲存，新值為 ${result.new_value}。`, false);
+            } catch (error) {
+                renderStatus(statusElement, `儲存失敗: ${error.message}`, true);
+            } finally {
+                buttonElement.disabled = false;
+                buttonElement.textContent = '儲存';
+            }
+        };
+
+        saveTimeoutBtn.addEventListener('click', () => saveSetting('api_timeout_seconds', timeoutInput, timeoutStatus, saveTimeoutBtn));
+        saveRetriesBtn.addEventListener('click', () => saveSetting('api_max_retries', retriesInput, retriesStatus, saveRetriesBtn));
+        saveSubmissionDelayBtn.addEventListener('click', () => saveSetting('gemini_submission_delay', submissionDelayInput, submissionDelayStatus, saveSubmissionDelayBtn));
+        saveRotationDelayBtn.addEventListener('click', () => saveSetting('gemini_rotation_delay', rotationDelayInput, rotationDelayStatus, saveRotationDelayBtn));
+
+        fetchKeys();
+        fetchSetting('api_timeout_seconds', timeoutInput, timeoutStatus);
+        fetchSetting('api_max_retries', retriesInput, retriesStatus);
+        fetchSetting('gemini_submission_delay', submissionDelayInput, submissionDelayStatus);
+        fetchSetting('gemini_rotation_delay', rotationDelayInput, rotationDelayStatus);
+
+        const centerActiveNavButton = () => {
+            const activeNavButton = document.querySelector('.top-nav a.active');
+            if (activeNavButton) {
+                activeNavButton.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+            }
+        };
+        setTimeout(centerActiveNavButton, 100);
+    });
+    </script>
+
+    <!-- V5.5 Readiness Overlay Start -->
+    <style>
+        #readiness-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.7);
+            color: white;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 1.5em;
+            z-index: 9999;
+            flex-direction: column;
+            text-align: center;
+        }
+        #readiness-overlay .spinner {
+            border: 4px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top: 4px solid #fff;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin-bottom: 20px;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+    <div id="readiness-overlay">
+        <div class="spinner"></div>
+        <p>系統正在初始化核心服務，請稍候...</p>
+    </div>
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const overlay = document.getElementById('readiness-overlay');
+            if (sessionStorage.getItem('isSystemReady') === 'true') {
+                overlay.style.display = 'none';
+                return;
+            }
+            const readinessInterval = setInterval(() => {
+                fetch('/api/health/ready')
+                    .then(response => {
+                        if (response.ok) {
+                            clearInterval(readinessInterval);
+                            sessionStorage.setItem('isSystemReady', 'true');
+                            overlay.style.display = 'none';
+                        }
+                    })
+                    .catch(error => {
+                        console.error('輪詢就緒狀態時發生錯誤:', error);
+                    });
+            }, 2000);
+        });
+    </script>
+    <!-- V5.5 Readiness Overlay End -->
+</body>
+</html>
